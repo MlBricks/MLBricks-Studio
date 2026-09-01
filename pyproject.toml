@@ -67,6 +67,6 @@ dev = [
 
 [tool.pytest.ini_options]
 markers = [
-  "integration: tests that require the pinned MLBricks runtime",
+  "integration: tests that require an installed MLBricks runtime",
 ]
 
