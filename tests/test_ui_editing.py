@@ -101,3 +101,12 @@ def test_device_cards_use_runtime_update_path():
     text = _builder_js()
     assert "function deviceCards(config,onSelect=null)" in text
     assert 'deviceCards(config,v=>update("device",v))' in text
+
+
+def test_all_number_inputs_get_shared_themed_steppers():
+    text = _builder_js()
+    assert "function installNumberSteppers(scope)" in text
+    assert 'input[type="number"]:not([data-mlb-number-ready="1"])' in text
+    assert 'makeStep(1,"+","Increment value")' in text
+    assert 'makeStep(-1,"−","Decrement value")' in text
+    assert "installNumberSteppers(root);" in text

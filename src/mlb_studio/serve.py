@@ -66,32 +66,85 @@ def remote_notebook_environment() -> tuple[bool, str | None]:
 
 def _playground_html(model_name: str, api_key_required: bool, max_new_tokens: int) -> str:
     safe_name = html.escape(str(model_name), quote=True)
-    auth_html = '<input id="key" type="password" autocomplete="off" placeholder="API key" />' if api_key_required else ""
+    max_tokens = max(1, int(max_new_tokens))
+    default_tokens = min(128, max_tokens)
+    auth_html = """<div class=\"field full\">
+<label for=\"key\">API KEY <span>Bearer token</span></label>
+<div class=\"secret-wrap\"><input id=\"key\" type=\"password\" autocomplete=\"off\" placeholder=\"Paste API key\" /><button id=\"toggle-key\" class=\"icon-btn\" type=\"button\" aria-label=\"Show API key\">SHOW</button></div>
+</div>""" if api_key_required else """<div class=\"auth-note\">Authentication is disabled for this server.</div>"""
     auth_js = 'if(key.value) headers["Authorization"]="Bearer "+key.value;' if api_key_required else ""
+    key_js = """
+const toggleKey=document.getElementById(\"toggle-key\");
+if(toggleKey){toggleKey.onclick=()=>{const hidden=key.type===\"password\";key.type=hidden?\"text\":\"password\";toggleKey.textContent=hidden?\"HIDE\":\"SHOW\";};}
+""" if api_key_required else ""
     return f"""<!doctype html>
-<html><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{safe_name} · MLBricks</title>
+<html lang=\"en\"><head>
+<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<title>{safe_name} · MLBricks Studio Serve</title>
 <style>
-body{{font-family:system-ui,-apple-system,sans-serif;background:#0c1117;color:#e6edf3;margin:0}}
-main{{max-width:760px;margin:0 auto;padding:28px 18px}} .card{{background:#111923;border:1px solid #2a3948;border-radius:14px;padding:18px}}
-h1{{font-size:22px;margin:0 0 4px}} p{{color:#8fa0b2}}
-textarea,input{{width:100%;box-sizing:border-box;background:#0b1219;color:#e6edf3;border:1px solid #35485a;border-radius:9px;padding:11px;margin:6px 0}}
-textarea{{min-height:120px;resize:vertical}} .row{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}
-button{{width:100%;padding:11px;border:0;border-radius:9px;background:#6d55e7;color:white;font-weight:700;cursor:pointer}}
-pre{{white-space:pre-wrap;background:#0b1219;border:1px solid #263747;border-radius:9px;padding:12px;min-height:90px}} small{{color:#718396}}
-</style></head><body><main><div class="card">
-<h1>{safe_name}</h1><p>Served by MLB Studio V{SERVER_VERSION}</p>
-{auth_html}
-<textarea id="prompt">Once upon a time</textarea>
-<div class="row"><input id="tokens" type="number" min="1" max="{int(max_new_tokens)}" value="{min(128, int(max_new_tokens))}"><input id="temp" type="number" step="0.1" value="0.8"></div>
-<button id="go">Generate</button><p><small>POST /v1/generate · POST /v1/completions · GET /health</small></p><pre id="out">Ready.</pre>
-</div></main><script>
-const prompt=document.getElementById("prompt"),tokens=document.getElementById("tokens"),temp=document.getElementById("temp"),
-out=document.getElementById("out"),key=document.getElementById("key")||{{value:""}};
-document.getElementById("go").onclick=async()=>{{out.textContent="Generating…";const headers={{"Content-Type":"application/json"}};{auth_js}
-try{{const r=await fetch("/v1/generate",{{method:"POST",headers,body:JSON.stringify({{prompt:prompt.value,max_new_tokens:Number(tokens.value),temperature:Number(temp.value)}})}});const data=await r.json();out.textContent=r.ok?data.text:JSON.stringify(data,null,2);}}
-catch(e){{out.textContent=String(e)}}}};
+:root{{--bg:#0b1118;--panel:#101720;--panel2:#151e28;--border:#2d3b49;--border2:#3a4a59;--text:#e8edf4;--muted:#8493a4;--purple:#7a5ae8;--gold:#f0b94a;--green:#55c78a;--red:#e56a6a}}
+*{{box-sizing:border-box}}
+body{{margin:0;min-height:100vh;background:radial-gradient(circle at 50% -20%,#162231 0,#0b1118 38%,#080d12 100%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}}
+.shell{{width:min(900px,calc(100% - 28px));margin:32px auto 48px}}
+.brandbar{{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px;padding:0 2px}}
+.brand{{display:flex;align-items:center;gap:9px;font-weight:900;letter-spacing:.04em}} .brand .ml{{color:var(--gold)}} .brand .bricks{{color:#e8edf4}} .brand small{{display:block;color:#8d9aaa;font-size:10px;letter-spacing:.18em;margin-top:-2px}}
+.live{{display:inline-flex;align-items:center;gap:7px;border:1px solid #285d47;background:#10251d;color:#78d8aa;border-radius:6px;padding:6px 9px;font-size:11px;font-weight:800}} .live i{{width:7px;height:7px;border-radius:50%;background:#55c78a;box-shadow:0 0 9px #55c78a}}
+.card{{border:1px solid #293846;background:linear-gradient(180deg,#111923,#0f171f);border-radius:12px;box-shadow:0 18px 45px rgba(0,0,0,.28);overflow:hidden}}
+.head{{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:22px 22px 18px;border-bottom:1px solid #253340;background:#101820}}
+h1{{font-size:22px;line-height:1.15;margin:0 0 6px}} .subtitle{{margin:0;color:#8292a3;font-size:12px}} .version{{flex:0 0 auto;border:1px solid #3b4a5b;background:#17222d;border-radius:6px;padding:6px 8px;color:#cbd5df;font-size:11px;font-weight:800}}
+.body{{padding:20px 22px 22px}} .grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}} .field{{min-width:0}} .field.full{{grid-column:1/-1}}
+label{{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px;color:#a8b4c1;font-size:10.5px;font-weight:800;letter-spacing:.055em}} label span{{color:#667789;font-weight:500;letter-spacing:0}}
+textarea,input{{width:100%;border:1px solid #344655;background:#0d151d;color:#e6edf4;border-radius:7px;outline:none;padding:10px 11px;font:inherit;font-size:12px;transition:border-color .14s,box-shadow .14s}}
+textarea:focus,input:focus{{border-color:#785de0;box-shadow:0 0 0 1px rgba(120,93,224,.18)}} textarea{{min-height:126px;resize:vertical;line-height:1.5}}
+input[type=\"number\"]{{appearance:textfield;-moz-appearance:textfield}} input[type=\"number\"]::-webkit-outer-spin-button,input[type=\"number\"]::-webkit-inner-spin-button{{-webkit-appearance:none;margin:0}}
+.num-shell{{display:grid;grid-template-columns:minmax(0,1fr) 24px;gap:5px}} .num-step{{display:grid;grid-template-rows:1fr 1fr;gap:3px}} .num-step button{{min-height:0;border:1px solid #394a5a;background:#16212b;color:#9faffe;border-radius:5px;padding:0;font-weight:900;font-size:11px;cursor:pointer}} .num-step button:hover{{border-color:#8a6d32;background:#241f16;color:#f2c562}}
+.secret-wrap{{display:grid;grid-template-columns:minmax(0,1fr) 58px;gap:6px}} .icon-btn{{border:1px solid #3a4b5a;background:#17212b;color:#9eacba;border-radius:7px;font-size:10px;font-weight:900;cursor:pointer}} .icon-btn:hover{{color:#f2c562;border-color:#7b6334}}
+.auth-note{{grid-column:1/-1;border:1px solid #315d48;background:#11251e;color:#78d8aa;border-radius:7px;padding:9px 11px;font-size:11px}}
+.actions{{display:flex;align-items:center;gap:10px;margin-top:14px}} #go{{flex:1;min-height:38px;border:1px solid #88671f;border-radius:7px;background:linear-gradient(180deg,#3a2d12,#2c220f);color:#ffd36a;font-weight:900;letter-spacing:.02em;cursor:pointer}} #go:hover{{background:linear-gradient(180deg,#493716,#342811)}} #go:disabled{{opacity:.55;cursor:wait}}
+.status{{flex:0 0 auto;min-width:108px;text-align:center;border:1px solid #344554;background:#111a22;color:#94a3b3;border-radius:7px;padding:10px 12px;font-size:10.5px;font-weight:800}} .status.busy{{border-color:#6e59a9;color:#bcaaff}} .status.ok{{border-color:#337657;color:#76d5a7}} .status.bad{{border-color:#74404a;color:#f09ba5}}
+.endpoints{{margin:15px 0 0;padding-top:13px;border-top:1px solid #24313d;display:flex;gap:7px;flex-wrap:wrap}} .endpoint{{border:1px solid #2d3c49;background:#111922;border-radius:5px;padding:5px 7px;color:#75879a;font:600 10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}
+.output{{margin-top:14px;border:1px solid #2d3d4a;border-radius:8px;overflow:hidden;background:#0b1219}} .output-head{{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #263542;background:#111a22;color:#9eacbb;font-size:10.5px;font-weight:800}} .output-head span:last-child{{color:#66798b;font-weight:500}} pre{{margin:0;min-height:126px;max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;padding:12px;color:#dce5ee;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}
+.footer{{padding:10px 2px 0;color:#586a7b;font-size:10px;text-align:center}}
+@media(max-width:640px){{.shell{{width:min(100% - 18px,900px);margin-top:16px}}.head,.body{{padding-left:15px;padding-right:15px}}.grid{{grid-template-columns:1fr}}.field.full{{grid-column:auto}}.actions{{align-items:stretch;flex-direction:column}}.status{{width:100%}}}}
+</style></head><body>
+<div class=\"shell\">
+  <div class=\"brandbar\"><div class=\"brand\"><div><span class=\"ml\">ML</span><span class=\"bricks\">BRICKS</span><small>STUDIO</small></div></div><div class=\"live\"><i></i> PUBLIC HTTPS API</div></div>
+  <main class=\"card\">
+    <div class=\"head\"><div><h1>{safe_name}</h1><p class=\"subtitle\">Interactive inference playground · served by MLB Studio</p></div><div class=\"version\">V{SERVER_VERSION}</div></div>
+    <div class=\"body\">
+      <div class=\"grid\">
+        {auth_html}
+        <div class=\"field full\"><label for=\"prompt\">PROMPT <span>Text input</span></label><textarea id=\"prompt\">Once upon a time</textarea></div>
+        <div class=\"field\"><label for=\"tokens\">MAX NEW TOKENS <span>1–{max_tokens}</span></label><div class=\"num-shell\"><input id=\"tokens\" type=\"number\" min=\"1\" max=\"{max_tokens}\" step=\"1\" value=\"{default_tokens}\"><div class=\"num-step\"><button type=\"button\" data-target=\"tokens\" data-dir=\"1\" aria-label=\"Increment max new tokens\">+</button><button type=\"button\" data-target=\"tokens\" data-dir=\"-1\" aria-label=\"Decrement max new tokens\">−</button></div></div></div>
+        <div class=\"field\"><label for=\"temp\">TEMPERATURE <span>Sampling</span></label><div class=\"num-shell\"><input id=\"temp\" type=\"number\" min=\"0.00001\" max=\"5\" step=\"0.1\" value=\"0.8\"><div class=\"num-step\"><button type=\"button\" data-target=\"temp\" data-dir=\"1\" aria-label=\"Increment temperature\">+</button><button type=\"button\" data-target=\"temp\" data-dir=\"-1\" aria-label=\"Decrement temperature\">−</button></div></div></div>
+        <div class=\"field\"><label for=\"topk\">TOP K <span>0 = disabled</span></label><div class=\"num-shell\"><input id=\"topk\" type=\"number\" min=\"0\" max=\"1000\" step=\"1\" value=\"50\"><div class=\"num-step\"><button type=\"button\" data-target=\"topk\" data-dir=\"1\" aria-label=\"Increment top K\">+</button><button type=\"button\" data-target=\"topk\" data-dir=\"-1\" aria-label=\"Decrement top K\">−</button></div></div></div>
+        <div class=\"field\"><label for=\"topp\">TOP P <span>Nucleus sampling</span></label><div class=\"num-shell\"><input id=\"topp\" type=\"number\" min=\"0\" max=\"1\" step=\"0.01\" value=\"0.95\"><div class=\"num-step\"><button type=\"button\" data-target=\"topp\" data-dir=\"1\" aria-label=\"Increment top P\">+</button><button type=\"button\" data-target=\"topp\" data-dir=\"-1\" aria-label=\"Decrement top P\">−</button></div></div></div>
+      </div>
+      <div class=\"actions\"><button id=\"go\" type=\"button\">GENERATE</button><div id=\"status\" class=\"status\">READY</div></div>
+      <div class=\"endpoints\"><span class=\"endpoint\">POST /v1/generate</span><span class=\"endpoint\">POST /v1/completions</span><span class=\"endpoint\">GET /health</span></div>
+      <section class=\"output\"><div class=\"output-head\"><span>GENERATED TEXT</span><span id=\"meta\">Waiting for request</span></div><pre id=\"out\">Ready.</pre></section>
+    </div>
+  </main>
+  <div class=\"footer\">MLBricks Studio · API key stays in this browser tab and is sent only to this endpoint.</div>
+</div>
+<script>
+const prompt=document.getElementById(\"prompt\"),tokens=document.getElementById(\"tokens\"),temp=document.getElementById(\"temp\"),topk=document.getElementById(\"topk\"),topp=document.getElementById(\"topp\"),
+out=document.getElementById(\"out\"),key=document.getElementById(\"key\")||{{value:\"\"}},go=document.getElementById(\"go\"),statusEl=document.getElementById(\"status\"),meta=document.getElementById(\"meta\");
+{key_js}
+document.querySelectorAll(\".num-step button\").forEach(button=>{{button.onclick=()=>{{const input=document.getElementById(button.dataset.target);if(!input)return;try{{Number(button.dataset.dir)>0?input.stepUp():input.stepDown();}}catch(_){{}} input.dispatchEvent(new Event(\"change\",{{bubbles:true}}));}};}});
+function setState(kind,text){{statusEl.className=\"status \"+kind;statusEl.textContent=text;}}
+go.onclick=async()=>{{
+  go.disabled=true;setState(\"busy\",\"GENERATING\");out.textContent=\"Generating…\";meta.textContent=\"Request in progress\";
+  const headers={{\"Content-Type\":\"application/json\"}};{auth_js}
+  const started=performance.now();
+  try{{
+    const r=await fetch(\"/v1/generate\",{{method:\"POST\",headers,body:JSON.stringify({{prompt:prompt.value,max_new_tokens:Number(tokens.value),temperature:Number(temp.value),top_k:Number(topk.value),top_p:Number(topp.value)}})}});
+    const data=await r.json();
+    if(r.ok){{out.textContent=data.text??\"\";setState(\"ok\",\"COMPLETE\");meta.textContent=((performance.now()-started)/1000).toFixed(2)+\"s\"+(data.generated_tokens!==undefined?\" · \"+data.generated_tokens+\" tokens\":\"\");}}
+    else{{out.textContent=JSON.stringify(data,null,2);setState(\"bad\",\"ERROR\");meta.textContent=\"HTTP \"+r.status;}}
+  }}catch(e){{out.textContent=String(e);setState(\"bad\",\"ERROR\");meta.textContent=\"Request failed\";}}
+  finally{{go.disabled=false;}}
+}};
 </script></body></html>"""
 
 

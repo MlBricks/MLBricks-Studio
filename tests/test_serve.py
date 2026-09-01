@@ -132,3 +132,14 @@ def test_internal_errors_are_not_exposed_by_default(monkeypatch):
         assert "sensitive-internal-detail" not in payload["error"]
     finally:
         r.stop()
+
+
+def test_playground_uses_studio_theme_and_custom_number_controls():
+    page = _playground_html("Demo", True, 256)
+    assert "MLBricks Studio Serve" in page
+    assert "PUBLIC HTTPS API" in page
+    assert "MAX NEW TOKENS" in page
+    assert "TEMPERATURE" in page
+    assert 'class="num-step"' in page
+    assert "::-webkit-inner-spin-button" in page
+    assert "GENERATED TEXT" in page
