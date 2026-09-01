@@ -743,6 +743,28 @@
       draw();
     }
 
+    function cancelRuntimeToModelEditor(entry,mode){
+      const kind=String(mode||runtimePanel?.mode||"");
+      const activeRun=execution.status==="running"&&execution.runtime_kind===kind;
+      if((kind==="train"||kind==="generate")&&activeRun)requestStop();
+      if(kind==="serve"&&(entry?.serve_status==="running"||entry?.serve_live?.local_url))requestServeCommand("serve_stop",entry);
+      if(entry&&kind==="train"){
+        entry.training_status=activeRun?"stopping":entry.training_status;
+        if(entry.training_live&&activeRun)entry.training_live.message="Cancellation requested. Returning to Model Builder…";
+      }
+      if(entry&&kind==="generate"&&entry.generation_live&&activeRun){
+        entry.generation_live.message="Cancellation requested. Returning to Model Builder…";
+      }
+      runtimePanel=null;
+      galleryWorkspace.open=false;
+      cloudWorkspace.open=false;
+      const label=kind==="train"?"Training":kind==="generate"?"Generation":"Runtime";
+      setStatus(activeRun?(label+" cancellation requested. Returned to Model Builder."):"Returned to Model Builder.");
+      draw();
+    }
+
+    function cancelTrainingToModelEditor(entry){cancelRuntimeToModelEditor(entry,"train");}
+
     function bridgeDocuments(){
       const docs=[];
       const add=doc=>{if(doc && !docs.includes(doc))docs.push(doc);};
@@ -2923,6 +2945,7 @@
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";const dev=selectedRuntimeDevice(config);
       summary.innerHTML="<h3>Training Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Backend</span><strong>"+config.backend+"</strong></div><div><span>Execution</span><strong>"+config.execution_mode+"</strong></div><div><span>Precision</span><strong>"+config.precision+"</strong></div>";side.appendChild(summary);
       const stop=btn("Stop Training","mlb-runtime-stop");stop.disabled=!(execution.status==="running"&&execution.runtime_kind==="train");stop.addEventListener("click",requestStop);side.appendChild(stop);
+      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop training and return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
       if(entry.weights_ready){const gen=btn("Open Generation","mlb-generate-btn");gen.addEventListener("click",()=>openRuntimePanel("generate",entry));side.appendChild(gen);}
     }
 
@@ -2949,6 +2972,7 @@
 
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Generation Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Generated</span><strong>"+Number(live.generated_tokens||0)+" / "+Number(config.max_new_tokens||0)+"</strong></div><div><span>Weights</span><strong>"+(entry.weights_ready?"Available":"Missing")+"</strong></div>";side.appendChild(summary);
       const stop=btn("Stop Generation","mlb-runtime-stop");stop.disabled=!(execution.status==="running"&&execution.runtime_kind==="generate");stop.addEventListener("click",requestStop);side.appendChild(stop);
+      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop generation and return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
     }
 
     async function copyTextRobust(text,label="Text"){
@@ -3087,6 +3111,7 @@
           });const copyKey=btn("Copy API Key","mlb-dark-btn");copyKey.addEventListener("click",()=>copyTextRobust(secret.api_key||"","API key"));keyBox.appendChild(copyKey);side.appendChild(keyBox);}
         const check=btn("Refresh Status","mlb-dark-btn");check.addEventListener("click",()=>requestServeCommand("serve_status",entry));side.appendChild(check);
         const stop=btn("Stop API Server","mlb-runtime-stop");stop.disabled=!running;stop.addEventListener("click",()=>requestServeCommand("serve_stop",entry));side.appendChild(stop);
+        const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop server and return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"serve"));side.appendChild(cancel);
         canvas.appendChild(outer);return;
       }
 
@@ -3121,6 +3146,7 @@
         draw();
         setTimeout(()=>requestServeCommand("serve_start",entry),80);
       });side.appendChild(start);
+      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"serve"));side.appendChild(cancel);
       if(config.public_tunnel==="ngrok"){const note=document.createElement("div");note.className="mlb-serve-warning compact";note.innerHTML="<strong>Remote access</strong><span>ngrok creates the HTTPS URL needed to reach a Kaggle/Colab model from your phone or local web app.</span>";side.appendChild(note);}
       canvas.appendChild(outer);
     }
@@ -3249,6 +3275,7 @@
         });side.appendChild(start);
         const stop=btn("Stop Training","mlb-runtime-stop");stop.disabled=execution.status!=="running";
         stop.addEventListener("click",requestStop);side.appendChild(stop);
+        const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop training and return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
       }else{
         const weights=document.createElement("div");weights.className="mlb-weight-status "+(entry.weights_ready?"ready":"missing");
         weights.textContent=entry.weights_ready?"✓ Model weights available":"✕ No trained/loaded weights yet";side.appendChild(weights);
@@ -3262,6 +3289,7 @@
         });side.appendChild(start);
         const stop=btn("Stop Generation","mlb-runtime-stop");stop.disabled=execution.status!=="running";
         stop.addEventListener("click",requestStop);side.appendChild(stop);
+        const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop generation and return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
       }
 
       const reset=btn("Reset Runtime Defaults","mlb-dark-btn");
@@ -6267,15 +6295,13 @@
       const dataFetchBusy=state.active_workspace==="data"&&execution.status==="running"&&execution.runtime_kind==="data";
       if(current(state)?.kind!=="custom_edit"){
         if(runtimeWorkspaceActive){
-          const cancelBtn=btn("← Cancel","mlb-dark-btn mlb-runtime-back-btn");
-          cancelBtn.title="Return to the previous builder page";
-          cancelBtn.addEventListener("click",exitRuntimePanel);
-          primary.appendChild(cancelBtn);
-          const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
-          stopBtn.disabled=execution.status!=="running"||!(execution.runtime_kind==="train"||execution.runtime_kind==="generate"||execution.runtime_kind==="serve");
-          stopBtn.style.display=(execution.status==="running")?"inline-flex":"none";
-          stopBtn.addEventListener("click",requestStop);
-          primary.appendChild(stopBtn);
+          const mode=runtimePanel?.mode||"train";
+          const runtimeLabel=mode==="train"?"Training":mode==="generate"?"Generating":"Serving";
+          const runtimeIndicator=actionBtn(runtimeLabel,"mlb-run mlb-build mlb-top-build-tab runtime-busy "+mode,"activity");
+          runtimeIndicator.disabled=true;
+          runtimeIndicator.title=runtimeLabel+" in progress";
+          runtimeIndicator.setAttribute("aria-disabled","true");
+          primary.appendChild(runtimeIndicator);
         }else{
           const run=state.active_workspace==="model"
             ?actionBtn(

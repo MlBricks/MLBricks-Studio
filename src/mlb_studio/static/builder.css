@@ -2188,3 +2188,13 @@
 .mlb-runtime-page-active .mlb-shell{grid-template-columns:0 minmax(500px,1fr) 300px}
 .mlb-sidebar-hidden{visibility:hidden !important;pointer-events:none !important;overflow:hidden !important;padding:0 !important;border:0 !important;width:0 !important;min-width:0 !important}
 .mlb-runtime-back-btn{font-weight:700}
+
+/* Runtime-focused controls: persistent top activity indicator + local cancel. */
+.mlb-runtime-cancel{
+  width:100%!important;height:30px!important;margin-top:6px!important;border-radius:6px!important;
+  border:1px solid #3c4b59!important;background:#111a22!important;color:#c8d2dc!important;font-weight:800!important
+}
+.mlb-runtime-cancel:hover{border-color:#607285!important;background:#17222c!important;color:#fff!important}
+.mlb-runtime-page-active .mlb-top-primary>.mlb-top-build-tab.runtime-busy:disabled{
+  opacity:1!important;cursor:default!important;pointer-events:none!important
+}
