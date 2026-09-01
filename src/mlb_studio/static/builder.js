@@ -167,8 +167,8 @@ function __MLB_STUDIO_FACTORY__(){
         };
 
         controls.append(
-          makeStep(-1,"−","Decrement value"),
-          makeStep(1,"+","Increment value")
+          makeStep(1,"+","Increment value"),
+          makeStep(-1,"−","Decrement value")
         );
         parent.insertBefore(shell,input);
         shell.append(input,controls);

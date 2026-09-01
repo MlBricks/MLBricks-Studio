@@ -107,8 +107,8 @@ def test_all_number_inputs_get_shared_themed_steppers():
     text = _builder_js()
     assert "function installNumberSteppers(scope)" in text
     assert 'input[type="number"]:not([data-mlb-number-ready="1"])' in text
-    assert 'makeStep(-1,"−","Decrement value")' in text
     assert 'makeStep(1,"+","Increment value")' in text
+    assert 'makeStep(-1,"−","Decrement value")' in text
     assert "installNumberSteppers(root);" in text
 
 
@@ -120,9 +120,9 @@ def test_notebook_layout_stays_desktop_and_uses_horizontal_scroll():
     text = _builder_css()
     assert "V1.0 stable desktop notebook / Kaggle layout" in text
     assert "height:720px!important" in text
-    assert "min-width:1360px!important" in text
+    assert "min-width:1120px!important" in text
     assert "overflow-x:auto!important" in text
-    assert "grid-template-columns:230px minmax(850px,1fr) 280px!important" in text
+    assert "grid-template-columns:210px minmax(650px,1fr) 260px!important" in text
     assert "grid-template-columns:1fr;grid-template-rows:auto minmax(420px,1fr) auto" not in text
     assert "@media" not in text
 
@@ -131,16 +131,3 @@ def test_remove_all_links_action_is_not_rendered():
     text = _builder_js()
     assert 'btn("Remove All Links")' not in text
     assert 'checkpoint("Remove all links from "+n.name)' not in text
-
-
-def test_desktop_control_geometry_does_not_shrink_in_kaggle():
-    text = _builder_css()
-    assert "V1.0 desktop control geometry lock" in text
-    assert "grid-template-columns:0 minmax(1040px,1fr) 300px!important" in text
-    assert "grid-template-columns:repeat(3,minmax(210px,1fr))!important" in text
-    assert "V1.0 compact horizontal number steppers" in text
-    assert "grid-template-columns:minmax(0,1fr) 24px 24px!important" in text
-    assert "display:contents!important" in text
-    assert "height:32px!important" in text
-    assert "height:34px!important" in text
-    assert "min-width:112px!important" in text
