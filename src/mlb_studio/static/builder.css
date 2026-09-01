@@ -2214,3 +2214,10 @@
   align-items:center!important;
   justify-content:center!important;
 }
+
+.mlb-port.named-port{background:#f0a84a;border-color:#ffe0a8;z-index:12}
+.mlb-port.named-port:hover,.mlb-port.named-port.armed{background:#ffd087;border-color:#fff}
+.mlb-user-port-label{position:absolute;z-index:5;max-width:86px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;color:#cfd8e4;pointer-events:none;background:rgba(12,18,25,.76);padding:1px 3px;border-radius:3px}
+.mlb-user-port-label.in{text-align:left}.mlb-user-port-label.out{text-align:right}
+.mlb-edge-named{stroke:#f0a84a;stroke-width:2;stroke-linecap:round}
+.mlb-user-function-named .node-desc{padding-left:5px;padding-right:5px}

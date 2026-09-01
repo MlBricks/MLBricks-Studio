@@ -255,6 +255,7 @@
       if(!Array.isArray(state.gallery.components))state.gallery.components=[];
       if(!Array.isArray(state.gallery.models))state.gallery.models=[];
       if(!Array.isArray(state.gallery.data))state.gallery.data=[];
+      if(!state.component_cache||typeof state.component_cache!=="object")state.component_cache={};
       if(!state.layout_locks||typeof state.layout_locks!=="object")state.layout_locks={};
       if(!state.workspaces){
         const modelRoot=state.root_component_id;
@@ -399,6 +400,7 @@
 
     ensureWorkspaces();
     loadGalleryStorage();
+    loadComponentCacheStorage();
 
     function normalizedUserName(value){return String(value||"").trim().replace(/\s+/g," ").toLowerCase();}
 
@@ -536,6 +538,69 @@
       try{(root.ownerDocument?.defaultView||window).localStorage.setItem(galleryStorageKey,JSON.stringify(state.gallery));}catch(_){ }
     }
 
+    const componentCacheStorageKey="mlb-studio-component-cache-v1";
+    function loadComponentCacheStorage(){
+      try{
+        const store=(root.ownerDocument?.defaultView||window).localStorage;
+        const parsed=JSON.parse(store.getItem(componentCacheStorageKey)||"null");
+        if(parsed&&typeof parsed==="object")Object.entries(parsed).forEach(([id,item])=>{if(id&&item&&!state.component_cache[id])state.component_cache[id]=cp(item);});
+      }catch(_){/* optional in sandboxed notebook frames */}
+    }
+    function persistComponentCache(){
+      try{(root.ownerDocument?.defaultView||window).localStorage.setItem(componentCacheStorageKey,JSON.stringify(state.component_cache||{}));}catch(_){ }
+    }
+    function userSourceHash(source){
+      const s=String(source||"");let h=0x811c9dc5;
+      for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193);}
+      return "fnv1a-"+(h>>>0).toString(16).padStart(8,"0");
+    }
+    function extractPythonDependencies(source){
+      const deps=new Set();
+      String(source||"").split(/\r?\n/).forEach(line=>{
+        const clean=line.replace(/#.*/,"").trim();
+        let m=clean.match(/^import\s+(.+)$/);
+        if(m){m[1].split(",").forEach(part=>{const rootName=String(part||"").trim().split(/\s+as\s+/i)[0].split(".")[0];if(rootName)deps.add(rootName);});return;}
+        m=clean.match(/^from\s+([A-Za-z_][\w.]*)\s+import\s+/);
+        if(m){const rootName=m[1].split(".")[0];if(rootName)deps.add(rootName);}
+      });
+      return [...deps].sort();
+    }
+    function userSourcePayload(step,definitionId=""){
+      const b=ensureAPIStepObjectIds(step);
+      const kind=b.call_type;
+      if(!["user_function","user_class"].includes(kind))return null;
+      const source=kind==="user_class"?b.user_class_code:b.user_code;
+      const entryName=kind==="user_class"?b.user_class_name:b.user_function_name;
+      const hash=userSourceHash(source);
+      const deps=extractPythonDependencies(source);
+      b.dependencies=deps;b.source_hash=hash;
+      const expectedPrefix="source::"+String(definitionId||"component")+"::";
+      if(!b.source_cache_id||!String(b.source_cache_id).startsWith(expectedPrefix))b.source_cache_id=expectedPrefix+step.id;
+      const previous=state.component_cache?.[b.source_cache_id];
+      const revision=previous&&previous.source_hash===hash?Number(previous.revision||1):Number(previous?.revision||0)+1;
+      b.source_revision=Math.max(1,revision);
+      return {id:b.source_cache_id,kind,entry_point:entryName,source_code:String(source||""),dependencies:deps,source_hash:hash,revision:b.source_revision,updated_at:new Date().toISOString(),node_id:step.id,node_name:step.name||entryName};
+    }
+    function cacheUserSourcesForDefinition(def,c=null){
+      if(!def)return;
+      const sourceNodes=c?.nodes||def.nodes||[];
+      sourceNodes.forEach(step=>{if(step?.type!=="api_step")return;const payload=userSourcePayload(step,def.id);if(payload)state.component_cache[payload.id]=payload;});
+      persistComponentCache();
+    }
+    function hydrateCachedUserSources(def){
+      if(!def)return def;
+      (def.nodes||[]).forEach(step=>{
+        if(step?.type!=="api_step")return;
+        const b=ensureAPIStepObjectIds(step);const cached=b.source_cache_id?state.component_cache?.[b.source_cache_id]:null;
+        if(!cached)return;
+        if(b.call_type==="user_function"&&!String(b.user_code||"").trim())b.user_code=String(cached.source_code||"");
+        if(b.call_type==="user_class"&&!String(b.user_class_code||"").trim())b.user_class_code=String(cached.source_code||"");
+        if(!b.dependencies?.length)b.dependencies=cp(cached.dependencies||[]);
+        b.source_hash=b.source_hash||cached.source_hash||"";b.source_revision=b.source_revision||cached.revision||1;
+      });
+      return def;
+    }
+
     function galleryNameExists(kind,name,exceptId=null){
       const wanted=normalizedUserName(name);
       return (state.gallery?.[kind]||[]).some(x=>x.id!==exceptId&&normalizedUserName(x.name)===wanted);
@@ -557,11 +622,12 @@
         const def=state.custom_components?.[c.definition_id];
         const name=askGalleryName("components",def?.name||c.name,"Save Module / API Component to Gallery as:");
         if(!name)return;
+        const snapshot=customGallerySnapshot(def,c);snapshot.name=name;
         state.gallery.components.push({
           id:uid("gallery_component"),name,kind:"component",saved_at:new Date().toISOString(),
-          definition:{id:def?.id||uid("custom"),name,description:def?.description||"Reusable Module",revision:def?.revision||1,implementation:def?.implementation||"graph",api_binding:cp(def?.api_binding||null),input_count:3,output_count:3,nodes:cp(c.nodes||[]),edges:cp(c.edges||[])}
+          source_definition_id:def?.id||snapshot.id,definition:snapshot
         });
-        persistGallery();setStatus(name+" saved to Gallery.");draw();return;
+        persistGallery();persistComponentCache();setStatus(name+" saved to Gallery with cached user source.");draw();return;
       }
       if(state.active_workspace==="data"){
         const pipeline=current(state);if(!pipeline)return;
@@ -581,7 +647,7 @@
       if(!name)return;
       state.gallery.models.push({
         id:uid("gallery_model"),name,kind:"model",saved_at:new Date().toISOString(),
-        project:cp(state.project||{}),architecture:cp(model),custom_components:cp(state.custom_components||{})
+        project:cp(state.project||{}),architecture:cp(model),custom_components:cp(state.custom_components||{}),component_cache:cp(state.component_cache||{})
       });
       persistGallery();setStatus(name+" saved to Model Gallery.");draw();
     }
@@ -595,8 +661,12 @@
       }
 
       const rootSource=cp(entry.definition);
+      const embeddedCache=cp(rootSource.component_cache||{});
+      Object.entries(embeddedCache).forEach(([id,item])=>{if(id&&item)state.component_cache[id]=cp(item);});
+      persistComponentCache();
       const dependencyDefs=cp(rootSource.dependency_definitions||{});
       delete rootSource.dependency_definitions;
+      delete rootSource.component_cache;
       const oldRootId=rootSource.id||entry.source_definition_id||uid("gallery_root");
       const remap={};
       const created=[];
@@ -611,7 +681,7 @@
         // so parent and child are allowed to use the same visible name.
         dep.name=String(dep.name||"Module").trim()||"Module";
         dep.palette_hidden=true;dep.palette_installed=false;dep.gallery_entry_id=dep.gallery_entry_id||null;
-        created.push(dep);
+        hydrateCachedUserSources(dep);created.push(dep);
       });
 
       const root=cp(rootSource);
@@ -620,14 +690,14 @@
       root.name=allowNameConflictWith
         ?requestedRootName
         :uniqueCustomDefinitionName(requestedRootName);
-      root.gallery_entry_id=entry.id;root.palette_hidden=!installed;root.palette_installed=!!installed;
+      root.gallery_entry_id=entry.id;root.palette_hidden=!installed;root.palette_installed=!!installed;hydrateCachedUserSources(root);
 
       const remapDefinitionRefs=def=>{
         (def.nodes||[]).forEach(n=>{if(n?.definition_id&&remap[n.definition_id])n.definition_id=remap[n.definition_id];});
       };
       created.forEach(remapDefinitionRefs);remapDefinitionRefs(root);
-      created.forEach(dep=>{state.custom_components[dep.id]=dep;});
-      state.custom_components[root.id]=root;
+      created.forEach(dep=>{state.custom_components[dep.id]=dep;cacheUserSourcesForDefinition(dep);});
+      state.custom_components[root.id]=root;cacheUserSourcesForDefinition(root);
       return root;
     }
 
@@ -644,6 +714,8 @@
       state.active_workspace="model";
       const rootId=state.workspaces.model.root_component_id;
       const architecture=cp(entry.architecture);
+      Object.entries(entry.component_cache||{}).forEach(([id,item])=>{if(id&&item)state.component_cache[id]=cp(item);});
+      persistComponentCache();
       const remap={};
       const importedDefs=[];
       // Custom definitions are identified by IDs, never by their display names.
@@ -654,7 +726,7 @@
         remap[oldId]=newId;
         const copyDef=cp(def);copyDef.id=newId;
         copyDef.name=String(copyDef.name||"Module").trim()||"Module";
-        copyDef.gallery_entry_id=null;
+        copyDef.gallery_entry_id=null;hydrateCachedUserSources(copyDef);
         importedDefs.push(copyDef);
       });
       importedDefs.forEach(copyDef=>{
@@ -1393,6 +1465,13 @@
         const did=String(next.definition_id||"");
         if(did)customImportStatus[did]={status:next.status,message:next.message||"Custom API import checked."};
         setStatus(next.message||"Custom API import checked.");
+        setTimeout(draw,20);return;
+      }
+      if(next.runtime_kind==="user_function_validation"||next.runtime_kind==="user_class_validation"){
+        const did=String(next.definition_id||"");
+        const details=next.user_function_validation||next.user_class_validation||null;
+        if(did)customImportStatus[did]={status:next.status,message:next.message||"User source checked.",details};
+        setStatus(next.message||"User source checked.");
         setTimeout(draw,20);return;
       }
       execution=next;
@@ -4583,12 +4662,12 @@
       if(c.edges.some(e=>e.source===a&&e.target===b&&e.kind===kind&&e.source_port===sourcePort&&e.target_port===targetPort)){
         setStatus("Connection already exists.");return;
       }
-      if(record) checkpoint(kind==="residual"?"Create skip connection":(kind==="aux"?"Create extra connection":"Create main connection"));
+      if(record) checkpoint(kind==="residual"?"Create skip connection":(kind==="aux"?"Create extra connection":(kind==="named"?"Create named connection":"Create main connection")));
       const e=edge(a,b,kind);
       e.source_port=sourcePort;
       e.target_port=targetPort;
       c.edges.push(e);
-      setStatus(kind==="residual"?"Skip connection created.":(kind==="aux"?"Extra connection created.":"Main connection created."));
+      setStatus(kind==="residual"?"Skip connection created.":(kind==="aux"?"Extra connection created.":(kind==="named"?"Named port connection created.":"Main connection created.")));
     }
 
     function isMainLaneEdge(e){
@@ -4677,12 +4756,27 @@
         result_object_name:"",
         result_output_mode:"result",
         output_selector:"auto",
+        user_function_name:"custom_function",
+        user_code:"def custom_function(x):\n    return x",
+        user_class_name:"CustomClass",
+        user_class_code:"class CustomClass:\n    def __init__(self):\n        pass",
+        source_cache_id:"",
+        source_hash:"",
+        source_revision:1,
+        dependencies:[],
+        port_mode:"standard",
+        input_ports:[],
+        output_ports:[],
+        multi_output:false,
+        output_map:{main:"0",skip:"1",extra:"2"},
         parameters:[]
       };
     }
 
     const apiCallTypeLabels={
       function:"Function",
+      user_function:"User Defined Function",
+      user_class:"User Defined Class",
       static_method:"Static Method",
       class_method:"Class Method",
       instance_method:"Instance Method",
@@ -4721,8 +4815,27 @@
       binding.result_object_id=String(binding.result_object_id||"").trim();
       binding.result_object_name=String(binding.result_object_name||"").trim();
       binding.result_output_mode=String(binding.result_output_mode||"result").toLowerCase()==="passthrough"?"passthrough":"result";
+      binding.user_function_name=String(binding.user_function_name||"custom_function").trim()||"custom_function";
+      binding.user_code=String(binding.user_code||"def custom_function(x):\n    return x");
+      binding.user_class_name=String(binding.user_class_name||"CustomClass").trim()||"CustomClass";
+      binding.user_class_code=String(binding.user_class_code||"class CustomClass:\n    def __init__(self):\n        pass");
+      binding.source_cache_id=String(binding.source_cache_id||"").trim();
+      binding.source_hash=String(binding.source_hash||"").trim();
+      binding.source_revision=Math.max(1,Number(binding.source_revision||1));
+      if(!Array.isArray(binding.dependencies))binding.dependencies=[];
+      binding.dependencies=binding.dependencies.map(x=>String(x||"").trim()).filter(Boolean);
+      binding.port_mode=String(binding.port_mode||"standard").toLowerCase()==="named"?"named":"standard";
+      if(!Array.isArray(binding.input_ports))binding.input_ports=[];
+      if(!Array.isArray(binding.output_ports))binding.output_ports=[];
+      binding.input_ports=binding.input_ports.map((port,i)=>({id:String(port?.id||("in_"+(i+1))),name:String(port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),parameter:String(port?.parameter||port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),positional:!!port?.positional,required:port?.required!==false}));
+      binding.output_ports=binding.output_ports.map((port,i)=>({id:String(port?.id||("out_"+(i+1))),name:String(port?.name||("output_"+(i+1))).trim()||("output_"+(i+1)),selector:String(port?.selector??(i===0?"auto":String(i)))}));
+      binding.multi_output=!!binding.multi_output;
+      if(!binding.output_map||typeof binding.output_map!=="object")binding.output_map={main:"0",skip:"1",extra:"2"};
+      binding.output_map.main=String(binding.output_map.main??"0");
+      binding.output_map.skip=String(binding.output_map.skip??"1");
+      binding.output_map.extra=String(binding.output_map.extra??"2");
       // Keep the legacy field synchronized for old runtimes/design readers.
-      binding.target_kind=binding.call_type==="function"?"function":"module";
+      binding.target_kind=["function","user_function"].includes(binding.call_type)?"function":"module";
       if(!Array.isArray(binding.parameters))binding.parameters=[];
       return binding;
     }
@@ -4735,6 +4848,16 @@
       const clean=String(value||"").trim().replace(/[^A-Za-z0-9_]+/g,"_").replace(/^_+|_+$/g,"");
       const base=clean||fallback;
       return /^[A-Za-z_]/.test(base)?base:("obj_"+base);
+    }
+
+    function apiSafePortName(value,fallback="port"){
+      return apiSafeObjectName(value,fallback);
+    }
+    function defaultUserInputPort(index=0){
+      const n=index+1;return {id:uid("inport"),name:"input_"+n,parameter:"input_"+n,positional:false,required:true};
+    }
+    function defaultUserOutputPort(index=0){
+      const n=index+1;return {id:uid("outport"),name:"output_"+n,selector:index===0?"auto":String(index)};
     }
 
     function ensureAPIStepObjectIds(step){
@@ -4752,7 +4875,7 @@
         if(!step||step.id===excludeStepId)return;
         const b=ensureAPIStepObjectIds(step);
         const source=step.name||"API Function";
-        const createsDirect=b.call_type==="constructor"||(b.call_type==="instance_method"&&b.object_mode==="new");
+        const createsDirect=b.call_type==="constructor"||b.call_type==="user_class"||(b.call_type==="instance_method"&&b.object_mode==="new");
         if(createsDirect){
           out.push({id:b.object_id,name:b.object_name||apiSafeObjectName(b.symbol||source),source,kind:"created"});
         }
@@ -5002,6 +5125,34 @@
     function requestCustomAPIImport(def,step=null){
       const binding=step?ensureAPIStepObjectIds(step):normalizeAPIBinding(def?.api_binding||defaultAPIBinding());
       const statusKey=step?def.id+":"+step.id:def.id;
+      if(binding.call_type==="user_function"){
+        const source=String(binding.user_code||"").trim();
+        const functionName=String(binding.user_function_name||"").trim();
+        if(!source||!functionName){
+          customImportStatus[statusKey]={status:"error",message:"Enter a Python function name and source code first."};
+          setStatus("Enter a Python function name and source code first.");draw();return;
+        }
+        if(!bridgeReady()){setStatus("Kernel bridge is offline. Re-run the Builder cell, then validate the function again.");return;}
+        const command={action:"validate_user_function",source,function_name:functionName,label:(step?.name||def?.name||functionName),definition_id:statusKey,ts:Date.now()};
+        if(!setBridgeState()||!setBridgeCommand(command)){setStatus("Could not send User Function validation to Python.");return;}
+        const button=bridgeControl(bridge.run,"button");if(!button){setStatus("Python Run control was not found.");return;}
+        customImportStatus[statusKey]={status:"running",message:"Validating "+functionName+"…"};
+        setStatus("Validating "+functionName+"…");clickBridgeButton(button);draw();return;
+      }
+      if(binding.call_type==="user_class"){
+        const source=String(binding.user_class_code||"").trim();
+        const className=String(binding.user_class_name||"").trim();
+        if(!source||!className){
+          customImportStatus[statusKey]={status:"error",message:"Enter a Python class name and source code first."};
+          setStatus("Enter a Python class name and source code first.");draw();return;
+        }
+        if(!bridgeReady()){setStatus("Kernel bridge is offline. Re-run the Builder cell, then validate the class again.");return;}
+        const command={action:"validate_user_class",source,class_name:className,label:(step?.name||def?.name||className),definition_id:statusKey,ts:Date.now()};
+        if(!setBridgeState()||!setBridgeCommand(command)){setStatus("Could not send User Class validation to Python.");return;}
+        const button=bridgeControl(bridge.run,"button");if(!button){setStatus("Python Run control was not found.");return;}
+        customImportStatus[statusKey]={status:"running",message:"Validating "+className+"…"};
+        setStatus("Validating "+className+"…");clickBridgeButton(button);draw();return;
+      }
       if(binding.call_type==="instance_method"&&binding.object_mode==="existing"){
         const candidate=apiObjectCandidates(def,step?.id||"").find(x=>x.id===binding.object_ref);
         if(!candidate){
@@ -5052,17 +5203,20 @@
       const callTypeOptions=Object.entries(apiCallTypeLabels).map(([value,label])=>({value,label}));
       body.appendChild(editorRow("Call Type",binding.call_type||"function",v=>{
         binding.call_type=v;
-        binding.target_kind=v==="function"?"function":"module";
+        binding.target_kind=["function","user_function"].includes(v)?"function":"module";
         const args=Array.isArray(binding.parameters)?binding.parameters:[];
-        if(v==="constructor")args.forEach(spec=>spec.stage="init");
+        if(v==="constructor"||v==="user_class")args.forEach(spec=>spec.stage="init");
         else if(v!=="instance_method"||binding.object_mode==="existing")args.forEach(spec=>spec.stage="call");
         customImportStatus[def.id+":"+step.id]=null;draw();
       },{select:true,options:callTypeOptions}));
 
       const callType=binding.call_type;
       const isExisting=callType==="instance_method"&&binding.object_mode==="existing";
-      const needsImport=!isExisting;
-      const classLike=["static_method","class_method","instance_method","constructor"].includes(callType);
+      const isUserFunction=callType==="user_function";
+      const isUserClass=callType==="user_class";
+      const isUserSource=isUserFunction||isUserClass;
+      const needsImport=!isExisting&&!isUserSource;
+      const classLike=["static_method","class_method","instance_method","constructor","user_class"].includes(callType);
 
       if(callType==="instance_method"){
         body.appendChild(editorRow("Object Source",binding.object_mode||"new",v=>{
@@ -5072,6 +5226,63 @@
           }
           customImportStatus[def.id+":"+step.id]=null;draw();
         },{select:true,options:[{value:"new",label:"Create New Object"},{value:"existing",label:"Use Existing Object"}]}));
+      }
+
+      if(isUserFunction){
+        const userTitle=document.createElement("div");userTitle.className="mlb-section-title";userTitle.textContent="PYTHON FUNCTION";body.appendChild(userTitle);
+        body.appendChild(editorRow("Function Name",binding.user_function_name||"custom_function",v=>{binding.user_function_name=String(v||"").trim()||"custom_function";customImportStatus[def.id+":"+step.id]=null;},{type:"text"}));
+        body.appendChild(editorRow("Python Code",binding.user_code||"def custom_function(x):\n    return x",v=>{binding.user_code=v;binding.dependencies=extractPythonDependencies(v);binding.source_hash=userSourceHash(v);customImportStatus[def.id+":"+step.id]=null;},{textarea:true,rows:10}));
+        const userHelp=document.createElement("div");userHelp.className="mlb-api-path";userHelp.textContent="Define one Python function. torch and torch.nn are available automatically; imports inside the editor use the notebook/kernel environment.";body.appendChild(userHelp);
+        body.appendChild(editorRow("Visual Port Mode",binding.port_mode||"standard",v=>{
+          binding.port_mode=v;
+          if(v==="named"){
+            binding.auto_main_input=false;binding.multi_output=false;
+            if(!binding.input_ports.length)binding.input_ports=[defaultUserInputPort(0)];
+            if(!binding.output_ports.length)binding.output_ports=[defaultUserOutputPort(0)];
+          }
+          pendingPort=null;draw();
+        },{select:true,options:[{value:"standard",label:"Main / Skip / Extra"},{value:"named",label:"Custom Named Ports"}]}));
+        if(binding.port_mode==="named"){
+          const inTitle=document.createElement("div");inTitle.className="mlb-section-title";inTitle.textContent="INPUT PORTS";body.appendChild(inTitle);
+          const inHelp=document.createElement("div");inHelp.className="mlb-api-path";inHelp.textContent="Each connected input port is passed to the Python function using its Function Parameter name. Named ports can connect directly between User Defined Function nodes.";body.appendChild(inHelp);
+          (binding.input_ports||[]).forEach((port,index)=>{
+            const box=document.createElement("div");box.className="mlb-custom-arg-card";
+            const head=document.createElement("div");head.className="mlb-custom-arg-head";const nm=document.createElement("strong");nm.textContent=port.name||("Input "+(index+1));
+            const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove input port";rm.addEventListener("click",()=>{checkpoint("Remove user input port");current(state).edges=(current(state).edges||[]).filter(e=>!(e.target===step.id&&e.target_port==="named_in:"+port.id));binding.input_ports.splice(index,1);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
+            box.appendChild(editorRow("Port Name",port.name||"",v=>{port.name=apiSafePortName(v,"input_"+(index+1));draw();}));
+            box.appendChild(editorRow("Function Parameter",port.parameter||port.name||"",v=>port.parameter=apiSafePortName(v,port.name||("input_"+(index+1)))));
+            box.appendChild(editorRow("Pass As",port.positional?"positional":"keyword",v=>port.positional=v==="positional",{select:true,options:["keyword","positional"]}));
+            box.appendChild(editorRow("Required",port.required===false?"false":"true",v=>port.required=v==="true",{select:true,options:["true","false"]}));
+            body.appendChild(box);
+          });
+          const addIn=btn("+ Add Input Port","mlb-create mlb-custom-add-arg");addIn.addEventListener("click",()=>{checkpoint("Add user input port");binding.input_ports.push(defaultUserInputPort(binding.input_ports.length));draw();});body.appendChild(addIn);
+          const outTitle=document.createElement("div");outTitle.className="mlb-section-title";outTitle.textContent="OUTPUT PORTS";body.appendChild(outTitle);
+          const outHelp=document.createElement("div");outHelp.className="mlb-api-path";outHelp.textContent="Map each visual output to the complete result (auto), a tuple/list index, or a dict/object key. Add as many outputs as your function returns.";body.appendChild(outHelp);
+          (binding.output_ports||[]).forEach((port,index)=>{
+            const box=document.createElement("div");box.className="mlb-custom-arg-card";
+            const head=document.createElement("div");head.className="mlb-custom-arg-head";const nm=document.createElement("strong");nm.textContent=port.name||("Output "+(index+1));
+            const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove output port";rm.addEventListener("click",()=>{checkpoint("Remove user output port");current(state).edges=(current(state).edges||[]).filter(e=>!(e.source===step.id&&e.source_port==="named_out:"+port.id));binding.output_ports.splice(index,1);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
+            box.appendChild(editorRow("Port Name",port.name||"",v=>{port.name=apiSafePortName(v,"output_"+(index+1));draw();}));
+            box.appendChild(editorRow("Return Index / Key",port.selector??"auto",v=>port.selector=v));body.appendChild(box);
+          });
+          const addOut=btn("+ Add Output Port","mlb-create mlb-custom-add-arg");addOut.addEventListener("click",()=>{checkpoint("Add user output port");binding.output_ports.push(defaultUserOutputPort(binding.output_ports.length));draw();});body.appendChild(addOut);
+        }
+      }
+      if(isUserClass){
+        const userTitle=document.createElement("div");userTitle.className="mlb-section-title";userTitle.textContent="PYTHON CLASS";body.appendChild(userTitle);
+        body.appendChild(editorRow("Class Name",binding.user_class_name||"CustomClass",v=>{binding.user_class_name=String(v||"").trim()||"CustomClass";if(!binding.object_name)binding.object_name=apiSafeObjectName(binding.user_class_name);customImportStatus[def.id+":"+step.id]=null;},{type:"text"}));
+        body.appendChild(editorRow("Python Code",binding.user_class_code||"class CustomClass:\n    def __init__(self):\n        pass",v=>{binding.user_class_code=v;binding.dependencies=extractPythonDependencies(v);binding.source_hash=userSourceHash(v);customImportStatus[def.id+":"+step.id]=null;},{textarea:true,rows:12}));
+        const userHelp=document.createElement("div");userHelp.className="mlb-api-path";userHelp.textContent="The class source is saved with this component. This node constructs one reusable object; later Instance Method nodes can select that same object. Third-party libraries are never installed automatically.";body.appendChild(userHelp);
+      }
+
+      if(isUserSource){
+        const source=isUserClass?binding.user_class_code:binding.user_code;
+        binding.dependencies=extractPythonDependencies(source);
+        binding.source_hash=userSourceHash(source);
+        const depTitle=document.createElement("div");depTitle.className="mlb-section-title";depTitle.textContent="SOURCE CACHE / DEPENDENCIES";body.appendChild(depTitle);
+        const depBox=document.createElement("div");depBox.className="mlb-summary";
+        [["Cached Source",binding.source_cache_id?"Yes":"Saved when component is saved"],["Source Revision","v"+(binding.source_revision||1)],["Source Hash",binding.source_hash||"—"],["Dependencies",binding.dependencies.length?binding.dependencies.join(", "):"None detected"]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";depBox.appendChild(r);});body.appendChild(depBox);
+        const depHelp=document.createElement("div");depHelp.className="mlb-api-path";depHelp.textContent="MLB Studio stores your source code with the saved component/project. External dependencies must already be installed in the active Python environment; Studio never installs them automatically.";body.appendChild(depHelp);
       }
 
       if(needsImport){
@@ -5085,8 +5296,8 @@
         },{type:"text"}));
       }
 
-      if(callType==="constructor"||(callType==="instance_method"&&binding.object_mode==="new")){
-        if(!binding.object_name)binding.object_name=apiSafeObjectName(binding.symbol||step.name);
+      if(callType==="constructor"||callType==="user_class"||(callType==="instance_method"&&binding.object_mode==="new")){
+        if(!binding.object_name)binding.object_name=apiSafeObjectName((isUserClass?binding.user_class_name:binding.symbol)||step.name);
         body.appendChild(editorRow("Object Name",binding.object_name||"",v=>binding.object_name=apiSafeObjectName(v||"object"),{type:"text"}));
         const objInfo=document.createElement("div");objInfo.className="mlb-api-path";
         objInfo.textContent="Reusable object ID is tied to this node, not its visible name. Renaming the node will not break later references.";body.appendChild(objInfo);
@@ -5112,9 +5323,18 @@
         body.appendChild(editorRow("Method",binding.call_method||"",v=>binding.call_method=v,{type:"text"}));
       }
 
-      if(callType!=="constructor"){
+      if(callType!=="constructor"&&callType!=="user_class"&&!(isUserFunction&&binding.port_mode==="named")){
         body.appendChild(editorRow("Implicit Main Input",binding.auto_main_input?"true":"false",v=>binding.auto_main_input=v==="true",{select:true,options:[{value:"true",label:"Auto prepend Main"},{value:"false",label:"Do not inject Main"}]}));
-        body.appendChild(editorRow("Output Selector",binding.output_selector||"auto",v=>binding.output_selector=v,{type:"text"}));
+        body.appendChild(editorRow("Multiple Outputs",binding.multi_output?"true":"false",v=>{binding.multi_output=v==="true";draw();},{select:true,options:[{value:"false",label:"Single Output"},{value:"true",label:"Map Multiple Outputs"}]}));
+        if(binding.multi_output){
+          const mapTitle=document.createElement("div");mapTitle.className="mlb-section-title";mapTitle.textContent="OUTPUT MAPPING";body.appendChild(mapTitle);
+          const mapHelp=document.createElement("div");mapHelp.className="mlb-api-path";mapHelp.textContent="For tuple/list returns use indexes such as 0, 1, 2. Dict/object returns may use a key or attribute name. Leave Skip or Extra blank when unused.";body.appendChild(mapHelp);
+          body.appendChild(editorRow("Main Output Index / Key",binding.output_map?.main??"0",v=>binding.output_map.main=v,{type:"text"}));
+          body.appendChild(editorRow("Skip Output Index / Key",binding.output_map?.skip??"1",v=>binding.output_map.skip=v,{type:"text"}));
+          body.appendChild(editorRow("Extra Output Index / Key",binding.output_map?.extra??"2",v=>binding.output_map.extra=v,{type:"text"}));
+        }else{
+          body.appendChild(editorRow("Output Selector",binding.output_selector||"auto",v=>binding.output_selector=v,{type:"text"}));
+        }
         body.appendChild(editorRow("Register Result as Object",binding.register_result_object?"true":"false",v=>{
           binding.register_result_object=v==="true";
           if(binding.register_result_object&&!binding.result_object_name)binding.result_object_name=apiSafeObjectName((step.name||"result")+"_result");
@@ -5128,12 +5348,25 @@
       }
 
       const apiActions=document.createElement("div");apiActions.className="mlb-action-grid";
-      const test=btn(isExisting?"Bind Existing Object":"Bind / Test API","mlb-custom-api-test");test.addEventListener("click",()=>requestCustomAPIImport(def,step));apiActions.appendChild(test);body.appendChild(apiActions);
-      const st=customImportStatus[def.id+":"+step.id];if(st){const msg=document.createElement("div");msg.className="mlb-api-status "+(st.status==="done"?"available":st.status==="error"?"unavailable":"utility");msg.textContent=st.message||st.status;body.appendChild(msg);}
+      const testLabel=isUserFunction?"Validate Function":(isUserClass?"Validate Class":(isExisting?"Bind Existing Object":"Bind / Test API"));
+      const test=btn(testLabel,"mlb-custom-api-test");test.addEventListener("click",()=>requestCustomAPIImport(def,step));apiActions.appendChild(test);body.appendChild(apiActions);
+      const st=customImportStatus[def.id+":"+step.id];if(st){
+        const msg=document.createElement("div");msg.className="mlb-api-status "+(st.status==="done"?"available":st.status==="error"?"unavailable":"utility");msg.textContent=st.message||st.status;body.appendChild(msg);
+        const checkedDeps=st.details?.dependencies||[];
+        if(checkedDeps.length){
+          const depCheck=document.createElement("div");depCheck.className="mlb-summary";
+          checkedDeps.forEach(item=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+(item.available?"✓ ":"✕ ")+item.name+"</span><strong>"+(item.available?"Available":"Install explicitly")+"</strong>";depCheck.appendChild(r);});
+          body.appendChild(depCheck);
+        }
+      }
 
       const argTitle=document.createElement("div");argTitle.className="mlb-section-title";argTitle.textContent="PARAMETERS";body.appendChild(argTitle);
       const note=document.createElement("div");note.className="mlb-api-path";
-      note.textContent=callType==="constructor"
+      note.textContent=callType==="user_function"
+        ?(binding.port_mode==="named"?"Your function uses custom named visual ports. Connected inputs are passed by parameter name and each output port selects a returned value.":"Your Python function executes on every pass. Use Main / Skip / Extra parameter sources for incoming lanes. Enable Multiple Outputs to map returned values to the node's three output ports.")
+        :callType==="user_class"
+        ?"Constructor parameters create one reusable instance from your cached class source. The object is registered once and later Instance Method nodes can reuse it."
+        :callType==="constructor"
         ?"Constructor parameters are evaluated once when the API Component is built. The created object is registered and this node passes Main data through unchanged."
         :(callType==="instance_method"&&binding.object_mode==="new"
           ?"Init parameters create the reusable object once; Call parameters are supplied whenever this method executes."
@@ -5141,7 +5374,7 @@
       body.appendChild(note);
 
       const args=Array.isArray(binding.parameters)?binding.parameters:(binding.parameters=[]);
-      const allowedStages=callType==="constructor"?["init"]:(callType==="instance_method"&&binding.object_mode==="new"?["init","call"]:["call"]);
+      const allowedStages=(callType==="constructor"||callType==="user_class")?["init"]:(callType==="instance_method"&&binding.object_mode==="new"?["init","call"]:["call"]);
       args.forEach((spec,index)=>{
         if(!allowedStages.includes(String(spec.stage||"")))spec.stage=allowedStages[0];
         const box=document.createElement("div");box.className="mlb-custom-arg-card";
@@ -5173,10 +5406,20 @@
       const initArgs=args.filter(a=>String(a.stage||"init")==="init").map(renderArg).join(", ");
       const explicitCallArgs=args.filter(a=>String(a.stage||"call")==="call").map(renderArg).join(", ");
       const callArgs=explicitCallArgs||(binding.auto_main_input?"main":"");
-      const objectName=binding.object_name||apiSafeObjectName(symbol||step.name);
+      const objectName=binding.object_name||apiSafeObjectName((isUserClass?binding.user_class_name:symbol)||step.name);
       let code="";
-      if(!isExisting)code+="from "+mod+" import "+symbol+"\n\n";
-      if(callType==="function")code+="y = "+symbol+"("+callArgs+")";
+      if(!isExisting&&!isUserSource)code+="from "+mod+" import "+symbol+"\n\n";
+      if(isUserFunction)code+=(binding.user_code||"def custom_function(x):\n    return x")+"\n\n";
+      if(isUserClass)code+=(binding.user_class_code||"class CustomClass:\n    def __init__(self):\n        pass")+"\n\n";
+      if(callType==="user_function"){
+        if(binding.port_mode==="named"){
+          const namedArgs=(binding.input_ports||[]).map(p=>(p.positional?"":(p.parameter||p.name)+"=")+"<"+(p.name||"input")+">").join(", ");
+          code+="result = "+(binding.user_function_name||"custom_function")+"("+namedArgs+")";
+          (binding.output_ports||[]).forEach(p=>{code+="\n"+(p.name||"output")+" = result"+(String(p.selector||"auto")==="auto"?"":("["+p.selector+"]"));});
+        }else code+="result = "+(binding.user_function_name||"custom_function")+"("+callArgs+")";
+      }
+      else if(callType==="user_class")code+=objectName+" = "+(binding.user_class_name||"CustomClass")+"("+initArgs+")\n# registered for later nodes\ny = main";
+      else if(callType==="function")code+="y = "+symbol+"("+callArgs+")";
       else if(callType==="static_method"||callType==="class_method")code+="y = "+symbol+"."+(binding.call_method||"method")+"("+callArgs+")";
       else if(callType==="constructor")code+=objectName+" = "+symbol+"("+initArgs+")\n# registered for later nodes\ny = main";
       else if(binding.object_mode==="existing"){
@@ -5186,7 +5429,15 @@
         code+=objectName+" = "+symbol+"("+initArgs+")\n";
         code+="y = "+objectName+(binding.call_method?("."+binding.call_method):"")+"("+callArgs+")";
       }
-      if(binding.register_result_object)code+="\n"+(binding.result_object_name||apiSafeObjectName(step.name+"_result"))+" = y  # registered for reuse"+(binding.result_output_mode==="passthrough"?"\ny = main":"");
+      if(isUserFunction&&binding.port_mode!=="named"){
+        if(binding.multi_output){
+          const om=binding.output_map||{};
+          code+="\nmain = result["+(om.main||"0")+"]";
+          if(String(om.skip??"").trim())code+="\nskip = result["+om.skip+"]";
+          if(String(om.extra??"").trim())code+="\nextra = result["+om.extra+"]";
+        }else code+="\ny = result"+(binding.output_selector&&binding.output_selector!=="auto"?("["+binding.output_selector+"]"):"");
+      }
+      if(binding.register_result_object)code+="\n"+(binding.result_object_name||apiSafeObjectName(step.name+"_result"))+" = "+(isUserFunction?"result":"y")+"  # registered for reuse"+(binding.result_output_mode==="passthrough"?"\ny = main":"");
       pre.textContent=code;body.appendChild(pre);
     }
 
@@ -5219,14 +5470,17 @@
 
     function renderAPIStepConnections(body,step){
       const title=document.createElement("div");title.className="mlb-section-title";title.textContent="CONNECTIONS";body.appendChild(title);
-      const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Add a connection by clicking an output port on one function and the matching input port on another. One function output may feed multiple downstream blocks for parallel execution.";body.appendChild(help);
+      const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Connect Main / Skip / Extra lanes normally, or connect custom named User Function ports directly. One output may feed multiple downstream blocks.";body.appendChild(help);
       const rel=(current(state).edges||[]).filter(e=>e.source===step.id||e.target===step.id);
       if(!rel.length){const empty=document.createElement("div");empty.className="mlb-api-path";empty.textContent="No connections for this function.";body.appendChild(empty);}
       else rel.forEach(ed=>{
         const row=document.createElement("div");row.className="mlb-connection-row";
         const src=current(state).nodes.find(x=>x.id===ed.source),tgt=current(state).nodes.find(x=>x.id===ed.target);
-        const lane=ed.kind==="residual"?"Skip":(ed.kind==="aux"?"Extra":"Main");
-        const txt=document.createElement("div");txt.className="mlb-connection-text";txt.textContent=(src?.name||"Function")+" → "+(tgt?.name||"Function")+" · "+lane;
+        const namedSource=String(ed.source_port||"").startsWith("named_out:")?String(ed.source_port).replace("named_out:",""):"";
+        const namedTarget=String(ed.target_port||"").startsWith("named_in:")?String(ed.target_port).replace("named_in:",""):"";
+        const lane=ed.kind==="residual"?"Skip":(ed.kind==="aux"?"Extra":(ed.kind==="named"?"Named":"Main"));
+        const portText=(namedSource||namedTarget)?(" · "+(namedSource||"standard")+" → "+(namedTarget||lane)):" · "+lane;
+        const txt=document.createElement("div");txt.className="mlb-connection-text";txt.textContent=(src?.name||"Function")+" → "+(tgt?.name||"Function")+portText;
         const del=btn("Remove","mlb-conn-remove");del.addEventListener("click",()=>{if(!requireEditableLayout("remove API connections"))return;checkpoint("Remove API connection");current(state).edges=current(state).edges.filter(x=>x.id!==ed.id);setStatus("API connection removed.");draw();});
         row.append(txt,del);body.appendChild(row);
       });
@@ -5315,8 +5569,30 @@
       return out;
     }
 
+    function cacheDefinitionTreeSources(rootDefId,seen=new Set(),liveRoot=null){
+      if(!rootDefId||seen.has(rootDefId))return;
+      seen.add(rootDefId);
+      const def=state.custom_components?.[rootDefId];if(!def)return;
+      cacheUserSourcesForDefinition(def,liveRoot&&liveRoot.definition_id===rootDefId?liveRoot:null);
+      (def.nodes||[]).forEach(n=>{if(n?.type==="custom"&&n.definition_id)cacheDefinitionTreeSources(n.definition_id,seen,null);});
+    }
+
     function customGallerySnapshot(def,c){
+      cacheDefinitionTreeSources(def.id,new Set(),c||null);
       const snap=customDefinitionSnapshot(def,c);
+      snap.component_cache={};
+      const collectNodes=(nodes,seenDefs=new Set())=>{
+        (nodes||[]).forEach(step=>{
+          if(step?.type==="api_step"){
+            const b=ensureAPIStepObjectIds(step);
+            if(b.source_cache_id&&state.component_cache?.[b.source_cache_id])snap.component_cache[b.source_cache_id]=cp(state.component_cache[b.source_cache_id]);
+          }else if(step?.type==="custom"&&step.definition_id&&!seenDefs.has(step.definition_id)){
+            seenDefs.add(step.definition_id);
+            const child=state.custom_components?.[step.definition_id];if(child)collectNodes(child.nodes||[],seenDefs);
+          }
+        });
+      };
+      collectNodes(snap.nodes||[],new Set([def.id]));
       snap.dependency_definitions=collectCustomDependencySnapshots(def.id,new Set());
       return snap;
     }
@@ -5346,7 +5622,7 @@
         state.gallery.components.push(entry);
       }
       def.gallery_entry_id=entry.id;
-      persistGallery();
+      persistGallery();persistComponentCache();
       return entry;
     }
 
@@ -5674,37 +5950,52 @@
       draw();
     }
 
-    function portClick(nodeId,side,portIndex,ev){
+    function portClick(nodeId,side,portIndex,ev,portKey="",portName="",portMode="standard"){
       ev.stopPropagation();
       if(!requireEditableLayout("edit connections"))return;
+      const named=portMode==="named"&&portKey;
       if(side==="out"){
-        pendingPort={nodeId,side,portIndex};
-        const lane=["Skip","Main","Extra"][portIndex]||"Lane";
-        setStatus(lane+" output selected. Click the matching "+lane.toLowerCase()+" input.");
-        draw();
-        return;
+        pendingPort={nodeId,side,portIndex,portKey,portName,portMode:named?"named":"standard"};
+        if(named)setStatus((portName||"Output")+" selected. Click a named input port or a standard Main / Skip / Extra input.");
+        else{
+          const lane=["Skip","Main","Extra"][portIndex]||"Lane";
+          setStatus(lane+" output selected. Click the matching "+lane.toLowerCase()+" input.");
+        }
+        draw();return;
       }
 
-      if(side==="in" && pendingPort?.side==="out"){
+      if(side==="in"&&pendingPort?.side==="out"){
+        const pendingNamed=pendingPort.portMode==="named"&&pendingPort.portKey;
+        if(named||pendingNamed){
+          if(named&&pendingNamed){
+            connect(pendingPort.nodeId,nodeId,"named","named_out:"+pendingPort.portKey,"named_in:"+portKey);
+          }else if(named&&!pendingNamed){
+            const srcLane=pendingPort.portIndex;
+            const sourcePort=srcLane===0?"skip_out":(srcLane===2?"extra_out":"main_out");
+            connect(pendingPort.nodeId,nodeId,"named",sourcePort,"named_in:"+portKey);
+          }else{
+            const lane=portIndex;
+            const kind=lane===0?"residual":(lane===2?"aux":"main");
+            const targetPort=lane===0?"skip_in":(lane===2?"extra_in":"main_in");
+            connect(pendingPort.nodeId,nodeId,kind,"named_out:"+pendingPort.portKey,targetPort);
+          }
+          pendingPort=null;draw();return;
+        }
         if(pendingPort.portIndex!==portIndex){
           const lane=["Skip","Main","Extra"][pendingPort.portIndex]||"Lane";
           setStatus("For a clean graph connect matching lanes: "+lane+" Out → "+lane+" In.");
-          pendingPort=null;
-          draw();
-          return;
+          pendingPort=null;draw();return;
         }
         const lane=portIndex;
         const kind=lane===0?"residual":(lane===2?"aux":"main");
         const sourcePort=lane===0?"skip_out":(lane===2?"extra_out":"main_out");
         const targetPort=lane===0?"skip_in":(lane===2?"extra_in":"main_in");
         connect(pendingPort.nodeId,nodeId,kind,sourcePort,targetPort);
-        pendingPort=null;
-        draw();
-        return;
+        pendingPort=null;draw();return;
       }
 
-      pendingPort={nodeId,side,portIndex};
-      setStatus("Input selected. Choose an output from the same lane.");
+      pendingPort={nodeId,side,portIndex,portKey,portName,portMode:named?"named":"standard"};
+      setStatus(named?(portName||"Input")+"  input selected. Choose a named or standard output port.":"Input selected. Choose an output from the same lane.");
       draw();
     }
 
@@ -5896,29 +6187,40 @@
     }
 
 
+    function namedUserPorts(node,side){
+      if(node?.type!=="api_step")return null;
+      const b=normalizeAPIBinding(node.api_binding||defaultAPIBinding());
+      if(b.call_type!=="user_function"||b.port_mode!=="named")return null;
+      return side==="in"?(b.input_ports||[]):(b.output_ports||[]);
+    }
+
     function portButtons(node, side){
+      const namedPorts=namedUserPorts(node,side);
+      if(namedPorts){
+        let html="";const count=Math.max(1,namedPorts.length);
+        namedPorts.forEach((port,i)=>{
+          const pct=((i+1)/(count+1))*100;
+          const key=String(port.id||((side==="in"?"in_":"out_")+(i+1)));
+          const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
+          const sideCss=side==="in"?"left:-6px":"right:-6px";
+          const labelCss=side==="in"?"left:10px":"right:10px";
+          html+='<button class="mlb-port '+side+' named-port" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" style="'+sideCss+';top:'+pct+'%;transform:translateY(-50%)" type="button" aria-label="'+name+'" title="'+name+'"></button>';
+          html+='<span class="mlb-user-port-label '+side+'" style="'+labelCss+';top:'+pct+'%;transform:translateY(-50%)">'+name+'</span>';
+        });
+        return html;
+      }
       let html="";
       for(let i=0;i<3;i++){
-        let style="";
-        let posClass="";
-
+        let style="";let posClass="";
         if(i===0){
-          // Top lane: ports live ON the top edge, input on left half / output on right half.
           const left = side==="in" ? 28 : 72;
-          style='left:'+left+'%;top:-6px;transform:translateX(-50%)';
-          posClass="top-edge";
-        }else if(i===1){
-          // Main lane: conventional side-center input/output.
-          style='top:50%;transform:translateY(-50%)';
-          posClass="middle-side";
-        }else{
-          // Bottom lane: ports live ON the bottom edge, input on left half / output on right half.
+          style='left:'+left+'%;top:-6px;transform:translateX(-50%)';posClass="top-edge";
+        }else if(i===1){style='top:50%;transform:translateY(-50%)';posClass="middle-side";}
+        else{
           const left = side==="in" ? 28 : 72;
-          style='left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)';
-          posClass="bottom-edge";
+          style='left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)';posClass="bottom-edge";
         }
-
-        html += '<button class="mlb-port '+side+' lane-'+i+' '+posClass+'" data-side="'+side+'" data-port-index="'+i+'" style="'+style+'" type="button" aria-label="'+portLabel(side,i)+'" title="'+portLabel(side,i)+'"></button>';
+        html += '<button class="mlb-port '+side+' lane-'+i+' '+posClass+'" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="standard" style="'+style+'" type="button" aria-label="'+portLabel(side,i)+'" title="'+portLabel(side,i)+'"></button>';
       }
       return html;
     }
@@ -5958,12 +6260,16 @@
       const wr=wrap.getBoundingClientRect();
       let skipRoute=0, extraRoute=0;
 
-      function portRect(nodeEl,side,index){
-        const el=nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
+      function portRect(nodeEl,side,index,key=""){
+        const selector=key
+          ?('.mlb-port[data-side="'+side+'"][data-port-key="'+key+'"]')
+          :('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
+        const el=nodeEl.querySelector(selector);
         return el ? el.getBoundingClientRect() : nodeEl.getBoundingClientRect();
       }
 
       function laneOf(e){
+        if(e.kind==="named"||String(e.target_port||"").startsWith("named_in:")) return "named";
         if(e.kind==="residual") return 0;
         if(e.kind==="aux") return 2;
         const sp=String(e.source_port||"");
@@ -5977,13 +6283,23 @@
         const b=flow.querySelector('[data-node-id="'+e.target+'"]');
         if(!a||!b)return;
         const lane=laneOf(e);
-        const ar=portRect(a,"out",lane), br=portRect(b,"in",lane);
+        const sourcePortText=String(e.source_port||"");const targetPortText=String(e.target_port||"");
+        const sourceKey=sourcePortText.startsWith("named_out:")?sourcePortText.replace(/^named_out:/,""):"";
+        const targetKey=targetPortText.startsWith("named_in:")?targetPortText.replace(/^named_in:/,""):"";
+        const routeIndex=lane==="named"?1:lane;
+        const sourceIndex=sourceKey?routeIndex:(sourcePortText.includes("skip")?0:(sourcePortText.includes("extra")?2:routeIndex));
+        const targetIndex=targetKey?routeIndex:(targetPortText.includes("skip")?0:(targetPortText.includes("extra")?2:routeIndex));
+        const ar=portRect(a,"out",sourceIndex,sourceKey), br=portRect(b,"in",targetIndex,targetKey);
         const x1=ar.left-wr.left+ar.width/2, y1=ar.top-wr.top+ar.height/2;
         const x2=br.left-wr.left+br.width/2, y2=br.top-wr.top+br.height/2;
         const p=document.createElementNS("http://www.w3.org/2000/svg","path");
         p.setAttribute("data-edge-id",e.id);
 
-        if(lane===0){
+        if(lane==="named"){
+          const gap=Math.max(1,Math.abs(x2-x1));const dir=x2>=x1?1:-1;const handle=Math.max(18,Math.min(58,gap*0.42));
+          p.setAttribute("d",`M ${x1} ${y1} C ${x1+dir*handle} ${y1}, ${x2-dir*handle} ${y2}, ${x2} ${y2}`);
+          p.setAttribute("class","mlb-edge-main mlb-edge-named");
+        }else if(lane===0){
           const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
           const route=skipRoute++;
           const topY=Math.min(ab.top-wr.top,bb.top-wr.top)-34-(route%4)*16;
@@ -6175,7 +6491,7 @@
       rememberWorkspaceView();
       return {
         format:"mlb-studio-design",
-        format_version:"0.7.5",
+        format_version:"0.8.0",
         builder_version:"1.0.0",
         saved_at:new Date().toISOString(),
         state:sanitizedProjectState()
@@ -6772,9 +7088,11 @@
           if(n.type==="api_step"){
             const binding=normalizeAPIBinding(n.api_binding||defaultAPIBinding());
             card.querySelector(".mlb-node-fields").innerHTML=
-              '<div class="mlb-mini-field"><span>API</span><strong>'+(apiBindingImportPath(binding)||"Not bound")+'</strong></div>'+ 
+              '<div class="mlb-mini-field"><span>API</span><strong>'+(binding.call_type==="user_function"?("User: "+(binding.user_function_name||"custom_function")):binding.call_type==="user_class"?("Class: "+(binding.user_class_name||"CustomClass")):(apiBindingImportPath(binding)||"Not bound"))+'</strong></div>'+ 
               '<div class="mlb-mini-field"><span>Type</span><strong>'+apiCallTypeLabel(binding.call_type)+'</strong></div>'+ 
-              '<div class="mlb-mini-field"><span>Parameters</span><strong>'+((binding.parameters||[]).length)+'</strong></div>';
+              (binding.call_type==="user_function"&&binding.port_mode==="named"
+                ?'<div class="mlb-mini-field"><span>Ports</span><strong>'+((binding.input_ports||[]).length)+' → '+((binding.output_ports||[]).length)+'</strong></div>'
+                :'<div class="mlb-mini-field"><span>Parameters</span><strong>'+((binding.parameters||[]).length)+'</strong></div>');
           }else if(n.type==="custom"){
             const def=state.custom_components?.[n.definition_id];const isApi=String(def?.implementation||"graph")==="api";
             const apiSteps=apiStepNodes(def);
@@ -6796,10 +7114,12 @@
             const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · lazy imports":"Nested Module · 3-lane interface";
           }else meta.textContent=(apiInfo(n).public_name||n.type)+" · Skip / Main / Extra";
           card.querySelectorAll('.mlb-port').forEach(portEl=>{
-            const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0);
-            if(pendingPort?.nodeId===n.id&&pendingPort.side===side&&pendingPort.portIndex===idx) portEl.classList.add("armed");
-            portEl.addEventListener("click",ev=>portClick(n.id,side,idx,ev));
+            const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",name=portEl.dataset.portName||"",mode=portEl.dataset.portMode||"standard";
+            if(pendingPort?.nodeId===n.id&&pendingPort.side===side&&((mode==="named"&&pendingPort.portKey===key)||(mode!=="named"&&pendingPort.portIndex===idx))) portEl.classList.add("armed");
+            portEl.addEventListener("click",ev=>portClick(n.id,side,idx,ev,key,name,mode));
           });
+          const namedIn=namedUserPorts(n,"in"),namedOut=namedUserPorts(n,"out");
+          if(namedIn||namedOut){card.classList.add("mlb-user-function-named");card.style.height=Math.max(315,(Math.max(namedIn?.length||0,namedOut?.length||0)+1)*38)+"px";}
           card.addEventListener("click",()=>{outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",()=>{if(n.definition_id)openInside(n);});
           flow.appendChild(card);
         });
@@ -6966,7 +7286,7 @@
         const binding=normalizeAPIBinding(n.api_binding||defaultAPIBinding());
         body.innerHTML='<div class="mlb-selected"><strong>'+String(n.name||"Function")+'</strong><span class="mlb-pill">'+apiCallTypeLabel(binding.call_type)+'</span></div>';
         const s=document.createElement("div");s.className="mlb-summary";
-        [["Import",(binding.call_type==="instance_method"&&binding.object_mode==="existing")?(apiObjectCandidates(state.custom_components?.[current(state).definition_id],n.id).find(x=>x.id===binding.object_ref)?.name||"Existing object"):(apiBindingImportPath(binding)||"Not bound")],["Type",apiCallTypeLabel(binding.call_type)],["Parameters",(binding.parameters||[]).length],["Connections",(current(state).edges||[]).filter(e=>e.source===n.id||e.target===n.id).length]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";s.appendChild(r);});body.appendChild(s);
+        [["Import",(binding.call_type==="instance_method"&&binding.object_mode==="existing")?(apiObjectCandidates(state.custom_components?.[current(state).definition_id],n.id).find(x=>x.id===binding.object_ref)?.name||"Existing object"):(binding.call_type==="user_function"?("User: "+(binding.user_function_name||"custom_function")):binding.call_type==="user_class"?("Class: "+(binding.user_class_name||"CustomClass")):(apiBindingImportPath(binding)||"Not bound"))],["Type",apiCallTypeLabel(binding.call_type)],["Parameters",(binding.parameters||[]).length],["Connections",(current(state).edges||[]).filter(e=>e.source===n.id||e.target===n.id).length]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";s.appendChild(r);});body.appendChild(s);
       }else if(inspectorTab==="info"){
         const api=apiInfo(n);const item=n.type==="custom"?{category:"Modules / API",description:"Reusable Module or API Component."}:cat(catalog,n.type);
         body.innerHTML='<div class="mlb-selected"><strong>'+nodeDisplayName(n)+'</strong><span class="mlb-pill">'+(api.public_name||"Custom")+'</span></div>';

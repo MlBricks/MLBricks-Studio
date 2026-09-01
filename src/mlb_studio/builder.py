@@ -1,5 +1,7 @@
 from __future__ import annotations
 import html
+import ast
+import importlib.util
 import json
 from pathlib import Path
 import uuid
@@ -76,6 +78,7 @@ class Builder:
         # metadata lives in state["prepared_datasets"] and is saved with the design.
         self.prepared_datasets = {}
         self.state.setdefault("prepared_datasets", [])
+        self.state.setdefault("component_cache", {})
         self.runtime_capabilities = self._detect_runtime_capabilities()
         from .local_runtime import detect_local_environment, ensure_mlbricks_workspace
         self.local_environment = detect_local_environment()
@@ -261,6 +264,106 @@ class Builder:
             else result.get("error") or f"Could not import {import_path}."
         )
         return result
+
+    @staticmethod
+    def _user_source_dependencies(source):
+        """Return top-level imported package names and whether they are available.
+
+        This only inspects imports.  It never installs dependencies and does not
+        import third-party packages as part of validation.
+        """
+        try:
+            tree = ast.parse(str(source or ""), mode="exec")
+        except SyntaxError:
+            return []
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = str(alias.name or "").split(".", 1)[0]
+                    if root:
+                        names.add(root)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                root = str(node.module).split(".", 1)[0]
+                if root:
+                    names.add(root)
+        result = []
+        for name in sorted(names):
+            try:
+                available = importlib.util.find_spec(name) is not None
+            except Exception:
+                available = False
+            result.append({"name": name, "available": bool(available)})
+        return result
+
+    def validate_user_function(self, source, function_name, *, label=None):
+        """Validate cached User Function source without executing its body."""
+        source = str(source or "")
+        function_name = str(function_name or "").strip()
+        if not source.strip():
+            return {"ok": False, "error": "Python source is empty.", "message": "Python source is empty."}
+        if not function_name:
+            return {"ok": False, "error": "Function name is required.", "message": "Function name is required."}
+        try:
+            tree = ast.parse(source, filename=f"<MLB Studio:{label or function_name}>", mode="exec")
+        except SyntaxError as exc:
+            msg = f"Syntax error on line {exc.lineno}: {exc.msg}"
+            return {"ok": False, "error": msg, "message": msg}
+        functions = {
+            node.name for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        if function_name not in functions:
+            msg = f"No top-level function named {function_name!r} was found."
+            return {"ok": False, "error": msg, "message": msg, "functions": sorted(functions)}
+        dependencies = self._user_source_dependencies(source)
+        missing = [item["name"] for item in dependencies if not item["available"]]
+        message = f"User Function {function_name} is syntactically valid."
+        if missing:
+            message += " Missing dependencies must be installed explicitly: " + ", ".join(missing) + "."
+        else:
+            message += " Dependencies are available and the function is ready to build."
+        return {
+            "ok": not bool(missing),
+            "function_name": function_name,
+            "functions": sorted(functions),
+            "dependencies": dependencies,
+            "missing_dependencies": missing,
+            "message": message,
+        }
+
+    def validate_user_class(self, source, class_name, *, label=None):
+        """Validate cached User Class source and its external dependencies."""
+        source = str(source or "")
+        class_name = str(class_name or "").strip()
+        if not source.strip():
+            return {"ok": False, "error": "Python source is empty.", "message": "Python source is empty."}
+        if not class_name:
+            return {"ok": False, "error": "Class name is required.", "message": "Class name is required."}
+        try:
+            tree = ast.parse(source, filename=f"<MLB Studio:{label or class_name}>", mode="exec")
+        except SyntaxError as exc:
+            msg = f"Syntax error on line {exc.lineno}: {exc.msg}"
+            return {"ok": False, "error": msg, "message": msg}
+        classes = {node.name for node in tree.body if isinstance(node, ast.ClassDef)}
+        if class_name not in classes:
+            msg = f"No top-level class named {class_name!r} was found."
+            return {"ok": False, "error": msg, "message": msg, "classes": sorted(classes)}
+        dependencies = self._user_source_dependencies(source)
+        missing = [item["name"] for item in dependencies if not item["available"]]
+        message = f"User Class {class_name} is syntactically valid."
+        if missing:
+            message += " Missing dependencies must be installed explicitly: " + ", ".join(missing) + "."
+        else:
+            message += " Dependencies are available and the class is ready to build."
+        return {
+            "ok": not bool(missing),
+            "class_name": class_name,
+            "classes": sorted(classes),
+            "dependencies": dependencies,
+            "missing_dependencies": missing,
+            "message": message,
+        }
 
     def validate_component_imports(self, *, eager=True):
         """Validate that every MLBricks-backed catalog component has an import route.
@@ -794,6 +897,7 @@ class Builder:
             "project": copy.deepcopy(self.state.get("project") or {}),
             "model_component": component,
             "custom_components": copy.deepcopy(self.state.get("custom_components") or {}),
+            "component_cache": copy.deepcopy(self.state.get("component_cache") or {}),
             "model_entry": copy.deepcopy(entry),
             "dataset_meta": dataset_meta,
         }
@@ -893,6 +997,9 @@ class Builder:
         self.state["view_component_id"] = root_id
         self.state.setdefault("custom_components", {}).update(
             copy.deepcopy(package.get("custom_components") or {})
+        )
+        self.state.setdefault("component_cache", {}).update(
+            copy.deepcopy(package.get("component_cache") or {})
         )
 
         loaded_project = copy.deepcopy(package.get("project") or {})
@@ -1109,6 +1216,9 @@ class Builder:
                 self.state["view_component_id"] = root_id
                 self.state.setdefault("custom_components", {}).update(
                     copy.deepcopy(package.get("custom_components") or {})
+                )
+                self.state.setdefault("component_cache", {}).update(
+                    copy.deepcopy(package.get("component_cache") or {})
                 )
                 source = copy.deepcopy(package.get("model_entry") or {})
                 source["id"] = f"model_{uuid.uuid4().hex[:12]}"
@@ -1416,6 +1526,9 @@ class Builder:
         self.state.setdefault("components", {})[root_id] = architecture
         self.state["view_component_id"] = root_id
         self.state.setdefault("custom_components", {}).update(custom_components)
+        self.state.setdefault("component_cache", {}).update(
+            copy.deepcopy(package.get("component_cache") or {})
+        )
 
         project = copy.deepcopy(package.get("project") or {})
         current_project = self.state.setdefault("project", {})
@@ -2142,6 +2255,34 @@ class Builder:
                         "overall": 100,
                         "message": result.get("message") or "Custom API import checked.",
                         "external_import": result,
+                        "definition_id": command.get("definition_id"),
+                    })
+                elif action == "validate_user_function":
+                    source = str(command.get("source") or "")
+                    function_name = str(command.get("function_name") or "").strip()
+                    label = str(command.get("label") or function_name).strip()
+                    result = self.validate_user_function(source, function_name, label=label)
+                    self._publish_bridge_progress({
+                        "status": "done" if result.get("ok") else "error",
+                        "runtime_kind": "user_function_validation",
+                        "phase": "custom_component",
+                        "overall": 100,
+                        "message": result.get("message") or "User Function checked.",
+                        "user_function_validation": result,
+                        "definition_id": command.get("definition_id"),
+                    })
+                elif action == "validate_user_class":
+                    source = str(command.get("source") or "")
+                    class_name = str(command.get("class_name") or "").strip()
+                    label = str(command.get("label") or class_name).strip()
+                    result = self.validate_user_class(source, class_name, label=label)
+                    self._publish_bridge_progress({
+                        "status": "done" if result.get("ok") else "error",
+                        "runtime_kind": "user_class_validation",
+                        "phase": "custom_component",
+                        "overall": 100,
+                        "message": result.get("message") or "User Class checked.",
+                        "user_class_validation": result,
                         "definition_id": command.get("definition_id"),
                     })
                 elif action == "train":

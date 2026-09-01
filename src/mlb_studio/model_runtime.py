@@ -293,6 +293,53 @@ def _api_binding_import_path(binding: dict[str, Any]) -> str:
     return ".".join(part for part in (module, symbol) if part)
 
 
+class _APILaneOutputs:
+    """Internal three-lane result produced by an API/User Function node."""
+    __slots__ = ("main", "skip", "extra")
+
+    def __init__(self, main=None, skip=None, extra=None):
+        self.main = main
+        self.skip = skip
+        self.extra = extra
+
+
+class _APINamedOutputs:
+    """Arbitrary named outputs produced by a User Defined Function node."""
+    __slots__ = ("values", "main")
+
+    def __init__(self, values):
+        self.values = dict(values or {})
+        self.main = next(iter(self.values.values()), None)
+
+
+def _lane_output(value, lane):
+    if isinstance(value, _APILaneOutputs):
+        selected = getattr(value, lane, None)
+        if selected is None:
+            raise ModelCompileError(f"API output lane {lane!r} is connected but has no mapped return value.")
+        return selected
+    if isinstance(value, _APINamedOutputs):
+        if lane in value.values:
+            return value.values[lane]
+        if lane == "main" and value.main is not None:
+            return value.main
+        raise ModelCompileError(f"Named User Function output has no {lane!r} value.")
+    return value
+
+
+def _named_output(value, key):
+    key = str(key or "").strip()
+    if isinstance(value, _APINamedOutputs):
+        if key in value.values:
+            return value.values[key]
+        raise ModelCompileError(f"User Function has no named output port {key!r}.")
+    if isinstance(value, _APILaneOutputs) and key in {"main", "skip", "extra"}:
+        return _lane_output(value, key)
+    if key in {"", "main", "skip", "extra", "output"}:
+        return _lane_output(value, "main" if key in {"", "output"} else key)
+    raise ModelCompileError(f"Output {key!r} is not available from the connected source node.")
+
+
 class _APIOperation(nn.Module):
     """One Python/PyTorch operation inside a user-authored API Component graph.
 
@@ -303,7 +350,7 @@ class _APIOperation(nn.Module):
     re-constructing the object.
     """
 
-    _CALL_TYPES = {"function", "static_method", "class_method", "instance_method", "constructor"}
+    _CALL_TYPES = {"function", "user_function", "user_class", "static_method", "class_method", "instance_method", "constructor"}
 
     def __init__(self, *, binding, params, runtime, label, object_registry=None):
         super().__init__()
@@ -330,9 +377,57 @@ class _APIOperation(nn.Module):
         self.auto_main_input = bool(self.binding.get("auto_main_input", True))
         self.register_result_object = bool(self.binding.get("register_result_object"))
         self.result_output_mode = "passthrough" if str(self.binding.get("result_output_mode") or "result").lower() == "passthrough" else "result"
+        self.multi_output = bool(self.binding.get("multi_output"))
+        self.output_map = deepcopy(self.binding.get("output_map") or {})
+        self.port_mode = "named" if str(self.binding.get("port_mode") or "standard").lower() == "named" else "standard"
+        self.input_ports = deepcopy(self.binding.get("input_ports") or [])
+        self.output_ports = deepcopy(self.binding.get("output_ports") or [])
 
         self.api_target = None
         self.created_object = None
+
+        # User-authored source is embedded in the component/project cache.  It is
+        # compiled in the user's active Python environment.  Third-party imports
+        # are deliberately not installed by Studio; missing libraries produce an
+        # explicit install-the-dependency error instead.
+        if self.call_type in {"user_function", "user_class"}:
+            is_class = self.call_type == "user_class"
+            source_key = "user_class_code" if is_class else "user_code"
+            name_key = "user_class_name" if is_class else "user_function_name"
+            kind_label = "User Class" if is_class else "User Function"
+            source = str(self.binding.get(source_key) or "").strip()
+            entry_name = str(self.binding.get(name_key) or "").strip()
+            if not source:
+                raise ModelCompileError(f"{kind_label} {self.label!r} has no Python source code.")
+            if not entry_name:
+                raise ModelCompileError(f"{kind_label} {self.label!r} has no entry name configured.")
+            namespace = {"torch": torch, "nn": nn}
+            try:
+                exec(compile(source, f"<MLB Studio:{self.label}>", "exec"), namespace, namespace)
+            except ModuleNotFoundError as exc:
+                missing = getattr(exc, "name", None) or str(exc)
+                raise ModelCompileError(
+                    f"{kind_label} {self.label!r} needs dependency {missing!r}. "
+                    f"Install it explicitly in the active Python environment before building this component."
+                ) from exc
+            except Exception as exc:
+                raise ModelCompileError(f"Could not compile {kind_label} {self.label!r}: {exc}") from exc
+            target = namespace.get(entry_name)
+            if not callable(target):
+                raise ModelCompileError(f"{kind_label} {self.label!r} did not define callable {entry_name!r}.")
+            self.api_target = target
+            if is_class:
+                init_specs = [spec for spec in self.parameters if str(spec.get("stage") or "init").lower() == "init"]
+                init_args, init_kwargs = self._build_arguments(init_specs, x=None)
+                try:
+                    instance = target(*init_args, **init_kwargs)
+                except Exception as exc:
+                    raise ModelCompileError(
+                        f"Could not construct user object {self.object_name!r} from class {entry_name!r}: {exc}"
+                    ) from exc
+                self.created_object = instance
+                self.object_registry[self.object_id] = instance
+            return
 
         # Reusing an existing object does not need another import or constructor.
         if self.call_type == "instance_method" and self.object_mode == "existing":
@@ -414,7 +509,7 @@ class _APIOperation(nn.Module):
 
     def _resolve_call_target(self):
         method = str(self.binding.get("call_method") or "").strip()
-        if self.call_type == "function":
+        if self.call_type in {"function", "user_function"}:
             return self.api_target
         if self.call_type in {"static_method", "class_method"}:
             return getattr(self.api_target, method)
@@ -440,11 +535,11 @@ class _APIOperation(nn.Module):
             return instance
         raise ModelCompileError(f"API node {self.label!r} is a constructor and has no call target.")
 
-    def forward(self, x, skip=None, extra=None):
+    def forward(self, x, skip=None, extra=None, named_inputs=None):
         # A constructor is an object-lifecycle node, not a tensor transform.  It
         # creates/registers the object once in __init__ and transparently passes
         # the Main lane through at execution time.
-        if self.call_type == "constructor":
+        if self.call_type in {"constructor", "user_class"}:
             return x
 
         call_specs = [spec for spec in self.parameters if str(spec.get("stage") or "call").lower() == "call"]
@@ -459,6 +554,24 @@ class _APIOperation(nn.Module):
         else:
             args, kwargs = ([x], {}) if self.auto_main_input else ([], {})
 
+        if self.call_type == "user_function" and self.port_mode == "named":
+            named_inputs = dict(named_inputs or {})
+            for port in self.input_ports:
+                port_id = str(port.get("id") or "").strip()
+                port_name = str(port.get("name") or port_id).strip()
+                parameter = str(port.get("parameter") or port_name).strip()
+                if port_id not in named_inputs:
+                    if port.get("required", True):
+                        raise ModelCompileError(
+                            f"User Function {self.label!r} input port {port_name!r} is not connected."
+                        )
+                    continue
+                value = named_inputs[port_id]
+                if bool(port.get("positional")):
+                    args.append(value)
+                else:
+                    kwargs[parameter] = value
+
         target = self._resolve_call_target()
         try:
             out = target(*args, **kwargs)
@@ -469,6 +582,32 @@ class _APIOperation(nn.Module):
             self.object_registry[self.result_object_id] = out
             if self.result_output_mode == "passthrough":
                 return x
+
+        if self.call_type == "user_function" and self.port_mode == "named":
+            mapped = {}
+            ports = self.output_ports or [{"id": "output", "name": "output", "selector": "auto"}]
+            for port in ports:
+                port_id = str(port.get("id") or port.get("name") or "output").strip()
+                selector = port.get("selector", "auto")
+                mapped[port_id] = self._select_output(out, selector)
+            return _APINamedOutputs(mapped)
+
+        if self.multi_output:
+            mapping = self.output_map or {}
+            def selected(lane, default=""):
+                selector = str(mapping.get(lane, default) or "").strip()
+                if not selector:
+                    return None
+                return self._select_output(out, selector)
+            main_value = selected("main", "0")
+            if main_value is None:
+                raise ModelCompileError(f"User/API function {self.label!r} needs a Main output mapping.")
+            return _APILaneOutputs(
+                main=main_value,
+                skip=selected("skip"),
+                extra=selected("extra"),
+            )
+
         return self._select_output(out, self.binding.get("output_selector"))
 
 
@@ -556,16 +695,26 @@ class TensorGraph(nn.Module):
         self.in_main={n["id"]:[] for n in self.nodes}
         self.in_skip={n["id"]:[] for n in self.nodes}
         self.in_extra={n["id"]:[] for n in self.nodes}
+        self.in_main_edges={n["id"]:[] for n in self.nodes}
+        self.in_skip_edges={n["id"]:[] for n in self.nodes}
+        self.in_extra_edges={n["id"]:[] for n in self.nodes}
+        self.in_named={n["id"]:[] for n in self.nodes}
         self.outgoing={n["id"]:[] for n in self.nodes}
         for e in self.edges:
             a,b=e.get("source"),e.get("target")
             if a not in self.by_id or b not in self.by_id: continue
             kind=str(e.get("kind") or "main").lower()
-            if kind in {"residual","skip"}: self.in_skip[b].append(a)
-            elif kind in {"main",""}: self.in_main[b].append(a)
+            target_port=str(e.get("target_port") or "")
+            if kind == "named" or target_port.startswith("named_in:"):
+                self.in_named[b].append(deepcopy(e))
+            elif kind in {"residual","skip"}:
+                self.in_skip[b].append(a);self.in_skip_edges[b].append(deepcopy(e))
+            elif kind in {"main",""}:
+                self.in_main[b].append(a);self.in_main_edges[b].append(deepcopy(e))
             elif kind in {"aux","extra"}:
-                self.in_extra[b].append(a)
-            else: self.in_main[b].append(a)
+                self.in_extra[b].append(a);self.in_extra_edges[b].append(deepcopy(e))
+            else:
+                self.in_main[b].append(a);self.in_main_edges[b].append(deepcopy(e))
             self.outgoing[a].append(b)
         self.mods=nn.ModuleDict()
         for node in self.nodes:
@@ -785,30 +934,54 @@ class TensorGraph(nn.Module):
 
     def forward(self, graph_input, graph_skip=None, graph_extra=None):
         values={}
+        def edge_value(edge, lane):
+            source_id=edge.get("source")
+            source_port=str(edge.get("source_port") or "")
+            if source_port.startswith("named_out:"):
+                return _named_output(values[source_id], source_port.replace("named_out:","",1))
+            return _lane_output(values[source_id], lane)
         for node in self.order:
             nid=node["id"]; t=node.get("type"); mod=self.mods[nid]
-            main_sources=self.in_main[nid]; skip_sources=self.in_skip[nid]; extra_sources=self.in_extra[nid]
+            main_sources=self.in_main[nid]; skip_sources=self.in_skip[nid]; extra_sources=self.in_extra[nid]; named_edges=self.in_named[nid]
+            named_inputs={}
+            for named_edge in named_edges:
+                source_id=named_edge.get("source")
+                source_port=str(named_edge.get("source_port") or "main_out")
+                if source_port.startswith("named_out:"):
+                    source_key=source_port.replace("named_out:","",1)
+                elif "skip" in source_port:
+                    source_key="skip"
+                elif "extra" in source_port:
+                    source_key="extra"
+                else:
+                    source_key="main"
+                target_key=str(named_edge.get("target_port") or "").replace("named_in:","",1)
+                if source_id not in values:
+                    raise ModelCompileError(f"Named input for {node.get('name')} is not available from upstream node {source_id!r}.")
+                named_inputs[target_key]=_named_output(values[source_id],source_key)
             if main_sources:
                 if len(main_sources)!=1: raise ModelCompileError(f"{node.get('name')} has {len(main_sources)} Main inputs; merge execution is not implemented.")
-                x=values[main_sources[0]]
+                x=edge_value(self.in_main_edges[nid][0], "main")
             else: x=graph_input
             if t=="residual":
                 if len(skip_sources)!=1: raise ModelCompileError(f"Residual {node.get('name')} needs exactly one Skip input.")
                 if extra_sources: raise ModelCompileError(f"Residual {node.get('name')} does not accept an Extra input.")
-                y=mod(values[skip_sources[0]],x)
+                y=mod(edge_value(self.in_skip_edges[nid][0], "skip"),x)
             elif t=="api_step":
                 if len(skip_sources)>1 or len(extra_sources)>1:
                     raise ModelCompileError(f"API function {node.get('name')} accepts at most one Skip and one Extra tensor lane.")
-                skip_value=values[skip_sources[0]] if skip_sources else graph_skip
-                extra_value=values[extra_sources[0]] if extra_sources else graph_extra
-                y=mod(x,skip=skip_value,extra=extra_value)
+                skip_value=edge_value(self.in_skip_edges[nid][0], "skip") if skip_sources else graph_skip
+                extra_value=edge_value(self.in_extra_edges[nid][0], "extra") if extra_sources else graph_extra
+                y=mod(x,skip=skip_value,extra=extra_value,named_inputs=named_inputs)
                 repeat=max(1,int(node.get("repeat") or 1))
-                for _ in range(1,repeat): y=mod(y,skip=skip_value,extra=extra_value)
+                if repeat>1 and getattr(mod,"port_mode","standard")=="named":
+                    raise ModelCompileError(f"Named-port User Function {node.get('name')} cannot use Repeat > 1; connect another function node instead.")
+                for _ in range(1,repeat): y=mod(y,skip=skip_value,extra=extra_value,named_inputs=named_inputs)
             elif t=="custom" and str((self.custom_components.get(node.get("definition_id")) or {}).get("implementation") or "graph") == "api":
                 if len(skip_sources)>1 or len(extra_sources)>1:
                     raise ModelCompileError(f"API component {node.get('name')} accepts at most one Skip and one Extra tensor lane.")
-                skip_value=values[skip_sources[0]] if skip_sources else None
-                extra_value=values[extra_sources[0]] if extra_sources else None
+                skip_value=edge_value(self.in_skip_edges[nid][0], "skip") if skip_sources else None
+                extra_value=edge_value(self.in_extra_edges[nid][0], "extra") if extra_sources else None
                 y=mod(x,skip=skip_value,extra=extra_value)
                 repeat=max(1,int(node.get("repeat") or 1))
                 for _ in range(1,repeat): y=mod(y,skip=skip_value,extra=extra_value)
@@ -822,7 +995,7 @@ class TensorGraph(nn.Module):
         sinks=[n for n in self.order if not self.outgoing[n["id"]]]
         if not sinks: raise ModelCompileError("Graph has no output node.")
         if len(sinks)>1: raise ModelCompileError("Training compiler currently requires one tensor output.")
-        return values[sinks[0]["id"]]
+        return _lane_output(values[sinks[0]["id"]], "main")
 
 
 

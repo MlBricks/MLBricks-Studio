@@ -1801,3 +1801,31 @@ Reusable visual custom graphs are now presented as **Modules**. Low-level items 
 - `Add Module` now immediately opens a blank child Module in both Module Editor and API Component Editor.
 - `Done` inserts the child at the selected position; `Cancel` discards the child and restores the parent editor.
 - No picker/overlay or per-layer `+` buttons are used.
+
+## User Defined Functions in API Components
+
+API Components can include a **User Defined Function** node. Write the Python function directly in the Inspector, validate its syntax against the notebook kernel, and connect it to normal MLB Studio components.
+
+A user function may return one value or multiple values. For tuple/list returns, enable **Multiple Outputs** and map return indexes to the visual lanes. Example:
+
+```python
+def split_state(x):
+    main = x
+    skip = x + 1
+    extra = x + 2
+    return main, skip, extra
+```
+
+Map `0` to **Main**, `1` to **Skip**, and `2` to **Extra**. Each lane can then be connected to another MLB Studio/API component. Dictionary keys or object attributes are also accepted as selectors. `torch` and `torch.nn` are available automatically; other installed packages can be imported inside the user function source.
+
+## User-defined source components
+
+MLB Studio API Components can embed **User Defined Function** and **User Defined Class** source code. When a component is saved, Studio stores the source, entry point, detected import dependencies, source revision, and source hash in the component cache and embeds that cache in Gallery/project exports. Reopening or importing the component restores the source automatically.
+
+Third-party Python libraries are **not installed automatically**. The dependency list is validated against the active notebook/local Python environment; install missing packages explicitly before building or running the component.
+
+A User Defined Class node constructs one reusable object instance. Later Instance Method nodes can select that object from the object registry, so stateful objects can be reused across intervening graph operations without recreating the class instance.
+
+### Custom named ports
+
+User Defined Function nodes can use either the standard Main/Skip/Extra interface or **Custom Named Ports**. Named mode allows an arbitrary number of visual inputs and outputs. Each input maps to a Python function parameter; each output maps to `auto`, a tuple/list index, or a dict/object key. Named User Function ports can connect to other named User Functions or directly to standard MLB Studio Main/Skip/Extra ports.
