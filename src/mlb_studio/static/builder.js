@@ -6657,19 +6657,15 @@
         lockToggle.addEventListener("click",toggleLayoutLock);
         toolbar.append(lockToggle);
 
-        if(state.active_workspace==="data"){
+        // Data runtime health/progress belongs only to the Data Processing workspace.
+        // Module/API Component editors may be opened while Data is the active parent
+        // workspace, but they are reusable component editors and should stay clean.
+        if(state.active_workspace==="data" && current(state)?.kind!=="custom_edit"){
+          // Data Processing only needs the notebook/kernel connectivity indicator here.
+          // Progress percentage and prepared-validation summary are shown in their
+          // relevant execution/output views instead of occupying the canvas toolbar.
           const kernel=document.createElement("div");kernel.className="mlb-kernel-badge";
           toolbar.appendChild(kernel);
-          const live=document.createElement("div");live.className="mlb-run-live "+(execution.status||"idle");
-          live.innerHTML="<strong>"+Math.max(0,Math.min(100,Number(execution.overall||0)))+"%</strong><span>"+(execution.message||"Ready")+"</span>";
-          toolbar.appendChild(live);
-          const latest=latestPreparedDataset();
-          if(latest){
-            const ready=document.createElement("div");ready.className="mlb-data-ready-chip";
-            ready.textContent=compactDatasetSummary(latest);
-            ready.title=latest.name+" — latest prepared dataset available to Model Builder Text Input";
-            toolbar.appendChild(ready);
-          }
           requestAnimationFrame(updateKernelBadge);
         }
         const tsp=document.createElement("div");tsp.className="mlb-toolspacer";toolbar.appendChild(tsp);
