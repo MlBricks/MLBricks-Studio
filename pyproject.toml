@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlb-studio"
+version = "1.0.0"
+description = "MLB Studio V1.0 — visual model studio for MLBricks in Jupyter, Kaggle and Colab."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+
+authors = [
+  { name = "Zameer Hussain" },
+  { name = "Akhtar Hussain" }
+]
+
+dependencies = [
+  "ipython>=8",
+  "ipywidgets>=8",
+  "huggingface_hub>=0.24",
+  "mlbricks @ git+https://github.com/MlBricks/MLBricks.git"
+]
+
+[project.urls]
+Homepage = "https://github.com/MlBricks/MLBricks-Studio"
+Repository = "https://github.com/MlBricks/MLBricks-Studio"
+Issues = "https://github.com/MlBricks/MLBricks-Studio/issues"
+License = "https://polyformproject.org/licenses/noncommercial/1.0.0"
+"MLBricks" = "https://github.com/MlBricks/MLBricks"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mlb_studio*"]
+
+[tool.setuptools.package-data]
+mlb_studio = ["static/*.js", "static/*.css", "static/*.png", "*.json"]
+
+
+[project.optional-dependencies]
+data = [
+  "datasets>=2.18",
+  "kagglehub>=0.3",
+  "transformers>=4.40",
+  "pandas>=2",
+  "pyarrow>=15",
+  "pillow>=10",
+  "numpy>=1.26"
+]
+
+cloud = [
+  "boto3>=1.34",
+  "google-cloud-storage>=2.16",
+  "google-auth>=2.29",
+  "azure-storage-blob>=12.20"
+]
+
+serve = [
+  "pyngrok>=7.2"
+]

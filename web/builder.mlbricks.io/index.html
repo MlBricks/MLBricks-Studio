@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MLB Studio V1.0</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;background:#0b1118;color:#dfe7ef;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    body{display:grid;place-items:center}
+    .boot{font-size:14px;color:#8e9baa;letter-spacing:.02em}
+  </style>
+</head>
+<body>
+  <div class="boot">Opening MLB Studio V1.0…</div>
+  <script>
+  (()=>{
+    const params=new URLSearchParams(location.search);
+    const probeToken=params.get("mlb_probe")||"";
+    const ready=()=>{
+      const message={__mlb_studio_launcher__:true,type:"ready"};
+      if(probeToken)message.probe_token=probeToken;
+      try{if(window.opener&&!window.opener.closed)window.opener.postMessage(message,"*");}catch(_){}
+      try{if(window.parent&&window.parent!==window)window.parent.postMessage(message,"*");}catch(_){}
+    };
+    window.addEventListener("message",event=>{
+      const msg=event.data||{};
+      if(msg.__mlb_studio_launcher__!==true||msg.type!=="bootstrap"||typeof msg.html!=="string")return;
+      try{
+        document.open();
+        document.write(msg.html);
+        document.close();
+        document.title=msg.title||"MLB Studio V1.0";
+      }catch(err){document.body.textContent="Could not start MLB Studio V1.0: "+String(err);}
+    });
+    ready();
+    setTimeout(ready,250);
+    setTimeout(ready,800);
+  })();
+  </script>
+</body>
+</html>

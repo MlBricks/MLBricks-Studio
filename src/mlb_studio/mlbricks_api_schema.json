@@ -1,0 +1,2705 @@
+{
+  "schema_version": 1,
+  "mlbricks_version": "1.0.0",
+  "generated_from": "MLBricks-main(2).zip",
+  "components": {
+    "embedding": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "Embedding",
+      "import_path": "mlbricks.components.Embedding",
+      "signature": "Embedding(vocab_size: int, embedding_dim: int)",
+      "description": "A PyTorch embedding table available from the MLBricks namespace.",
+      "parameters": [
+        {
+          "key": "vocab_size",
+          "label": "Vocab Size",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "embedding_dim",
+          "label": "Embedding Dim",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        }
+      ],
+      "import_module": "mlbricks.components",
+      "import_symbol": "Embedding"
+    },
+    "esa": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "ESA",
+      "import_path": "mlbricks.esa.ESA",
+      "signature": "ESA(embd: int, head: int = 4, batch: int | None = None, block: int | None = None, backend: str = 'auto', precision: str = 'fp16', compass: int | str | None = 'auto', dropout: float = 0.0, gate_min: float = 0.8, gate_max: float = 0.995, eps: float = 1e-05, device: str | torch.device | None = 'auto', auto_compile: bool = False, compile_mode: str = 'default', auto_move_input: bool = True, strict_checks: bool = False)",
+      "description": "Public Entangled State Attention sequence-mixing layer.",
+      "parameters": [
+        {
+          "key": "embd",
+          "label": "Embd",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "head",
+          "label": "Head",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int"
+        },
+        {
+          "key": "batch",
+          "label": "Batch",
+          "type": "number",
+          "required": false,
+          "value": null,
+          "annotation": "int | None"
+        },
+        {
+          "key": "block",
+          "label": "Block",
+          "type": "number",
+          "required": false,
+          "value": null,
+          "annotation": "int | None"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        },
+        {
+          "key": "precision",
+          "label": "Precision",
+          "type": "select",
+          "required": false,
+          "value": "fp16",
+          "annotation": "str",
+          "options": [
+            "fp32",
+            "fp16",
+            "bf16"
+          ]
+        },
+        {
+          "key": "compass",
+          "label": "Compass",
+          "type": "number",
+          "required": false,
+          "value": "auto",
+          "annotation": "int | str | None"
+        },
+        {
+          "key": "dropout",
+          "label": "Dropout",
+          "type": "number",
+          "required": false,
+          "value": 0.0,
+          "annotation": "float"
+        },
+        {
+          "key": "gate_min",
+          "label": "Gate Min",
+          "type": "number",
+          "required": false,
+          "value": 0.8,
+          "annotation": "float"
+        },
+        {
+          "key": "gate_max",
+          "label": "Gate Max",
+          "type": "number",
+          "required": false,
+          "value": 0.995,
+          "annotation": "float"
+        },
+        {
+          "key": "eps",
+          "label": "Eps",
+          "type": "number",
+          "required": false,
+          "value": 1e-05,
+          "annotation": "float"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str | torch.device | None",
+          "options": [
+            "auto",
+            "cpu",
+            "cuda",
+            "None"
+          ]
+        },
+        {
+          "key": "auto_compile",
+          "label": "Auto Compile",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        },
+        {
+          "key": "compile_mode",
+          "label": "Compile Mode",
+          "type": "select",
+          "required": false,
+          "value": "default",
+          "annotation": "str",
+          "options": [
+            "default",
+            "reduce-overhead",
+            "max-autotune"
+          ]
+        },
+        {
+          "key": "auto_move_input",
+          "label": "Auto Move Input",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "strict_checks",
+          "label": "Strict Checks",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        }
+      ],
+      "import_module": "mlbricks.esa",
+      "import_symbol": "ESA"
+    },
+    "soup": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 SOUP source schema",
+      "public_name": "SOUP",
+      "import_path": "mlbricks.soup.SOUP",
+      "signature": "SOUP(dim=512, width=1116, depth=2, mixer='esa', ffn='saffn', mixer_config=None, ffn_config=None, backend='auto', precision='fp16', memory_dim=128, fusion_hidden=768)",
+      "description": "State-and-memory architecture with configurable ESA/BOLT mixers, FFNs, observation memory and SOUP fusion.",
+      "parameters": [
+        {
+          "key": "dim",
+          "label": "Model Dim",
+          "type": "number",
+          "required": false,
+          "value": 512,
+          "annotation": "int",
+          "group": "Architecture",
+          "min": 1
+        },
+        {
+          "key": "width",
+          "label": "State Width",
+          "type": "text",
+          "required": false,
+          "value": "1116",
+          "annotation": "int | sequence[int]",
+          "group": "Architecture",
+          "help": "One width for all layers, or comma-separated widths such as 1116,1024."
+        },
+        {
+          "key": "depth",
+          "label": "Depth",
+          "type": "number",
+          "required": false,
+          "value": 2,
+          "annotation": "int",
+          "group": "Architecture",
+          "min": 1
+        },
+        {
+          "key": "mixer",
+          "label": "Mixer",
+          "type": "text",
+          "required": false,
+          "value": "esa",
+          "annotation": "str | sequence",
+          "group": "Layer Routing",
+          "help": "Use esa or bolt globally, or comma-separated per-layer mixers such as esa,bolt."
+        },
+        {
+          "key": "ffn",
+          "label": "FFN",
+          "type": "text",
+          "required": false,
+          "value": "saffn",
+          "annotation": "str | sequence",
+          "group": "Layer Routing",
+          "help": "Use saffn or ffn globally, or comma-separated per-layer values."
+        },
+        {
+          "key": "mixer_config",
+          "label": "Mixer Config",
+          "type": "textarea",
+          "required": false,
+          "value": "{\"head\":8,\"num_heads\":8}",
+          "annotation": "mapping | sequence[mapping] | None",
+          "group": "Layer Routing",
+          "help": "JSON object applied to every layer, or a JSON list with one config per layer. head is used by ESA; num_heads by BOLT."
+        },
+        {
+          "key": "ffn_config",
+          "label": "FFN Config",
+          "type": "textarea",
+          "required": false,
+          "value": "{}",
+          "annotation": "mapping | sequence[mapping] | None",
+          "group": "Layer Routing",
+          "help": "JSON object applied to every layer, or one config object per layer."
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ],
+          "group": "Runtime"
+        },
+        {
+          "key": "precision",
+          "label": "Precision",
+          "type": "select",
+          "required": false,
+          "value": "fp16",
+          "annotation": "str",
+          "options": [
+            "fp32",
+            "fp16",
+            "bf16"
+          ],
+          "group": "Runtime"
+        },
+        {
+          "key": "memory_dim",
+          "label": "Observer Memory Dim",
+          "type": "number",
+          "required": false,
+          "value": 128,
+          "annotation": "int",
+          "group": "Memory & Fusion",
+          "min": 1
+        },
+        {
+          "key": "fusion_hidden",
+          "label": "Fusion Hidden",
+          "type": "number",
+          "required": false,
+          "value": 768,
+          "annotation": "int",
+          "group": "Memory & Fusion",
+          "min": 1
+        }
+      ],
+      "import_module": "mlbricks.soup",
+      "import_symbol": "SOUP"
+    },
+    "bolt": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "Bolt",
+      "import_path": "mlbricks.bolt.Bolt",
+      "signature": "Bolt(d_model: int, num_heads: int, latent_dim: int = 32, bias: bool = False, dropout: float = 0.0, causal: bool = True, backend: str = 'auto', autotune_kernels: bool = True, eps: float = 1e-06, use_sdpa: bool = True, position=None, native_full_sequence: bool = False)",
+      "description": "Routed gated shared-latent Bolt attention.",
+      "parameters": [
+        {
+          "key": "d_model",
+          "label": "D Model",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "num_heads",
+          "label": "Num Heads",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "latent_dim",
+          "label": "Latent Dim",
+          "type": "number",
+          "required": false,
+          "value": 32,
+          "annotation": "int"
+        },
+        {
+          "key": "bias",
+          "label": "Bias",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        },
+        {
+          "key": "dropout",
+          "label": "Dropout",
+          "type": "number",
+          "required": false,
+          "value": 0.0,
+          "annotation": "float"
+        },
+        {
+          "key": "causal",
+          "label": "Causal",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        },
+        {
+          "key": "autotune_kernels",
+          "label": "Autotune Kernels",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "eps",
+          "label": "Eps",
+          "type": "number",
+          "required": false,
+          "value": 1e-06,
+          "annotation": "float"
+        },
+        {
+          "key": "use_sdpa",
+          "label": "Use Sdpa",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "position",
+          "label": "Position",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "",
+          "options": [
+            "none",
+            "auto",
+            "learned",
+            "sinusoidal",
+            "rope"
+          ]
+        },
+        {
+          "key": "native_full_sequence",
+          "label": "Native Full Sequence",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        }
+      ],
+      "import_module": "mlbricks.bolt",
+      "import_symbol": "Bolt"
+    },
+    "ffn": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "FFN",
+      "import_path": "mlbricks.components.FFN",
+      "signature": "FFN(hidden_size: int, intermediate_size: int | None = None, activation: ActivationLike = 'gelu', dropout: float = 0.0, bias: bool = True, gated: bool = False, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
+      "description": "PyTorch-native feed-forward network.",
+      "parameters": [
+        {
+          "key": "hidden_size",
+          "label": "Hidden Size",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "intermediate_size",
+          "label": "Intermediate Size",
+          "type": "number",
+          "required": false,
+          "value": null,
+          "annotation": "int | None"
+        },
+        {
+          "key": "activation",
+          "label": "Activation",
+          "type": "select",
+          "required": false,
+          "value": "gelu",
+          "annotation": "ActivationLike",
+          "options": [
+            "gelu",
+            "gelu_tanh",
+            "relu",
+            "silu",
+            "swish",
+            "tanh"
+          ]
+        },
+        {
+          "key": "dropout",
+          "label": "Dropout",
+          "type": "number",
+          "required": false,
+          "value": 0.0,
+          "annotation": "float"
+        },
+        {
+          "key": "bias",
+          "label": "Bias",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "gated",
+          "label": "Gated",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.device | str | None",
+          "options": [
+            "auto",
+            "cpu",
+            "cuda",
+            "None"
+          ]
+        },
+        {
+          "key": "dtype",
+          "label": "Dtype",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.dtype | None",
+          "options": [
+            "None",
+            "torch.float16",
+            "torch.bfloat16",
+            "torch.float32"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.components",
+      "import_symbol": "FFN"
+    },
+    "saffn": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "StateAwareFFN",
+      "import_path": "mlbricks.ffnbrick.StateAwareFFN",
+      "signature": "StateAwareFFN(d_model: int, state_dim: int = 256, depth_embedding_dim: int = 64, layer_index: int = 0, total_layers: int = 1, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
+      "description": "ESA-conditioned recurrent feature network across physical depth.",
+      "parameters": [
+        {
+          "key": "d_model",
+          "label": "D Model",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "state_dim",
+          "label": "State Dim",
+          "type": "number",
+          "required": false,
+          "value": 256,
+          "annotation": "int"
+        },
+        {
+          "key": "depth_embedding_dim",
+          "label": "Depth Embedding Dim",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "layer_index",
+          "label": "Layer Index",
+          "type": "number",
+          "required": false,
+          "value": 0,
+          "annotation": "int"
+        },
+        {
+          "key": "total_layers",
+          "label": "Total Layers",
+          "type": "number",
+          "required": false,
+          "value": 1,
+          "annotation": "int"
+        },
+        {
+          "key": "use_native",
+          "label": "Use Native",
+          "type": "bool",
+          "required": false,
+          "value": null,
+          "annotation": "bool | None"
+        },
+        {
+          "key": "fused_cuda",
+          "label": "Fused Cuda",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.ffnbrick",
+      "import_symbol": "StateAwareFFN"
+    },
+    "micro_ffn": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "MicroVirtualFFN",
+      "import_path": "mlbricks.ffnbrick.MicroVirtualFFN",
+      "signature": "MicroVirtualFFN(d_model: int, hidden_dim: int = 64, refinements: int = 1, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
+      "description": "Pass-specific gated Micro-FFN for lightweight virtual refinement.",
+      "parameters": [
+        {
+          "key": "d_model",
+          "label": "D Model",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "hidden_dim",
+          "label": "Hidden Dim",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "refinements",
+          "label": "Refinements",
+          "type": "number",
+          "required": false,
+          "value": 1,
+          "annotation": "int"
+        },
+        {
+          "key": "use_native",
+          "label": "Use Native",
+          "type": "bool",
+          "required": false,
+          "value": null,
+          "annotation": "bool | None"
+        },
+        {
+          "key": "fused_cuda",
+          "label": "Fused Cuda",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.ffnbrick",
+      "import_symbol": "MicroVirtualFFN"
+    },
+    "virtual_saffn": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "VirtualStateAwareFFN",
+      "import_path": "mlbricks.ffnbrick.VirtualStateAwareFFN",
+      "signature": "VirtualStateAwareFFN(d_model: int, state_dim: int = 256, depth_embedding_dim: int = 64, layer_index: int = 0, total_layers: int = 1, virtual_refinements: int = 2, virtual_hidden_dim: int = 128, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
+      "description": "ESA-State-Aware FFN with shared condition-aware virtual state passes.",
+      "parameters": [
+        {
+          "key": "d_model",
+          "label": "D Model",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "state_dim",
+          "label": "State Dim",
+          "type": "number",
+          "required": false,
+          "value": 256,
+          "annotation": "int"
+        },
+        {
+          "key": "depth_embedding_dim",
+          "label": "Depth Embedding Dim",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "layer_index",
+          "label": "Layer Index",
+          "type": "number",
+          "required": false,
+          "value": 0,
+          "annotation": "int"
+        },
+        {
+          "key": "total_layers",
+          "label": "Total Layers",
+          "type": "number",
+          "required": false,
+          "value": 1,
+          "annotation": "int"
+        },
+        {
+          "key": "virtual_refinements",
+          "label": "Virtual Refinements",
+          "type": "number",
+          "required": false,
+          "value": 2,
+          "annotation": "int"
+        },
+        {
+          "key": "virtual_hidden_dim",
+          "label": "Virtual Hidden Dim",
+          "type": "number",
+          "required": false,
+          "value": 128,
+          "annotation": "int"
+        },
+        {
+          "key": "use_native",
+          "label": "Use Native",
+          "type": "bool",
+          "required": false,
+          "value": null,
+          "annotation": "bool | None"
+        },
+        {
+          "key": "fused_cuda",
+          "label": "Fused Cuda",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.ffnbrick",
+      "import_symbol": "VirtualStateAwareFFN"
+    },
+    "rmsnorm": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "RMSNorm",
+      "import_path": "mlbricks.components.RMSNorm",
+      "signature": "RMSNorm(normalized_shape: int | Sequence[int], eps: float = 1e-06, elementwise_affine: bool = True, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
+      "description": "Portable PyTorch RMS normalization with optional affine weight.",
+      "parameters": [
+        {
+          "key": "normalized_shape",
+          "label": "Normalized Shape",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int | Sequence[int]"
+        },
+        {
+          "key": "eps",
+          "label": "Eps",
+          "type": "number",
+          "required": false,
+          "value": 1e-06,
+          "annotation": "float"
+        },
+        {
+          "key": "elementwise_affine",
+          "label": "Elementwise Affine",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.device | str | None",
+          "options": [
+            "auto",
+            "cpu",
+            "cuda",
+            "None"
+          ]
+        },
+        {
+          "key": "dtype",
+          "label": "Dtype",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.dtype | None",
+          "options": [
+            "None",
+            "torch.float16",
+            "torch.bfloat16",
+            "torch.float32"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.components",
+      "import_symbol": "RMSNorm"
+    },
+    "layernorm": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "LayerNorm",
+      "import_path": "mlbricks.components.LayerNorm",
+      "signature": "LayerNorm(normalized_shape: int | Sequence[int], eps: float = 1e-05, elementwise_affine: bool = True, bias: bool = True, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
+      "description": "PyTorch functional LayerNorm with optional bias across Torch versions.",
+      "parameters": [
+        {
+          "key": "normalized_shape",
+          "label": "Normalized Shape",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int | Sequence[int]"
+        },
+        {
+          "key": "eps",
+          "label": "Eps",
+          "type": "number",
+          "required": false,
+          "value": 1e-05,
+          "annotation": "float"
+        },
+        {
+          "key": "elementwise_affine",
+          "label": "Elementwise Affine",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "bias",
+          "label": "Bias",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.device | str | None",
+          "options": [
+            "auto",
+            "cpu",
+            "cuda",
+            "None"
+          ]
+        },
+        {
+          "key": "dtype",
+          "label": "Dtype",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.dtype | None",
+          "options": [
+            "None",
+            "torch.float16",
+            "torch.bfloat16",
+            "torch.float32"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.components",
+      "import_symbol": "LayerNorm"
+    },
+    "residual": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "Residual",
+      "import_path": "mlbricks.components.Residual",
+      "signature": "Residual(dropout: float = 0.0)",
+      "description": "Add a residual update, optionally applying PyTorch dropout first.",
+      "parameters": [
+        {
+          "key": "dropout",
+          "label": "Dropout",
+          "type": "number",
+          "required": false,
+          "value": 0.0,
+          "annotation": "float"
+        }
+      ],
+      "import_module": "mlbricks.components",
+      "import_symbol": "Residual"
+    },
+    "rescontroller": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "ResController",
+      "import_path": "mlbricks.residualbrick.ResController",
+      "signature": "ResController(update_ratio: float, stream_ratio: float = 1.08, update_softness: float = 8.0, stream_softness: float = 8.0, eps: float = 1e-12, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
+      "description": "Adaptively control update energy and residual-stream growth.",
+      "parameters": [
+        {
+          "key": "update_ratio",
+          "label": "Update Ratio",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "float"
+        },
+        {
+          "key": "stream_ratio",
+          "label": "Stream Ratio",
+          "type": "number",
+          "required": false,
+          "value": 1.08,
+          "annotation": "float"
+        },
+        {
+          "key": "update_softness",
+          "label": "Update Softness",
+          "type": "number",
+          "required": false,
+          "value": 8.0,
+          "annotation": "float"
+        },
+        {
+          "key": "stream_softness",
+          "label": "Stream Softness",
+          "type": "number",
+          "required": false,
+          "value": 8.0,
+          "annotation": "float"
+        },
+        {
+          "key": "eps",
+          "label": "Eps",
+          "type": "number",
+          "required": false,
+          "value": 1e-12,
+          "annotation": "float"
+        },
+        {
+          "key": "use_native",
+          "label": "Use Native",
+          "type": "bool",
+          "required": false,
+          "value": null,
+          "annotation": "bool | None"
+        },
+        {
+          "key": "fused_cuda",
+          "label": "Fused Cuda",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.residualbrick",
+      "import_symbol": "ResController"
+    },
+    "lm_head": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema + Builder module-reference binding",
+      "public_name": "LMHead",
+      "import_path": "mlbricks.components.LMHead",
+      "signature": "LMHead(hidden_size: int, vocab_size: int, bias: bool = False, tie_to: nn.Module | None = None, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
+      "description": "PyTorch linear output projection for language-model logits.",
+      "parameters": [
+        {
+          "key": "hidden_size",
+          "label": "Hidden Size",
+          "type": "number",
+          "required": true,
+          "value": 384,
+          "annotation": "int",
+          "min": 1
+        },
+        {
+          "key": "vocab_size",
+          "label": "Vocab Size",
+          "type": "number",
+          "required": true,
+          "value": 50257,
+          "annotation": "int",
+          "min": 1
+        },
+        {
+          "key": "bias",
+          "label": "Bias",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        },
+        {
+          "key": "tie_embeddings",
+          "label": "Tie To Upstream Embedding",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "Builder binding for LMHead.tie_to",
+          "help": "Uses MLBricks LMHead.tie_weights() with the nearest compatible upstream Embedding."
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.device | str | None",
+          "options": [
+            "auto",
+            "cpu",
+            "cuda",
+            "None"
+          ]
+        },
+        {
+          "key": "dtype",
+          "label": "Dtype",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.dtype | None",
+          "options": [
+            "None",
+            "torch.float16",
+            "torch.bfloat16",
+            "torch.float32"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.components",
+      "import_symbol": "LMHead"
+    },
+    "elasticbit_runtime": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 ElasticBit native 4\u201332 source schema",
+      "public_name": "ElasticBit",
+      "import_path": "mlbricks.elasticbit.ElasticBit",
+      "signature": "ElasticBit.RuntimeMatrix.from_auto(weights, calibration, threshold=0.01, runtime_mode='compact', min_bits=4, max_bits=32)",
+      "description": "Adaptive 4\u201332-bit CUDA matrix runtime. Analyzes calibration error, selects the smallest acceptable storage width, and runs compact or widened fast execution.",
+      "parameters": [
+        {
+          "key": "threshold",
+          "label": "Error Threshold",
+          "type": "number",
+          "required": false,
+          "value": 0.01,
+          "annotation": "float",
+          "group": "Adaptive Precision",
+          "min": 0.0,
+          "help": "Maximum accepted calibration error when choosing the storage width."
+        },
+        {
+          "key": "min_bits",
+          "label": "Minimum Bits",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int",
+          "group": "Adaptive Precision",
+          "min": 4,
+          "max": 32
+        },
+        {
+          "key": "max_bits",
+          "label": "Maximum Bits",
+          "type": "number",
+          "required": false,
+          "value": 32,
+          "annotation": "int",
+          "group": "Adaptive Precision",
+          "min": 4,
+          "max": 32
+        },
+        {
+          "key": "runtime_mode",
+          "label": "Runtime Mode",
+          "type": "select",
+          "required": false,
+          "value": "compact",
+          "annotation": "str",
+          "options": [
+            "compact",
+            "fast"
+          ],
+          "group": "Execution",
+          "help": "compact keeps exact packed storage on GPU; fast widens to the selected compute bucket for execution."
+        }
+      ],
+      "native_only": true,
+      "import_module": "mlbricks.elasticbit",
+      "import_symbol": "ElasticBit"
+    },
+    "rope": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "RoPE",
+      "import_path": "mlbricks.position.RoPE",
+      "signature": "RoPE(dim: int | None = None, base: float = 10000.0)",
+      "description": "Rotary position transform for Q/K-like tensors ``[B,H,T,D]``.",
+      "parameters": [
+        {
+          "key": "dim",
+          "label": "Dim",
+          "type": "number",
+          "required": false,
+          "value": null,
+          "annotation": "int | None"
+        },
+        {
+          "key": "base",
+          "label": "Base",
+          "type": "number",
+          "required": false,
+          "value": 10000.0,
+          "annotation": "float"
+        }
+      ],
+      "import_module": "mlbricks.position",
+      "import_symbol": "RoPE"
+    },
+    "learned_position": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "LearnedPosition",
+      "import_path": "mlbricks.position.LearnedPosition",
+      "signature": "LearnedPosition(dim: int, max_seq_len: int)",
+      "description": "Learned additive positional embedding.",
+      "parameters": [
+        {
+          "key": "dim",
+          "label": "Dim",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "max_seq_len",
+          "label": "Max Seq Len",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        }
+      ],
+      "import_module": "mlbricks.position",
+      "import_symbol": "LearnedPosition"
+    },
+    "sinusoidal_position": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "SinusoidalPosition",
+      "import_path": "mlbricks.position.SinusoidalPosition",
+      "signature": "SinusoidalPosition(dim: int, max_seq_len: int = 65536, base: float = 10000.0)",
+      "description": "Deterministic additive sinusoidal positional encoding.",
+      "parameters": [
+        {
+          "key": "dim",
+          "label": "Dim",
+          "type": "number",
+          "required": true,
+          "value": null,
+          "annotation": "int"
+        },
+        {
+          "key": "max_seq_len",
+          "label": "Max Seq Len",
+          "type": "number",
+          "required": false,
+          "value": 65536,
+          "annotation": "int"
+        },
+        {
+          "key": "base",
+          "label": "Base",
+          "type": "number",
+          "required": false,
+          "value": 10000.0,
+          "annotation": "float"
+        }
+      ],
+      "import_module": "mlbricks.position",
+      "import_symbol": "SinusoidalPosition"
+    },
+    "vesa": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "Vesa",
+      "import_path": "mlbricks.vesa.Vesa",
+      "signature": "Vesa(config: VesaConfig | VisionConfig | None = None, **kwargs)",
+      "description": "Unified ESA vision family selected by ``engine=``.",
+      "parameters": [
+        {
+          "key": "image_size",
+          "label": "Image Size",
+          "type": "number",
+          "required": false,
+          "value": 32,
+          "annotation": "int"
+        },
+        {
+          "key": "patch_size",
+          "label": "Patch Size",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int"
+        },
+        {
+          "key": "in_channels",
+          "label": "In Channels",
+          "type": "number",
+          "required": false,
+          "value": 3,
+          "annotation": "int"
+        },
+        {
+          "key": "num_classes",
+          "label": "Num Classes",
+          "type": "number",
+          "required": false,
+          "value": 10,
+          "annotation": "int"
+        },
+        {
+          "key": "dim",
+          "label": "Dim",
+          "type": "number",
+          "required": false,
+          "value": 192,
+          "annotation": "int"
+        },
+        {
+          "key": "depth",
+          "label": "Depth",
+          "type": "number",
+          "required": false,
+          "value": 6,
+          "annotation": "int"
+        },
+        {
+          "key": "mlp_mult",
+          "label": "Mlp Mult",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "FullBackend",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        },
+        {
+          "key": "chunk_size",
+          "label": "Chunk Size",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "perspective_groups",
+          "label": "Perspective Groups",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int"
+        },
+        {
+          "key": "local_kernel_size",
+          "label": "Local Kernel Size",
+          "type": "number",
+          "required": false,
+          "value": 3,
+          "annotation": "int"
+        },
+        {
+          "key": "serpentine",
+          "label": "Serpentine",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "alternating_reverse",
+          "label": "Alternating Reverse",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        },
+        {
+          "key": "engine",
+          "label": "Engine",
+          "type": "select",
+          "required": false,
+          "value": "Serpentine",
+          "annotation": "str",
+          "options": [
+            "Serpentine",
+            "ViT",
+            "CNN",
+            "Diffusion",
+            "AR"
+          ]
+        },
+        {
+          "key": "position",
+          "label": "Position",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str | None",
+          "options": [
+            "none",
+            "auto",
+            "learned",
+            "sinusoidal",
+            "rope"
+          ]
+        },
+        {
+          "key": "scan",
+          "label": "Scan",
+          "type": "select",
+          "required": false,
+          "value": "cross",
+          "annotation": "str",
+          "options": [
+            "cross",
+            "raster",
+            "serpentine"
+          ]
+        },
+        {
+          "key": "vocab_size",
+          "label": "Vocab Size",
+          "type": "number",
+          "required": false,
+          "value": 8192,
+          "annotation": "int"
+        },
+        {
+          "key": "heads",
+          "label": "Heads",
+          "type": "number",
+          "required": false,
+          "value": 6,
+          "annotation": "int"
+        },
+        {
+          "key": "latent_dim",
+          "label": "Latent Dim",
+          "type": "number",
+          "required": false,
+          "value": 32,
+          "annotation": "int"
+        },
+        {
+          "key": "tie_embeddings",
+          "label": "Tie Embeddings",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "ffn",
+          "label": "Ffn",
+          "type": "select",
+          "required": false,
+          "value": "standard",
+          "annotation": "str",
+          "options": [
+            "standard",
+            "ffnbrick",
+            "virtual_ffnbrick",
+            "micro_ffnbrick"
+          ]
+        },
+        {
+          "key": "residual",
+          "label": "Residual",
+          "type": "select",
+          "required": false,
+          "value": "standard",
+          "annotation": "str",
+          "options": [
+            "standard",
+            "rescontroller"
+          ]
+        },
+        {
+          "key": "ffn_state_dim",
+          "label": "Ffn State Dim",
+          "type": "number",
+          "required": false,
+          "value": 256,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_depth_embedding_dim",
+          "label": "Ffn Depth Embedding Dim",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_virtual_refinements",
+          "label": "Ffn Virtual Refinements",
+          "type": "number",
+          "required": false,
+          "value": 2,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_virtual_hidden_dim",
+          "label": "Ffn Virtual Hidden Dim",
+          "type": "number",
+          "required": false,
+          "value": 128,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_micro_hidden_dim",
+          "label": "Ffn Micro Hidden Dim",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_micro_refinements",
+          "label": "Ffn Micro Refinements",
+          "type": "number",
+          "required": false,
+          "value": 1,
+          "annotation": "int"
+        },
+        {
+          "key": "residual_update_ratio",
+          "label": "Residual Update Ratio",
+          "type": "number",
+          "required": false,
+          "value": 0.18,
+          "annotation": "float"
+        },
+        {
+          "key": "residual_stream_ratio",
+          "label": "Residual Stream Ratio",
+          "type": "number",
+          "required": false,
+          "value": 1.08,
+          "annotation": "float"
+        },
+        {
+          "key": "residual_update_softness",
+          "label": "Residual Update Softness",
+          "type": "number",
+          "required": false,
+          "value": 8.0,
+          "annotation": "float"
+        },
+        {
+          "key": "residual_stream_softness",
+          "label": "Residual Stream Softness",
+          "type": "number",
+          "required": false,
+          "value": 8.0,
+          "annotation": "float"
+        }
+      ],
+      "config_api": {
+        "public_name": "VesaConfig",
+        "signature": "VesaConfig(image_size: int = 32, patch_size: int = 4, in_channels: int = 3, num_classes: int = 10, dim: int = 192, depth: int = 6, mlp_mult: int = 4, backend: FullBackend = 'auto', chunk_size: int = 64, perspective_groups: int = 4, local_kernel_size: int = 3, serpentine: bool = True, alternating_reverse: bool = False, engine: str = 'Serpentine', position: str | None = 'auto', scan: str = 'cross', vocab_size: int = 8192, heads: int = 6, latent_dim: int = 32, tie_embeddings: bool = True, ffn: str = 'standard', residual: str = 'standard', ffn_state_dim: int = 256, ffn_depth_embedding_dim: int = 64, ffn_virtual_refinements: int = 2, ffn_virtual_hidden_dim: int = 128, ffn_micro_hidden_dim: int = 64, ffn_micro_refinements: int = 1, residual_update_ratio: float = 0.18, residual_stream_ratio: float = 1.08, residual_update_softness: float = 8.0, residual_stream_softness: float = 8.0)",
+        "parameters": [
+          {
+            "key": "image_size",
+            "label": "Image Size",
+            "type": "number",
+            "required": false,
+            "value": 32,
+            "annotation": "int"
+          },
+          {
+            "key": "patch_size",
+            "label": "Patch Size",
+            "type": "number",
+            "required": false,
+            "value": 4,
+            "annotation": "int"
+          },
+          {
+            "key": "in_channels",
+            "label": "In Channels",
+            "type": "number",
+            "required": false,
+            "value": 3,
+            "annotation": "int"
+          },
+          {
+            "key": "num_classes",
+            "label": "Num Classes",
+            "type": "number",
+            "required": false,
+            "value": 10,
+            "annotation": "int"
+          },
+          {
+            "key": "dim",
+            "label": "Dim",
+            "type": "number",
+            "required": false,
+            "value": 192,
+            "annotation": "int"
+          },
+          {
+            "key": "depth",
+            "label": "Depth",
+            "type": "number",
+            "required": false,
+            "value": 6,
+            "annotation": "int"
+          },
+          {
+            "key": "mlp_mult",
+            "label": "Mlp Mult",
+            "type": "number",
+            "required": false,
+            "value": 4,
+            "annotation": "int"
+          },
+          {
+            "key": "backend",
+            "label": "Backend",
+            "type": "select",
+            "required": false,
+            "value": "auto",
+            "annotation": "FullBackend",
+            "options": [
+              "auto",
+              "native",
+              "pytorch"
+            ]
+          },
+          {
+            "key": "chunk_size",
+            "label": "Chunk Size",
+            "type": "number",
+            "required": false,
+            "value": 64,
+            "annotation": "int"
+          },
+          {
+            "key": "perspective_groups",
+            "label": "Perspective Groups",
+            "type": "number",
+            "required": false,
+            "value": 4,
+            "annotation": "int"
+          },
+          {
+            "key": "local_kernel_size",
+            "label": "Local Kernel Size",
+            "type": "number",
+            "required": false,
+            "value": 3,
+            "annotation": "int"
+          },
+          {
+            "key": "serpentine",
+            "label": "Serpentine",
+            "type": "bool",
+            "required": false,
+            "value": true,
+            "annotation": "bool"
+          },
+          {
+            "key": "alternating_reverse",
+            "label": "Alternating Reverse",
+            "type": "bool",
+            "required": false,
+            "value": false,
+            "annotation": "bool"
+          },
+          {
+            "key": "engine",
+            "label": "Engine",
+            "type": "select",
+            "required": false,
+            "value": "Serpentine",
+            "annotation": "str",
+            "options": [
+              "Serpentine",
+              "ViT",
+              "CNN",
+              "Diffusion",
+              "AR"
+            ]
+          },
+          {
+            "key": "position",
+            "label": "Position",
+            "type": "select",
+            "required": false,
+            "value": "auto",
+            "annotation": "str | None",
+            "options": [
+              "none",
+              "auto",
+              "learned",
+              "sinusoidal",
+              "rope"
+            ]
+          },
+          {
+            "key": "scan",
+            "label": "Scan",
+            "type": "select",
+            "required": false,
+            "value": "cross",
+            "annotation": "str",
+            "options": [
+              "cross",
+              "raster",
+              "serpentine"
+            ]
+          },
+          {
+            "key": "vocab_size",
+            "label": "Vocab Size",
+            "type": "number",
+            "required": false,
+            "value": 8192,
+            "annotation": "int"
+          },
+          {
+            "key": "heads",
+            "label": "Heads",
+            "type": "number",
+            "required": false,
+            "value": 6,
+            "annotation": "int"
+          },
+          {
+            "key": "latent_dim",
+            "label": "Latent Dim",
+            "type": "number",
+            "required": false,
+            "value": 32,
+            "annotation": "int"
+          },
+          {
+            "key": "tie_embeddings",
+            "label": "Tie Embeddings",
+            "type": "bool",
+            "required": false,
+            "value": true,
+            "annotation": "bool"
+          },
+          {
+            "key": "ffn",
+            "label": "Ffn",
+            "type": "select",
+            "required": false,
+            "value": "standard",
+            "annotation": "str",
+            "options": [
+              "standard",
+              "ffnbrick",
+              "virtual_ffnbrick",
+              "micro_ffnbrick"
+            ]
+          },
+          {
+            "key": "residual",
+            "label": "Residual",
+            "type": "select",
+            "required": false,
+            "value": "standard",
+            "annotation": "str",
+            "options": [
+              "standard",
+              "rescontroller"
+            ]
+          },
+          {
+            "key": "ffn_state_dim",
+            "label": "Ffn State Dim",
+            "type": "number",
+            "required": false,
+            "value": 256,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_depth_embedding_dim",
+            "label": "Ffn Depth Embedding Dim",
+            "type": "number",
+            "required": false,
+            "value": 64,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_virtual_refinements",
+            "label": "Ffn Virtual Refinements",
+            "type": "number",
+            "required": false,
+            "value": 2,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_virtual_hidden_dim",
+            "label": "Ffn Virtual Hidden Dim",
+            "type": "number",
+            "required": false,
+            "value": 128,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_micro_hidden_dim",
+            "label": "Ffn Micro Hidden Dim",
+            "type": "number",
+            "required": false,
+            "value": 64,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_micro_refinements",
+            "label": "Ffn Micro Refinements",
+            "type": "number",
+            "required": false,
+            "value": 1,
+            "annotation": "int"
+          },
+          {
+            "key": "residual_update_ratio",
+            "label": "Residual Update Ratio",
+            "type": "number",
+            "required": false,
+            "value": 0.18,
+            "annotation": "float"
+          },
+          {
+            "key": "residual_stream_ratio",
+            "label": "Residual Stream Ratio",
+            "type": "number",
+            "required": false,
+            "value": 1.08,
+            "annotation": "float"
+          },
+          {
+            "key": "residual_update_softness",
+            "label": "Residual Update Softness",
+            "type": "number",
+            "required": false,
+            "value": 8.0,
+            "annotation": "float"
+          },
+          {
+            "key": "residual_stream_softness",
+            "label": "Residual Stream Softness",
+            "type": "number",
+            "required": false,
+            "value": 8.0,
+            "annotation": "float"
+          }
+        ],
+        "import_path": "mlbricks.vesa.VesaConfig",
+        "import_module": "mlbricks.vesa",
+        "import_symbol": "VesaConfig"
+      },
+      "import_module": "mlbricks.vesa",
+      "import_symbol": "Vesa"
+    },
+    "visualbolt": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "VisionBolt",
+      "import_path": "mlbricks.visionbolt.VisionBolt",
+      "signature": "VisionBolt(config: VisionBoltConfig | VisionConfig | None = None, **kwargs)",
+      "description": "Unified Bolt image family selected by ``engine=``.",
+      "parameters": [
+        {
+          "key": "image_size",
+          "label": "Image Size",
+          "type": "number",
+          "required": false,
+          "value": 32,
+          "annotation": "int"
+        },
+        {
+          "key": "patch_size",
+          "label": "Patch Size",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int"
+        },
+        {
+          "key": "in_channels",
+          "label": "In Channels",
+          "type": "number",
+          "required": false,
+          "value": 3,
+          "annotation": "int"
+        },
+        {
+          "key": "num_classes",
+          "label": "Num Classes",
+          "type": "number",
+          "required": false,
+          "value": 10,
+          "annotation": "int"
+        },
+        {
+          "key": "dim",
+          "label": "Dim",
+          "type": "number",
+          "required": false,
+          "value": 192,
+          "annotation": "int"
+        },
+        {
+          "key": "depth",
+          "label": "Depth",
+          "type": "number",
+          "required": false,
+          "value": 6,
+          "annotation": "int"
+        },
+        {
+          "key": "mlp_mult",
+          "label": "Mlp Mult",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int"
+        },
+        {
+          "key": "backend",
+          "label": "Backend",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "FullBackend",
+          "options": [
+            "auto",
+            "native",
+            "pytorch"
+          ]
+        },
+        {
+          "key": "chunk_size",
+          "label": "Chunk Size",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "perspective_groups",
+          "label": "Perspective Groups",
+          "type": "number",
+          "required": false,
+          "value": 4,
+          "annotation": "int"
+        },
+        {
+          "key": "local_kernel_size",
+          "label": "Local Kernel Size",
+          "type": "number",
+          "required": false,
+          "value": 3,
+          "annotation": "int"
+        },
+        {
+          "key": "serpentine",
+          "label": "Serpentine",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "alternating_reverse",
+          "label": "Alternating Reverse",
+          "type": "bool",
+          "required": false,
+          "value": false,
+          "annotation": "bool"
+        },
+        {
+          "key": "engine",
+          "label": "Engine",
+          "type": "select",
+          "required": false,
+          "value": "Serpentine",
+          "annotation": "str",
+          "options": [
+            "Serpentine",
+            "ViT",
+            "CNN",
+            "Diffusion",
+            "AR"
+          ]
+        },
+        {
+          "key": "position",
+          "label": "Position",
+          "type": "select",
+          "required": false,
+          "value": "auto",
+          "annotation": "str | None",
+          "options": [
+            "none",
+            "auto",
+            "learned",
+            "sinusoidal",
+            "rope"
+          ]
+        },
+        {
+          "key": "scan",
+          "label": "Scan",
+          "type": "select",
+          "required": false,
+          "value": "cross",
+          "annotation": "str",
+          "options": [
+            "cross",
+            "raster",
+            "serpentine"
+          ]
+        },
+        {
+          "key": "vocab_size",
+          "label": "Vocab Size",
+          "type": "number",
+          "required": false,
+          "value": 8192,
+          "annotation": "int"
+        },
+        {
+          "key": "heads",
+          "label": "Heads",
+          "type": "number",
+          "required": false,
+          "value": 6,
+          "annotation": "int"
+        },
+        {
+          "key": "latent_dim",
+          "label": "Latent Dim",
+          "type": "number",
+          "required": false,
+          "value": 32,
+          "annotation": "int"
+        },
+        {
+          "key": "tie_embeddings",
+          "label": "Tie Embeddings",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "ffn",
+          "label": "Ffn",
+          "type": "select",
+          "required": false,
+          "value": "standard",
+          "annotation": "str",
+          "options": [
+            "standard",
+            "ffnbrick",
+            "virtual_ffnbrick",
+            "micro_ffnbrick"
+          ]
+        },
+        {
+          "key": "residual",
+          "label": "Residual",
+          "type": "select",
+          "required": false,
+          "value": "standard",
+          "annotation": "str",
+          "options": [
+            "standard",
+            "rescontroller"
+          ]
+        },
+        {
+          "key": "ffn_state_dim",
+          "label": "Ffn State Dim",
+          "type": "number",
+          "required": false,
+          "value": 256,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_depth_embedding_dim",
+          "label": "Ffn Depth Embedding Dim",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_virtual_refinements",
+          "label": "Ffn Virtual Refinements",
+          "type": "number",
+          "required": false,
+          "value": 2,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_virtual_hidden_dim",
+          "label": "Ffn Virtual Hidden Dim",
+          "type": "number",
+          "required": false,
+          "value": 128,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_micro_hidden_dim",
+          "label": "Ffn Micro Hidden Dim",
+          "type": "number",
+          "required": false,
+          "value": 64,
+          "annotation": "int"
+        },
+        {
+          "key": "ffn_micro_refinements",
+          "label": "Ffn Micro Refinements",
+          "type": "number",
+          "required": false,
+          "value": 1,
+          "annotation": "int"
+        },
+        {
+          "key": "residual_update_ratio",
+          "label": "Residual Update Ratio",
+          "type": "number",
+          "required": false,
+          "value": 0.18,
+          "annotation": "float"
+        },
+        {
+          "key": "residual_stream_ratio",
+          "label": "Residual Stream Ratio",
+          "type": "number",
+          "required": false,
+          "value": 1.08,
+          "annotation": "float"
+        },
+        {
+          "key": "residual_update_softness",
+          "label": "Residual Update Softness",
+          "type": "number",
+          "required": false,
+          "value": 8.0,
+          "annotation": "float"
+        },
+        {
+          "key": "residual_stream_softness",
+          "label": "Residual Stream Softness",
+          "type": "number",
+          "required": false,
+          "value": 8.0,
+          "annotation": "float"
+        }
+      ],
+      "config_api": {
+        "public_name": "VisionBoltConfig",
+        "signature": "VisionBoltConfig(image_size: int = 32, patch_size: int = 4, in_channels: int = 3, num_classes: int = 10, dim: int = 192, depth: int = 6, mlp_mult: int = 4, backend: FullBackend = 'auto', chunk_size: int = 64, perspective_groups: int = 4, local_kernel_size: int = 3, serpentine: bool = True, alternating_reverse: bool = False, engine: str = 'Serpentine', position: str | None = 'auto', scan: str = 'cross', vocab_size: int = 8192, heads: int = 6, latent_dim: int = 32, tie_embeddings: bool = True, ffn: str = 'standard', residual: str = 'standard', ffn_state_dim: int = 256, ffn_depth_embedding_dim: int = 64, ffn_virtual_refinements: int = 2, ffn_virtual_hidden_dim: int = 128, ffn_micro_hidden_dim: int = 64, ffn_micro_refinements: int = 1, residual_update_ratio: float = 0.18, residual_stream_ratio: float = 1.08, residual_update_softness: float = 8.0, residual_stream_softness: float = 8.0)",
+        "parameters": [
+          {
+            "key": "image_size",
+            "label": "Image Size",
+            "type": "number",
+            "required": false,
+            "value": 32,
+            "annotation": "int"
+          },
+          {
+            "key": "patch_size",
+            "label": "Patch Size",
+            "type": "number",
+            "required": false,
+            "value": 4,
+            "annotation": "int"
+          },
+          {
+            "key": "in_channels",
+            "label": "In Channels",
+            "type": "number",
+            "required": false,
+            "value": 3,
+            "annotation": "int"
+          },
+          {
+            "key": "num_classes",
+            "label": "Num Classes",
+            "type": "number",
+            "required": false,
+            "value": 10,
+            "annotation": "int"
+          },
+          {
+            "key": "dim",
+            "label": "Dim",
+            "type": "number",
+            "required": false,
+            "value": 192,
+            "annotation": "int"
+          },
+          {
+            "key": "depth",
+            "label": "Depth",
+            "type": "number",
+            "required": false,
+            "value": 6,
+            "annotation": "int"
+          },
+          {
+            "key": "mlp_mult",
+            "label": "Mlp Mult",
+            "type": "number",
+            "required": false,
+            "value": 4,
+            "annotation": "int"
+          },
+          {
+            "key": "backend",
+            "label": "Backend",
+            "type": "select",
+            "required": false,
+            "value": "auto",
+            "annotation": "FullBackend",
+            "options": [
+              "auto",
+              "native",
+              "pytorch"
+            ]
+          },
+          {
+            "key": "chunk_size",
+            "label": "Chunk Size",
+            "type": "number",
+            "required": false,
+            "value": 64,
+            "annotation": "int"
+          },
+          {
+            "key": "perspective_groups",
+            "label": "Perspective Groups",
+            "type": "number",
+            "required": false,
+            "value": 4,
+            "annotation": "int"
+          },
+          {
+            "key": "local_kernel_size",
+            "label": "Local Kernel Size",
+            "type": "number",
+            "required": false,
+            "value": 3,
+            "annotation": "int"
+          },
+          {
+            "key": "serpentine",
+            "label": "Serpentine",
+            "type": "bool",
+            "required": false,
+            "value": true,
+            "annotation": "bool"
+          },
+          {
+            "key": "alternating_reverse",
+            "label": "Alternating Reverse",
+            "type": "bool",
+            "required": false,
+            "value": false,
+            "annotation": "bool"
+          },
+          {
+            "key": "engine",
+            "label": "Engine",
+            "type": "select",
+            "required": false,
+            "value": "Serpentine",
+            "annotation": "str",
+            "options": [
+              "Serpentine",
+              "ViT",
+              "CNN",
+              "Diffusion",
+              "AR"
+            ]
+          },
+          {
+            "key": "position",
+            "label": "Position",
+            "type": "select",
+            "required": false,
+            "value": "auto",
+            "annotation": "str | None",
+            "options": [
+              "none",
+              "auto",
+              "learned",
+              "sinusoidal",
+              "rope"
+            ]
+          },
+          {
+            "key": "scan",
+            "label": "Scan",
+            "type": "select",
+            "required": false,
+            "value": "cross",
+            "annotation": "str",
+            "options": [
+              "cross",
+              "raster",
+              "serpentine"
+            ]
+          },
+          {
+            "key": "vocab_size",
+            "label": "Vocab Size",
+            "type": "number",
+            "required": false,
+            "value": 8192,
+            "annotation": "int"
+          },
+          {
+            "key": "heads",
+            "label": "Heads",
+            "type": "number",
+            "required": false,
+            "value": 6,
+            "annotation": "int"
+          },
+          {
+            "key": "latent_dim",
+            "label": "Latent Dim",
+            "type": "number",
+            "required": false,
+            "value": 32,
+            "annotation": "int"
+          },
+          {
+            "key": "tie_embeddings",
+            "label": "Tie Embeddings",
+            "type": "bool",
+            "required": false,
+            "value": true,
+            "annotation": "bool"
+          },
+          {
+            "key": "ffn",
+            "label": "Ffn",
+            "type": "select",
+            "required": false,
+            "value": "standard",
+            "annotation": "str",
+            "options": [
+              "standard",
+              "ffnbrick",
+              "virtual_ffnbrick",
+              "micro_ffnbrick"
+            ]
+          },
+          {
+            "key": "residual",
+            "label": "Residual",
+            "type": "select",
+            "required": false,
+            "value": "standard",
+            "annotation": "str",
+            "options": [
+              "standard",
+              "rescontroller"
+            ]
+          },
+          {
+            "key": "ffn_state_dim",
+            "label": "Ffn State Dim",
+            "type": "number",
+            "required": false,
+            "value": 256,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_depth_embedding_dim",
+            "label": "Ffn Depth Embedding Dim",
+            "type": "number",
+            "required": false,
+            "value": 64,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_virtual_refinements",
+            "label": "Ffn Virtual Refinements",
+            "type": "number",
+            "required": false,
+            "value": 2,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_virtual_hidden_dim",
+            "label": "Ffn Virtual Hidden Dim",
+            "type": "number",
+            "required": false,
+            "value": 128,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_micro_hidden_dim",
+            "label": "Ffn Micro Hidden Dim",
+            "type": "number",
+            "required": false,
+            "value": 64,
+            "annotation": "int"
+          },
+          {
+            "key": "ffn_micro_refinements",
+            "label": "Ffn Micro Refinements",
+            "type": "number",
+            "required": false,
+            "value": 1,
+            "annotation": "int"
+          },
+          {
+            "key": "residual_update_ratio",
+            "label": "Residual Update Ratio",
+            "type": "number",
+            "required": false,
+            "value": 0.18,
+            "annotation": "float"
+          },
+          {
+            "key": "residual_stream_ratio",
+            "label": "Residual Stream Ratio",
+            "type": "number",
+            "required": false,
+            "value": 1.08,
+            "annotation": "float"
+          },
+          {
+            "key": "residual_update_softness",
+            "label": "Residual Update Softness",
+            "type": "number",
+            "required": false,
+            "value": 8.0,
+            "annotation": "float"
+          },
+          {
+            "key": "residual_stream_softness",
+            "label": "Residual Stream Softness",
+            "type": "number",
+            "required": false,
+            "value": 8.0,
+            "annotation": "float"
+          }
+        ],
+        "import_path": "mlbricks.visionbolt.VisionBoltConfig",
+        "import_module": "mlbricks.visionbolt",
+        "import_symbol": "VisionBoltConfig"
+      },
+      "import_module": "mlbricks.visionbolt",
+      "import_symbol": "VisionBolt"
+    },
+    "text_input": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLB Studio workflow node",
+      "public_name": "Text Input",
+      "import_path": null,
+      "signature": "Text Input",
+      "description": "Builder utility node.",
+      "parameters": [
+        {
+          "key": "prompt",
+          "label": "Prompt",
+          "type": "text",
+          "value": "Once upon a time",
+          "required": false
+        }
+      ],
+      "builder_utility": true,
+      "builder_python_api": false,
+      "python_preview": false
+    },
+    "image_input": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLB Studio workflow node",
+      "public_name": "Image Input",
+      "import_path": null,
+      "signature": "Image Input",
+      "description": "Builder utility node.",
+      "parameters": [
+        {
+          "key": "image_size",
+          "label": "Image Size",
+          "type": "number",
+          "value": 224,
+          "required": false
+        },
+        {
+          "key": "channels",
+          "label": "Channels",
+          "type": "number",
+          "value": 3,
+          "required": false
+        }
+      ],
+      "builder_utility": true,
+      "builder_python_api": false,
+      "python_preview": false
+    },
+    "audio_input": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLB Studio workflow node",
+      "public_name": "Audio Input",
+      "import_path": null,
+      "signature": "Audio Input",
+      "description": "Builder utility node.",
+      "parameters": [
+        {
+          "key": "sample_rate",
+          "label": "Sample Rate",
+          "type": "number",
+          "value": 16000,
+          "required": false
+        }
+      ],
+      "builder_utility": true,
+      "builder_python_api": false,
+      "python_preview": false
+    },
+    "dropout": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLB Studio workflow node",
+      "public_name": "Dropout",
+      "import_path": null,
+      "signature": "Dropout",
+      "description": "Builder utility node.",
+      "parameters": [
+        {
+          "key": "p",
+          "label": "Probability",
+          "type": "number",
+          "value": 0.1,
+          "required": false
+        }
+      ],
+      "builder_utility": true,
+      "builder_python_api": false,
+      "python_preview": false
+    },
+    "classifier": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLB Studio workflow node",
+      "public_name": "Classifier Head",
+      "import_path": null,
+      "signature": "Classifier Head",
+      "description": "Builder utility node.",
+      "parameters": [
+        {
+          "key": "hidden_size",
+          "label": "Hidden Size",
+          "type": "number",
+          "value": 384,
+          "required": false
+        },
+        {
+          "key": "classes",
+          "label": "Classes",
+          "type": "number",
+          "value": 10,
+          "required": false
+        }
+      ],
+      "builder_utility": true,
+      "builder_python_api": false,
+      "python_preview": false
+    },
+    "text_output": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLB Studio workflow node",
+      "public_name": "Text Output",
+      "import_path": null,
+      "signature": "Text Output",
+      "description": "Builder utility node.",
+      "parameters": [
+        {
+          "key": "max_new_tokens",
+          "label": "Max New Tokens",
+          "type": "number",
+          "value": 64,
+          "required": false
+        },
+        {
+          "key": "temperature",
+          "label": "Temperature",
+          "type": "number",
+          "value": 0.8,
+          "required": false
+        },
+        {
+          "key": "top_p",
+          "label": "Top P",
+          "type": "number",
+          "value": 0.95,
+          "required": false
+        }
+      ],
+      "builder_utility": true,
+      "builder_python_api": false,
+      "python_preview": false
+    },
+    "logits_output": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLB Studio workflow node",
+      "public_name": "Logits Output",
+      "import_path": null,
+      "signature": "Logits Output",
+      "description": "Builder utility node.",
+      "parameters": [],
+      "builder_utility": true,
+      "builder_python_api": false,
+      "python_preview": false
+    },
+    "linear": {
+      "available": true,
+      "runtime_available": null,
+      "source": "MLBricks 1.0.0 source schema",
+      "public_name": "Linear",
+      "import_path": "mlbricks.components.Linear",
+      "signature": "Linear(in_features: int, out_features: int, bias: bool = True, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
+      "description": "PyTorch-native linear projection exposed through MLBricks.",
+      "parameters": [
+        {
+          "key": "in_features",
+          "label": "Input Features",
+          "type": "number",
+          "required": true,
+          "value": 384,
+          "annotation": "int",
+          "min": 1
+        },
+        {
+          "key": "out_features",
+          "label": "Output Features",
+          "type": "number",
+          "required": true,
+          "value": 384,
+          "annotation": "int",
+          "min": 1
+        },
+        {
+          "key": "bias",
+          "label": "Bias",
+          "type": "bool",
+          "required": false,
+          "value": true,
+          "annotation": "bool"
+        },
+        {
+          "key": "device",
+          "label": "Device",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.device | str | None",
+          "options": [
+            "auto",
+            "cpu",
+            "cuda",
+            "None"
+          ]
+        },
+        {
+          "key": "dtype",
+          "label": "Dtype",
+          "type": "select",
+          "required": false,
+          "value": null,
+          "annotation": "torch.dtype | None",
+          "options": [
+            "None",
+            "torch.float16",
+            "torch.bfloat16",
+            "torch.float32"
+          ]
+        }
+      ],
+      "import_module": "mlbricks.components",
+      "import_symbol": "Linear"
+    }
+  },
+  "builder_version": "1.0.0"
+}
