@@ -226,7 +226,7 @@
     const collapsedInspectorGroups=new Set();
     let myBricksCollapsed=false;
     let customActionMenuId=null;
-    let bottomExpanded=true;
+    let bottomExpanded=false;
     let bottomView="details";
     let outputDirectorySelection=null;
     let filesFilter="all";
@@ -884,6 +884,32 @@
       return start;
     }
 
+    function generationIsRunning(){
+      return execution.status==="running" && execution.runtime_kind==="generate";
+    }
+
+    function startGenerationFromRuntime(entry){
+      if(!entry || generationIsRunning() || !entry.weights_ready)return;
+      entry.generation_history=[];
+      entry.generation_live={status:"running",phase:"starting",overall:0,generated_tokens:0,message:"Starting generation in Python…",generated_text:""};
+      runtimePanel={mode:"generate",modelId:entry.id,tab:"status"};
+      draw();
+      setTimeout(()=>requestRuntimeCommand("generate",entry),80);
+    }
+
+    function generationActionButton(entry){
+      if(generationIsRunning()){
+        const stop=btn("Stop Generation","mlb-runtime-stop");
+        stop.addEventListener("click",requestStop);
+        return stop;
+      }
+      const start=btn("Generate Tokens","mlb-runtime-start");
+      start.disabled=!entry?.weights_ready || execution.status==="running";
+      start.title=!entry?.weights_ready?"Train or load model weights before generation":"Generate tokens";
+      start.addEventListener("click",()=>startGenerationFromRuntime(entry));
+      return start;
+    }
+
     function bridgeDocuments(){
       const docs=[];
       const add=doc=>{if(doc && !docs.includes(doc))docs.push(doc);};
@@ -1526,7 +1552,7 @@
             const type=next.local_import_type||"model";
             state.active_workspace=type==="data"?"data":"model";
             bottomView="outputs";
-            bottomExpanded=true;
+            bottomExpanded=false;
             const imported=next.local_import.imported||[];
             outputDirectorySelection=imported.length?imported[imported.length-1].id:null;
           }else{
@@ -2589,7 +2615,7 @@
           nodes:Object.fromEntries(nodes.map(n=>[n.id,{status:"done",message:"Built"}]))
         };
         bottomView="outputs";
-        bottomExpanded=true;
+        bottomExpanded=false;
         outputDirectorySelection=entry.id;
         selected=null;
         scrollBuiltModelActionsOnce=true;
@@ -3109,8 +3135,8 @@
       rg.append(statusMetric("Device",dev.label),statusMetric("Backend",config.backend),statusMetric("Execution",config.execution_mode),statusMetric("Compile",config.execution_mode==="compiled"?config.compile_mode:"Not used"),statusMetric("Precision",config.precision),statusMetric("Generated At",entry.generated_at||"—"));runtime.appendChild(rg);main.appendChild(runtime);
 
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Generation Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Generated</span><strong>"+Number(live.generated_tokens||0)+" / "+Number(config.max_new_tokens||0)+"</strong></div><div><span>Weights</span><strong>"+(entry.weights_ready?"Available":"Missing")+"</strong></div>";side.appendChild(summary);
-      const stop=btn("Stop Generation","mlb-runtime-stop");stop.disabled=!(execution.status==="running"&&execution.runtime_kind==="generate");stop.addEventListener("click",requestStop);side.appendChild(stop);
-      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop generation and return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
+      side.appendChild(generationActionButton(entry));
+      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=generationIsRunning()?"Stop generation and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
     }
 
     async function copyTextRobust(text,label="Text"){
@@ -3397,17 +3423,8 @@
       }else{
         const weights=document.createElement("div");weights.className="mlb-weight-status "+(entry.weights_ready?"ready":"missing");
         weights.textContent=entry.weights_ready?"✓ Model weights available":"✕ No trained/loaded weights yet";side.appendChild(weights);
-        const start=btn("Generate Tokens","mlb-runtime-start");start.disabled=!entry.weights_ready||execution.status==="running";
-        start.addEventListener("click",()=>{
-          if(!entry.weights_ready)return;
-          entry.generation_history=[];entry.generation_live={status:"running",phase:"starting",overall:0,generated_tokens:0,message:"Starting generation in Python…",generated_text:""};
-          runtimePanel={mode:"generate",modelId:entry.id,tab:"status"};
-          draw();
-          setTimeout(()=>requestRuntimeCommand("generate",entry),80);
-        });side.appendChild(start);
-        const stop=btn("Stop Generation","mlb-runtime-stop");stop.disabled=execution.status!=="running";
-        stop.addEventListener("click",requestStop);side.appendChild(stop);
-        const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop generation and return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
+        side.appendChild(generationActionButton(entry));
+        const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=generationIsRunning()?"Stop generation and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
       }
 
       const reset=btn("Reset Runtime Defaults","mlb-dark-btn");
