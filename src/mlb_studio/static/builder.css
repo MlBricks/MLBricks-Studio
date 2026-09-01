@@ -2887,14 +2887,14 @@
 }
 
 
-/* V1.0 final spinner sizing: keep the complete ▲/▼ column at 25px. */
+/* V1.0 final spinner sizing: keep the complete ▲/▼ column at 12px. */
 .mlb-number-stepper,
 .mlb-runtime-field .mlb-number-stepper,
 .mlb-field .mlb-number-stepper,
 .mlb-model-setting-field .mlb-number-stepper,
 .mlb-percent-row .mlb-number-stepper{
-  height:25px!important;
-  min-height:25px!important;
-  max-height:25px!important;
+  height:12px!important;
+  min-height:12px!important;
+  max-height:12px!important;
   align-self:center!important;
 }
