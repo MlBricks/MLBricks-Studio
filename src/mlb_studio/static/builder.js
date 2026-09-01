@@ -38,6 +38,7 @@
     let searchFocusRestore=null;
     const inspectorScrollPositions={};
     let lastInspectorRenderKey=null;
+    let scrollBuiltModelActionsOnce=false;
     const bridge=payload.bridge||null;
     const isPopout=!!(bridge&&(bridge.mode==="broadcast"||bridge.mode==="popout"));
     const popoutChannelName=(bridge&&bridge.channel)||("mlb-studio-"+(payload.instance_id||root.id||"session"));
@@ -2591,6 +2592,7 @@
         bottomExpanded=true;
         outputDirectorySelection=entry.id;
         selected=null;
+        scrollBuiltModelActionsOnce=true;
         setStatus("Build complete. Select training data and check compatibility.");
         draw();
       };
@@ -3553,7 +3555,7 @@
         body.appendChild(datasetSummaryCard(dataset,"SELECTED TRAINING DATA"));
       }
 
-      const actionTitle=document.createElement("div");actionTitle.className="mlb-section-title";actionTitle.textContent="ACTIONS";
+      const actionTitle=document.createElement("div");actionTitle.className="mlb-section-title mlb-model-actions-title";actionTitle.textContent="ACTIONS";
       body.appendChild(actionTitle);
       const actions=document.createElement("div");actions.className="mlb-model-actions";
 
@@ -7498,7 +7500,20 @@
       lastInspectorRenderKey=nextInspectorKey;
       requestAnimationFrame(()=>{
         const liveBody=root.querySelector(".mlb-ins-body");
-        if(liveBody){liveBody.scrollLeft=inspectorPos.left||0;liveBody.scrollTop=inspectorPos.top||0;}
+        if(liveBody){
+          liveBody.scrollLeft=inspectorPos.left||0;
+          liveBody.scrollTop=inspectorPos.top||0;
+          if(scrollBuiltModelActionsOnce && outputModel){
+            const actionsTitle=liveBody.querySelector(".mlb-model-actions-title");
+            const actions=liveBody.querySelector(".mlb-model-actions");
+            const target=actionsTitle||actions;
+            if(target){
+              liveBody.scrollTop=Math.max(0,target.offsetTop-14);
+              inspectorScrollPositions[nextInspectorKey]={left:0,top:liveBody.scrollTop};
+            }
+            scrollBuiltModelActionsOnce=false;
+          }
+        }
         if(searchFocusRestore){
           const restore=searchFocusRestore;searchFocusRestore=null;
           const liveSearch=root.querySelector(".mlb-search");
