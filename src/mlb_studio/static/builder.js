@@ -230,6 +230,20 @@
     let outputDirectorySelection=null;
     let filesFilter="all";
 
+    // Full Window must open on the exact page the notebook is currently showing
+    // (Training Setup/Status, Generation, Gallery, etc.), not reset to Model Builder.
+    const initialView=(payload.initial_view&&typeof payload.initial_view==="object")?cp(payload.initial_view):null;
+    if(initialView){
+      if(initialView.runtime_panel&&typeof initialView.runtime_panel==="object")runtimePanel=cp(initialView.runtime_panel);
+      if(initialView.gallery_workspace&&typeof initialView.gallery_workspace==="object")galleryWorkspace=cp(initialView.gallery_workspace);
+      if(initialView.cloud_workspace&&typeof initialView.cloud_workspace==="object")cloudWorkspace=cp(initialView.cloud_workspace);
+      if(typeof initialView.bottom_expanded==="boolean")bottomExpanded=initialView.bottom_expanded;
+      if(typeof initialView.bottom_view==="string")bottomView=initialView.bottom_view;
+      if(typeof initialView.selected==="string"||initialView.selected===null)selected=initialView.selected;
+      if(typeof initialView.inspector_tab==="string")inspectorTab=initialView.inspector_tab;
+      if(Number.isFinite(Number(initialView.zoom)))zoom=Math.max(.65,Math.min(1.5,Number(initialView.zoom)));
+    }
+
     Object.values(state.components||{}).forEach(c=>{if(!c.edges)c.edges=[];});
     if(state.auto_connect===undefined) state.auto_connect=true;
 
@@ -1720,6 +1734,16 @@
       const popPayload=cp(payload);
       delete popPayload.popout_assets;
       popPayload.state=bridgeStatePayload();
+      popPayload.initial_view={
+        runtime_panel:runtimePanel?cp(runtimePanel):null,
+        gallery_workspace:cp(galleryWorkspace),
+        cloud_workspace:cp(cloudWorkspace),
+        bottom_expanded:!!bottomExpanded,
+        bottom_view:bottomView,
+        selected:selected,
+        inspector_tab:inspectorTab,
+        zoom:zoom
+      };
       // Use distinct placeholder bridge ids in the popout so Run and Stop remain
       // distinguishable while commands are proxied back to the notebook host.
       popPayload.bridge={
