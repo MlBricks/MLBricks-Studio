@@ -2522,3 +2522,151 @@
 .mlb-root::-webkit-scrollbar{height:9px;width:9px}
 .mlb-root::-webkit-scrollbar-thumb{background:#344353;border-radius:8px}
 .mlb-root::-webkit-scrollbar-track{background:#0b1118}
+
+
+/* ------------------------------------------------------------------
+   V1.0 desktop control geometry lock
+   ------------------------------------------------------------------
+   Kaggle notebook outputs may be narrower than Studio's desktop UI.
+   Never solve that by shrinking buttons/fields. Keep desktop geometry and
+   let the root horizontal scrollbar expose the full application. */
+.mlb-topbar,.mlb-shell,.mlb-statusbar{
+  min-width:1360px!important;
+}
+.mlb-shell{
+  grid-template-columns:230px minmax(850px,1fr) 280px!important;
+}
+.mlb-sidebar{
+  min-width:230px!important;
+  max-width:230px!important;
+}
+.mlb-main{
+  min-width:850px!important;
+}
+.mlb-inspector{
+  min-width:280px!important;
+  max-width:280px!important;
+}
+/* Runtime pages hide the left library, so give that width directly to the
+   center workspace instead of allowing the center grid to compress. */
+.mlb-runtime-page-active .mlb-shell{
+  grid-template-columns:0 minmax(1040px,1fr) 300px!important;
+}
+.mlb-runtime-page-active .mlb-main{
+  min-width:1040px!important;
+}
+.mlb-runtime-page-active .mlb-inspector{
+  min-width:300px!important;
+  max-width:300px!important;
+}
+.mlb-runtime-workspace{
+  min-width:1000px!important;
+}
+.mlb-runtime-layout{
+  grid-template-columns:minmax(720px,1fr) 250px!important;
+  gap:14px!important;
+}
+.mlb-runtime-main{min-width:720px!important}
+.mlb-runtime-side{min-width:250px!important}
+.mlb-runtime-grid{
+  grid-template-columns:repeat(3,minmax(210px,1fr))!important;
+  gap:9px!important;
+}
+.mlb-device-grid{
+  grid-template-columns:repeat(auto-fit,minmax(205px,1fr))!important;
+  gap:8px!important;
+}
+.mlb-device-card{
+  min-height:46px!important;
+  padding:8px 10px!important;
+}
+
+/* Numeric controls are desktop controls, not tiny browser spinner chrome. */
+.mlb-number-shell{
+  grid-template-columns:minmax(0,1fr) 28px!important;
+  gap:5px!important;
+  min-height:38px!important;
+}
+.mlb-number-stepper{
+  width:28px!important;
+  min-width:28px!important;
+  gap:3px!important;
+}
+.mlb-number-step{
+  width:28px!important;
+  min-width:28px!important;
+  min-height:17px!important;
+  border-radius:5px!important;
+  font-size:12px!important;
+  line-height:1!important;
+}
+.mlb-runtime-field input:not([type=checkbox]),
+.mlb-runtime-field select{
+  min-height:38px!important;
+  height:38px!important;
+  padding:0 10px!important;
+  font-size:11.5px!important;
+}
+.mlb-runtime-field textarea{
+  min-height:78px!important;
+  padding:9px 10px!important;
+  font-size:11.5px!important;
+}
+/* Compact percentage controls remain compact, but still usable. */
+.mlb-percent-row .mlb-number-shell{
+  width:76px!important;
+  min-height:34px!important;
+  grid-template-columns:minmax(0,1fr) 24px!important;
+  gap:4px!important;
+}
+.mlb-percent-row .mlb-number-stepper{
+  width:24px!important;
+  min-width:24px!important;
+}
+.mlb-percent-row .mlb-number-step{
+  width:24px!important;
+  min-width:24px!important;
+  font-size:10.5px!important;
+}
+/* Inspector/model settings also keep a readable desktop stepper. */
+.mlb-model-setting-field input,
+.mlb-model-setting-field select{
+  height:32px!important;
+  min-height:32px!important;
+  font-size:11px!important;
+}
+.mlb-model-setting-field .mlb-number-shell{min-height:32px!important}
+.mlb-model-setting-field .mlb-number-stepper{
+  width:24px!important;
+  min-width:24px!important;
+}
+.mlb-model-setting-field .mlb-number-step{
+  width:24px!important;
+  min-width:24px!important;
+  font-size:10.5px!important;
+}
+
+/* Action controls keep stable desktop hit targets. */
+.mlb-runtime-tab{
+  min-width:112px!important;
+  height:34px!important;
+  min-height:34px!important;
+  padding:0 14px!important;
+  font-size:11px!important;
+}
+.mlb-runtime-start{
+  height:38px!important;
+  min-height:38px!important;
+  font-size:12px!important;
+}
+.mlb-runtime-cancel,.mlb-runtime-stop{
+  height:36px!important;
+  min-height:36px!important;
+  font-size:11.5px!important;
+}
+.mlb-dark-btn,.mlb-run,.mlb-stop,.mlb-tool{
+  min-height:32px;
+}
+.mlb-toolbar .mlb-tool,.mlb-toolbar .mlb-dark-btn{
+  min-width:max-content;
+}

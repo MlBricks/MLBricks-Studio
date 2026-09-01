@@ -120,9 +120,9 @@ def test_notebook_layout_stays_desktop_and_uses_horizontal_scroll():
     text = _builder_css()
     assert "V1.0 stable desktop notebook / Kaggle layout" in text
     assert "height:720px!important" in text
-    assert "min-width:1120px!important" in text
+    assert "min-width:1360px!important" in text
     assert "overflow-x:auto!important" in text
-    assert "grid-template-columns:210px minmax(650px,1fr) 260px!important" in text
+    assert "grid-template-columns:230px minmax(850px,1fr) 280px!important" in text
     assert "grid-template-columns:1fr;grid-template-rows:auto minmax(420px,1fr) auto" not in text
     assert "@media" not in text
 
@@ -131,3 +131,14 @@ def test_remove_all_links_action_is_not_rendered():
     text = _builder_js()
     assert 'btn("Remove All Links")' not in text
     assert 'checkpoint("Remove all links from "+n.name)' not in text
+
+
+def test_desktop_control_geometry_does_not_shrink_in_kaggle():
+    text = _builder_css()
+    assert "V1.0 desktop control geometry lock" in text
+    assert "grid-template-columns:0 minmax(1040px,1fr) 300px!important" in text
+    assert "grid-template-columns:repeat(3,minmax(210px,1fr))!important" in text
+    assert "grid-template-columns:minmax(0,1fr) 28px!important" in text
+    assert "width:28px!important" in text
+    assert "height:38px!important" in text
+    assert "min-width:112px!important" in text
