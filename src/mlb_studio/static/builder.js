@@ -116,7 +116,15 @@ function __MLB_STUDIO_FACTORY__(){
     let interactionReleaseQueued=false;
 
     function isCommitEditor(el){
-      return !!(el && el.matches && el.matches('input,textarea,select,[contenteditable="true"]'));
+      if(!el || !el.matches)return false;
+      if(el.matches('textarea,[contenteditable="true"]'))return true;
+      if(!el.matches('input'))return false;
+      // Only free-form editors need protection from asynchronous background
+      // redraws. Selects, checkboxes, radios and sliders are atomic controls:
+      // deferring their redraw until blur makes the application appear stuck
+      // until the user clicks somewhere else.
+      const type=String(el.type||"text").toLowerCase();
+      return !["checkbox","radio","range","button","submit","reset","file","color"].includes(type);
     }
 
     function refreshFocusedEditorState(){
@@ -132,7 +140,9 @@ function __MLB_STUDIO_FACTORY__(){
     // Runtime progress, bridge messages and status updates can otherwise call
     // draw() between keystrokes and make an input appear impossible to edit.
     root.addEventListener("focusin",ev=>{
-      if(isCommitEditor(ev.target))focusedEditorActive=true;
+      // Atomic controls must never inherit a stale "text editor focused" flag
+      // from the control that previously had focus.
+      focusedEditorActive=isCommitEditor(ev.target);
     },true);
     root.addEventListener("focusout",ev=>{
       if(!isCommitEditor(ev.target))return;
@@ -168,8 +178,8 @@ function __MLB_STUDIO_FACTORY__(){
     root.addEventListener("pointercancel",releasePointerInteraction,true);
 
     function snapshot(){ return cp(state); }
-    function checkpoint(label){
-      undoStack.push({state:snapshot(),label:label||"Edit"});
+    function checkpoint(label,beforeState=null){
+      undoStack.push({state:beforeState?cp(beforeState):snapshot(),label:label||"Edit"});
       if(undoStack.length>historyLimit) undoStack.shift();
       redoStack.length=0;
     }
@@ -386,7 +396,9 @@ function __MLB_STUDIO_FACTORY__(){
       selected=null;pendingPort=null;search="";
       switchingWorkspace=true;
       setStatus(workspaceName()+" opened.");
-      draw();
+      // Workspace changes are atomic navigation actions, not text edits. Render
+      // immediately so the selector and canvas can never get out of sync.
+      draw(true);
     }
 
     const dataNodeTypes=new Set([
@@ -852,6 +864,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function cancelRuntimeToModelEditor(entry,mode){
+      entry=liveBuiltModel(entry);
       const kind=String(mode||runtimePanel?.mode||"");
       const activeRun=execution.status==="running"&&execution.runtime_kind===kind;
       if((kind==="train"||kind==="generate")&&activeRun)requestStop();
@@ -878,6 +891,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function startTrainingFromRuntime(entry){
+      entry=liveBuiltModel(entry);
       if(!entry || trainingIsRunning())return;
       entry.training_status="starting";
       entry.training_history=[];
@@ -910,6 +924,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function startGenerationFromRuntime(entry){
+      entry=liveBuiltModel(entry);
       if(!entry || generationIsRunning() || !entry.weights_ready)return;
       entry.generation_history=[];
       entry.generation_live={status:"running",phase:"starting",overall:0,generated_tokens:0,message:"Starting generation in Python…",generated_text:""};
@@ -1233,6 +1248,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function requestServeCommand(action,entry){
+      entry=liveBuiltModel(entry);
       if(!entry)return;
       updateKernelBadge();
       if(!bridgeReady()){
@@ -1286,6 +1302,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function requestRuntimeCommand(action,entry){
+      entry=liveBuiltModel(entry);
       if(!entry)return;
       updateKernelBadge();
       if(!bridgeReady()){
@@ -2359,7 +2376,11 @@ function __MLB_STUDIO_FACTORY__(){
 
     function updateBuiltModelSetting(entry,key,value){
       if(!entry)return;
-      const oldSettings=deriveModelSettings(entry);
+      // A bridge/popout refresh can replace model_outputs while the Inspector
+      // stays visible. Resolve by id before every commit so edits cannot write
+      // into a detached render-time model object and then snap back.
+      const latest=builtModelById(entry.id)||entry;
+      const oldSettings=deriveModelSettings(latest);
       const next={...oldSettings};
       if(key==="precision"){
         next[key]=String(value||"fp16");
@@ -2382,25 +2403,25 @@ function __MLB_STUDIO_FACTORY__(){
       syncModelSettingsToGraph(next,oldSettings);
 
       // Architecture-affecting model settings invalidate the previous build.
-      entry.context_length=next.block;
-      entry.batch_size=next.default_batch;
-      entry.status="needs_rebuild";
-      entry.weights_ready=false;
-      entry.training_status="untrained";
-      entry.requirements=inferModelRequirements(modelRootComponent());
-      entry.requirements.context_length=next.block;
-      entry.model_settings={...next};
-      entry.architecture=cp(modelRootComponent());
-      entry.fingerprint=modelFingerprint(modelRootComponent());
+      latest.context_length=next.block;
+      latest.batch_size=next.default_batch;
+      latest.status="needs_rebuild";
+      latest.weights_ready=false;
+      latest.training_status="untrained";
+      latest.requirements=inferModelRequirements(modelRootComponent());
+      latest.requirements.context_length=next.block;
+      latest.model_settings={...next};
+      latest.architecture=cp(modelRootComponent());
+      latest.fingerprint=modelFingerprint(modelRootComponent());
 
       // Keep training defaults aligned with the model-wide default batch.
-      ensureRuntimeConfigs(entry);
-      entry.training_config.batch_size=next.default_batch;
-      if(entry.training_config.precision==="auto" || !entry.training_config.precision){
-        entry.training_config.precision=next.precision;
+      ensureRuntimeConfigs(latest);
+      latest.training_config.batch_size=next.default_batch;
+      if(latest.training_config.precision==="auto" || !latest.training_config.precision){
+        latest.training_config.precision=next.precision;
       }
-      if(entry.generation_config && (entry.generation_config.precision==="auto" || !entry.generation_config.precision)){
-        entry.generation_config.precision=next.precision;
+      if(latest.generation_config && (latest.generation_config.precision==="auto" || !latest.generation_config.precision)){
+        latest.generation_config.precision=next.precision;
       }
 
       if(next.embedding_size%next.heads!==0){
@@ -2463,6 +2484,11 @@ function __MLB_STUDIO_FACTORY__(){
 
     function builtModelById(id){
       return (state.model_outputs||[]).find(item=>item.id===id)||null;
+    }
+
+    function liveBuiltModel(entry){
+      if(!entry)return null;
+      return entry.id ? (builtModelById(entry.id)||entry) : entry;
     }
 
     function selectedOutputModel(){
@@ -2749,6 +2775,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function setBuiltModelDataset(entry,datasetId){
+      entry=liveBuiltModel(entry);
       if(!entry)return;
       entry.selected_dataset_id=datasetId||null;
       const meta=preparedDatasetById(datasetId);
@@ -2834,15 +2861,28 @@ function __MLB_STUDIO_FACTORY__(){
       };
     }
 
+    function mergeRuntimeDefaultsInPlace(defaults,saved){
+      const merged=mergeRuntimeDefaults(defaults,saved);
+      if(!saved || typeof saved!=="object" || Array.isArray(saved))return merged;
+      // Keep the original object identity stable. Runtime field event handlers
+      // may still reference this object while a blur/redraw is in flight.
+      // Replacing it here can make a committed value write into a detached
+      // object and visually snap back to the previous/default value.
+      Object.keys(saved).forEach(key=>delete saved[key]);
+      Object.assign(saved,merged);
+      return saved;
+    }
+
     function ensureRuntimeConfigs(entry){
       const dataset=preparedDatasetById(entry?.selected_dataset_id)||null;
-      entry.training_config=mergeRuntimeDefaults(defaultTrainingConfig(entry,dataset),entry.training_config);
-      entry.generation_config=mergeRuntimeDefaults(defaultGenerationConfig(entry),entry.generation_config);
-      entry.serve_config=mergeRuntimeDefaults(defaultServeConfig(entry),entry.serve_config);
+      entry.training_config=mergeRuntimeDefaultsInPlace(defaultTrainingConfig(entry,dataset),entry.training_config);
+      entry.generation_config=mergeRuntimeDefaultsInPlace(defaultGenerationConfig(entry),entry.generation_config);
+      entry.serve_config=mergeRuntimeDefaultsInPlace(defaultServeConfig(entry),entry.serve_config);
       serveSecrets[entry.id]=serveSecrets[entry.id]||{api_key:"",ngrok_token:""};
     }
 
     function openRuntimePanel(mode,entry){
+      entry=liveBuiltModel(entry);
       if(!entry)return;
       ensureRuntimeConfigs(entry);
       runtimePanel={mode,modelId:entry.id,tab:"setup"};
@@ -2856,17 +2896,20 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function requestBuiltModelTraining(entry,compat){
+      entry=liveBuiltModel(entry);
       if(!entry||!compat?.ok)return;
       entry.training_status="configured";
       openRuntimePanel("train",entry);
     }
 
     function requestTokenGeneration(entry){
+      entry=liveBuiltModel(entry);
       if(!entry)return;
       openRuntimePanel("generate",entry);
     }
 
     function requestModelServing(entry){
+      entry=liveBuiltModel(entry);
       if(!entry||!entry.weights_ready)return;
       openRuntimePanel("serve",entry);
     }
@@ -2899,13 +2942,16 @@ function __MLB_STUDIO_FACTORY__(){
         input=document.createElement("input");input.type=type||"text";input.value=value??"";
         if(type==="number")input.step="any";
       }
-      const commit=()=>{
-        const value=type==="checkbox"
-          ?input.checked
-          :(type==="number"?(input.value.trim()===""?null:Number(input.value)):input.value);
-        onChange(value);
-      };
-      input.addEventListener("change",commit);
+      const readValue=()=>type==="checkbox"
+        ?input.checked
+        :(type==="number"?(input.value.trim()===""?null:Number(input.value)):input.value);
+      const commit=(redraw=true)=>onChange(readValue(),redraw);
+
+      // Persist text/number/textarea drafts as they are typed, without
+      // redrawing. This closes the blur race where another renderer could
+      // rebuild the runtime config before the change event committed.
+      if(type!=="select" && type!=="checkbox")input.addEventListener("input",()=>commit(false));
+      input.addEventListener("change",()=>commit(true));
       wrap.appendChild(input);return wrap;
     }
 
@@ -2914,7 +2960,7 @@ function __MLB_STUDIO_FACTORY__(){
       const h=document.createElement("h3");h.textContent=title;s.appendChild(h);return s;
     }
 
-    function deviceCards(config){
+    function deviceCards(config,onSelect=null){
       const box=document.createElement("div");box.className="mlb-device-grid";
       runtimeDeviceOptions().forEach(device=>{
         const card=document.createElement("button");card.type="button";
@@ -2922,7 +2968,11 @@ function __MLB_STUDIO_FACTORY__(){
         const icon=device.kind==="cpu"?"CPU":device.kind==="cuda"?"GPU":device.kind==="xpu"?"XPU":device.kind==="mps"?"GPU":"AUTO";
         card.innerHTML="<strong>"+icon+"</strong><span>"+device.label+"</span>"+
           (device.compute_capability?"<small>Compute "+device.compute_capability+"</small>":"");
-        card.addEventListener("click",()=>{config.device=device.id;draw();});box.appendChild(card);
+        card.addEventListener("click",()=>{
+          if(onSelect)onSelect(device.id);
+          else {config.device=device.id;draw();}
+        });
+        box.appendChild(card);
       });
       return box;
     }
@@ -3257,7 +3307,12 @@ function __MLB_STUDIO_FACTORY__(){
       const layout=document.createElement("div");layout.className="mlb-runtime-layout";
       const main=document.createElement("div");main.className="mlb-runtime-main",side=document.createElement("aside");side.className="mlb-runtime-side";
       layout.append(main,side);outer.appendChild(layout);
-      const update=(key,value)=>{config[key]=value;setStatus("Server setting updated: "+key);draw();};
+      const update=(key,value,redraw=true)=>{
+        const latest=builtModelById(entry.id)||entry;
+        ensureRuntimeConfigs(latest);
+        latest.serve_config[key]=value;
+        if(redraw){setStatus("Server setting updated: "+key);draw();}
+      };
 
       if(tab==="status"){
         const running=entry.serve_status==="running"||!!info.local_url;
@@ -3330,7 +3385,7 @@ function __MLB_STUDIO_FACTORY__(){
       if(config.public_tunnel==="ngrok")secGrid.appendChild(runtimeField("ngrok Authtoken","password",secret.ngrok_token,v=>secret.ngrok_token=v));
       secretsSection.appendChild(secGrid);const sn=document.createElement("div");sn.className="mlb-serve-secret-note";sn.textContent="API keys and ngrok tokens are session-only and are not saved in Builder files.";secretsSection.appendChild(sn);main.appendChild(secretsSection);
 
-      const dev=runtimeSection("Available Devices");dev.appendChild(deviceCards(config));main.appendChild(dev);
+      const dev=runtimeSection("Available Devices");dev.appendChild(deviceCards(config,v=>update("device",v)));main.appendChild(dev);
       const runtime=runtimeSection("Inference Runtime"),grid=document.createElement("div");grid.className="mlb-runtime-grid";
       const deviceOpts=runtimeDeviceOptions().map(d=>({value:d.id,label:d.label}));
       grid.append(runtimeField("Device","select",config.device,v=>update("device",v),deviceOpts),
@@ -3373,7 +3428,20 @@ function __MLB_STUDIO_FACTORY__(){
       layout.append(main,side);outer.appendChild(layout);
 
       const config=mode==="train"?entry.training_config:entry.generation_config;
-      const update=(key,value)=>{config[key]=value;setStatus((mode==="train"?"Training":"Generation")+" setting updated: "+key);draw();};
+      const update=(key,value,redraw=true)=>{
+        // Resolve the current model/config at commit time instead of trusting
+        // a render-time object reference. This remains correct even if a
+        // bridge/state redraw replaced the model entry while the field was
+        // focused.
+        const latest=builtModelById(entry.id)||entry;
+        ensureRuntimeConfigs(latest);
+        const target=mode==="train"?latest.training_config:latest.generation_config;
+        target[key]=value;
+        if(redraw){
+          setStatus((mode==="train"?"Training":"Generation")+" setting updated: "+key);
+          draw();
+        }
+      };
       const tab=runtimePanel?.tab||"setup";
       if(tab==="status"){
         if(mode==="train")renderTrainingStatus(main,side,entry);
@@ -3382,7 +3450,7 @@ function __MLB_STUDIO_FACTORY__(){
         return;
       }
 
-      const dev=runtimeSection("Available Devices");dev.appendChild(deviceCards(config));main.appendChild(dev);
+      const dev=runtimeSection("Available Devices");dev.appendChild(deviceCards(config,v=>update("device",v)));main.appendChild(dev);
 
       if(mode==="train"){
         const dataset=preparedDatasetById(entry.selected_dataset_id)||null;
@@ -6074,13 +6142,30 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function setSplitPreset(node,train,validation,test,label){
+      const target=liveNodeById(node?.id)||node;
+      if(!target)return;
       checkpoint("Split preset "+label);
-      node.params=node.params||{};
-      node.params.train_size=train;
-      node.params.validation_size=validation;
-      node.params.test_size=test;
+      target.params=target.params||{};
+      target.params.train_size=train;
+      target.params.validation_size=validation;
+      target.params.test_size=test;
       setStatus("Split set to "+train+"% train / "+validation+"% validation / "+test+"% test.");
       draw();
+    }
+
+    function liveNodeById(nodeId){
+      if(!nodeId)return null;
+      const live=current(state);
+      const direct=(live?.nodes||[]).find(item=>item.id===nodeId);
+      if(direct)return direct;
+      // A background state refresh can replace component/node objects while an
+      // editor remains mounted. Resolve by stable id across all components so
+      // commits always land on the current state object, never a detached one.
+      for(const component of Object.values(state.components||{})){
+        const found=(component?.nodes||[]).find(item=>item.id===nodeId);
+        if(found)return found;
+      }
+      return null;
     }
 
     function renderField(body,node,f){
@@ -6088,26 +6173,38 @@ function __MLB_STUDIO_FACTORY__(){
       const label=document.createElement("label");label.textContent=f.label+(f.required?" *":"");
       let input;
 
-      const commit=(value)=>{
-        checkpoint("Edit "+node.name+"."+f.key);
-        node.params=node.params||{};
-        node.params[f.key]=f.type==="number"||f.type==="percent"?Number(value):value;
-        if(node.type==="text_input" && f.key==="dataset_id"){
+      let editBefore=null;
+      const beginEdit=()=>{if(!editBefore)editBefore=snapshot();};
+      const applyValue=(value)=>{
+        const target=liveNodeById(node.id)||node;
+        if(!target)return null;
+        target.params=target.params||{};
+        target.params[f.key]=f.type==="number"||f.type==="percent"?Number(value):value;
+        if(target.type==="text_input" && f.key==="dataset_id"){
           const meta=preparedDatasetById(value);
           if(meta){
             const available=Object.keys(meta.splits||{});
-            if(!available.includes(node.params.dataset_split)){
-              node.params.dataset_split=meta.default_split||available[0]||"train";
+            if(!available.includes(target.params.dataset_split)){
+              target.params.dataset_split=meta.default_split||available[0]||"train";
             }
           }
         }
-        if(node.type==="train_test_split"){
-          const total=splitTotal(node);
-          setStatus(splitIsValid(node)
+        return target;
+      };
+      const commit=(value,redraw=true)=>{
+        beginEdit();
+        const target=applyValue(value);
+        if(!target)return;
+        if(!redraw)return;
+        checkpoint("Edit "+target.name+"."+f.key,editBefore);
+        editBefore=null;
+        if(target.type==="train_test_split"){
+          const total=splitTotal(target);
+          setStatus(splitIsValid(target)
             ?"Split valid: total 100%."
             :"Split needs attention: Train + Validation + Test = "+total+"%. It must equal 100%.");
         }else{
-          setStatus(node.name+" settings updated.");
+          setStatus(target.name+" settings updated.");
         }
         draw();
       };
@@ -6155,10 +6252,10 @@ function __MLB_STUDIO_FACTORY__(){
         const value=Number(node.params?.[f.key]??f.value??0);
         range.value=value;number.value=value;
         const suffix=document.createElement("span");suffix.className="mlb-percent-sign";suffix.textContent="%";
-        range.addEventListener("input",()=>{number.value=range.value;});
-        number.addEventListener("input",()=>{range.value=Math.max(Number(range.min),Math.min(Number(range.max),Number(number.value||0)));});
-        range.addEventListener("change",()=>commit(range.value));
-        number.addEventListener("change",()=>commit(Math.max(Number(number.min),Math.min(Number(number.max),Number(number.value||0)))));
+        range.addEventListener("input",()=>{number.value=range.value;commit(range.value,false);});
+        number.addEventListener("input",()=>{const next=Math.max(Number(range.min),Math.min(Number(range.max),Number(number.value||0)));range.value=next;commit(next,false);});
+        range.addEventListener("change",()=>commit(range.value,true));
+        number.addEventListener("change",()=>commit(Math.max(Number(number.min),Math.min(Number(number.max),Number(number.value||0))),true));
         row.append(range,number,suffix);
         input=row;
       }else if(f.type==="select"){
@@ -6171,7 +6268,8 @@ function __MLB_STUDIO_FACTORY__(){
         input.addEventListener("change",()=>commit(input.value));
       }else if(f.type==="textarea"){
         input=document.createElement("textarea");input.rows=4;input.value=node.params?.[f.key]??f.value??"";
-        input.addEventListener("change",()=>commit(input.value));
+        input.addEventListener("input",()=>commit(input.value,false));
+        input.addEventListener("change",()=>commit(input.value,true));
       }else if(f.type==="bool"){
         input=document.createElement("select");
         ["true","false"].forEach(v=>{const o=document.createElement("option");o.value=v;o.textContent=v;if(String(node.params?.[f.key]??f.value)===v)o.selected=true;input.appendChild(o);});
@@ -6180,7 +6278,8 @@ function __MLB_STUDIO_FACTORY__(){
         input=document.createElement("input");input.type=f.type==="number"?"number":"text";input.step=f.step??"any";
         if(f.min!==undefined)input.min=f.min;if(f.max!==undefined)input.max=f.max;
         input.value=node.params?.[f.key]??f.value??"";
-        input.addEventListener("change",()=>commit(input.value));
+        input.addEventListener("input",()=>commit(input.value,false));
+        input.addEventListener("change",()=>commit(input.value,true));
       }
 
       wrap.append(label,input);
@@ -6700,11 +6799,12 @@ function __MLB_STUDIO_FACTORY__(){
       document.body.appendChild(input);input.click();
     }
 
-    function draw(){
-      if(pointerInteractionActive || focusedEditorActive){
+    function draw(force=false){
+      if(!force && (pointerInteractionActive || focusedEditorActive)){
         deferredInteractionDraw=true;
         return;
       }
+      if(force)deferredInteractionDraw=false;
       if(bottomView==="hub")bottomView="cloud";
       const wsKey=state.active_workspace||"model";
       const oldCanvas=root.querySelector(".mlb-canvas");
@@ -6863,7 +6963,9 @@ function __MLB_STUDIO_FACTORY__(){
       const searchInput=document.createElement("input");searchInput.className="mlb-search";searchInput.placeholder="Search...";searchInput.setAttribute("aria-label",state.active_workspace==="data"?"Search data steps":"Search components");searchInput.value=search;searchInput.addEventListener("input",()=>{
         search=searchInput.value;
         searchFocusRestore={start:searchInput.selectionStart??search.length,end:searchInput.selectionEnd??search.length};
-        draw();
+        // Search intentionally redraws on every keystroke and restores its own
+        // focus/selection below, so bypass the background-edit redraw guard.
+        draw(true);
       });
       sr.appendChild(searchInput);side.appendChild(sr);
       if(current(state)?.kind!=="custom_edit"){
@@ -7547,7 +7649,7 @@ function __MLB_STUDIO_FACTORY__(){
       let statusDevice="Auto";
       if(runtimePanel){
         const e=builtModelById(runtimePanel.modelId);
-        if(e){const cfg=runtimePanel.mode==="train"?e.training_config:e.generation_config;statusDevice=selectedRuntimeDevice(cfg).label;}
+        if(e){const cfg=runtimePanel.mode==="train"?e.training_config:(runtimePanel.mode==="serve"?e.serve_config:e.generation_config);statusDevice=selectedRuntimeDevice(cfg).label;}
       }
       stat.innerHTML='<span>Workspace: '+workspaceName()+'</span><span>Backend: '+(state.active_workspace==="data"?"Builder Data API":"MLBricks Runtime")+'</span><span>Device: '+statusDevice+'</span><span class="right mlb-ready">● '+status+"</span>";
       root.appendChild(stat);
