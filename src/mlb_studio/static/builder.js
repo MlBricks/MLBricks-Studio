@@ -3073,7 +3073,7 @@
 
       const logs=runtimeSection("Training Log");renderEventLog(logs,history,"Training has not started yet.");main.appendChild(logs);
       const cp=runtimeSection("Checkpoints + Output");const cg=document.createElement("div");cg.className="mlb-validation-status-grid";
-      cg.append(statusMetric("Checkpoint Every",(config.checkpoint_every||0)+" steps"),statusMetric("Output Dir",config.output_dir||"—"),
+      cg.append(statusMetric("Checkpoint Every",(config.checkpoint_every||0)+" steps"),
         statusMetric("Latest Checkpoint",entry.latest_checkpoint_path||entry.checkpoint_path||live.checkpoint_path||"—"),statusMetric("Weights",entry.weights_ready?"Available":"Not yet"),
         statusMetric("Training Status",entry.training_status||"untrained"),statusMetric("Trained At",entry.trained_at||"—"));cp.appendChild(cg);main.appendChild(cp);
 
@@ -3375,10 +3375,6 @@
         runtimeField("Precision","select",config.precision,v=>update("precision",v),runtimeCaps.precisions||["auto","fp32","fp16","bf16"])
       );runtime.appendChild(runtimeGrid);main.appendChild(runtime);
 
-      if(mode==="train"){
-        const out=runtimeSection("Output");const grid=document.createElement("div");grid.className="mlb-runtime-grid";
-        grid.append(runtimeField("Output Directory","text",config.output_dir,v=>update("output_dir",v)));out.appendChild(grid);main.appendChild(out);
-      }
 
       const device=selectedRuntimeDevice(config);
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";
