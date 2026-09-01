@@ -2898,3 +2898,21 @@
   max-height:12px!important;
   align-self:center!important;
 }
+
+
+/* ------------------------------------------------------------------
+   V1.0 typing-only numeric inputs
+   ------------------------------------------------------------------ */
+/* Numeric values are entered directly. Keep both native and legacy custom
+   steppers out of the interface so number fields match ordinary text fields. */
+.mlb-root input[type="number"]{
+  appearance:textfield!important;
+  -moz-appearance:textfield!important;
+}
+.mlb-root input[type="number"]::-webkit-outer-spin-button,
+.mlb-root input[type="number"]::-webkit-inner-spin-button{
+  -webkit-appearance:none!important;
+  margin:0!important;
+}
+.mlb-number-shell{display:contents!important}
+.mlb-number-stepper,.mlb-number-step{display:none!important}

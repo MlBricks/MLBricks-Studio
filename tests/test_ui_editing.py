@@ -103,13 +103,13 @@ def test_device_cards_use_runtime_update_path():
     assert 'deviceCards(config,v=>update("device",v))' in text
 
 
-def test_all_number_inputs_get_shared_themed_steppers():
+def test_all_number_inputs_are_typing_only():
     text = _builder_js()
-    assert "function installNumberSteppers(scope)" in text
-    assert 'input[type="number"]:not([data-mlb-number-ready="1"])' in text
-    assert 'makeStep(1,"▲","Increment value")' in text
-    assert 'makeStep(-1,"▼","Decrement value")' in text
-    assert "installNumberSteppers(root);" in text
+    assert "function installNumberSteppers(scope)" not in text
+    assert 'input[type="number"]:not([data-mlb-number-ready="1"])' not in text
+    assert 'makeStep(1,"▲","Increment value")' not in text
+    assert 'makeStep(-1,"▼","Decrement value")' not in text
+    assert "installNumberSteppers(root);" not in text
 
 
 def _builder_css() -> str:
@@ -138,10 +138,18 @@ def test_desktop_control_geometry_does_not_shrink_in_kaggle():
     assert "V1.0 desktop control geometry lock" in text
     assert "grid-template-columns:0 minmax(1040px,1fr) 300px!important" in text
     assert "grid-template-columns:repeat(3,minmax(210px,1fr))!important" in text
-    assert "V1.0 compact horizontal number steppers" in text
-    assert "V1.0 compact themed arrow spinner" in text
-    assert "grid-template-columns:minmax(0,1fr) 24px 24px!important" in text
-    assert "display:contents!important" in text
+    assert "V1.0 typing-only numeric inputs" in text
+    assert '.mlb-number-stepper,.mlb-number-step{display:none!important}' in text
     assert "height:32px!important" in text
     assert "height:34px!important" in text
     assert "min-width:112px!important" in text
+
+
+def test_numeric_inputs_are_typing_only_without_custom_steppers():
+    text = _builder_js()
+    css = _builder_css()
+    assert "installNumberSteppers(root)" not in text
+    assert 'makeStep(1,"▲"' not in text
+    assert 'makeStep(-1,"▼"' not in text
+    assert "V1.0 typing-only numeric inputs" in css
+    assert '.mlb-number-stepper,.mlb-number-step{display:none!important}' in css

@@ -127,53 +127,9 @@ function __MLB_STUDIO_FACTORY__(){
       return !["checkbox","radio","range","button","submit","reset","file","color"].includes(type);
     }
 
-    function installNumberSteppers(scope){
-      if(!scope||!scope.querySelectorAll)return;
-      scope.querySelectorAll('input[type="number"]:not([data-mlb-number-ready="1"])').forEach(input=>{
-        input.dataset.mlbNumberReady="1";
-        const parent=input.parentNode;
-        if(!parent)return;
+    // Numeric inputs are typing-only by design. Studio hides browser-native
+    // spinner chrome and does not inject custom increment/decrement controls.
 
-        const shell=document.createElement("div");
-        shell.className="mlb-number-shell";
-        const controls=document.createElement("div");
-        controls.className="mlb-number-stepper";
-
-        const makeStep=(direction,label,title)=>{
-          const step=document.createElement("button");
-          step.type="button";
-          step.className="mlb-number-step";
-          step.textContent=label;
-          step.title=title;
-          step.setAttribute("aria-label",title);
-          // Keep the editor focused so stepping a value does not create a
-          // blur/redraw race before its input/change handlers have committed.
-          step.addEventListener("pointerdown",ev=>ev.preventDefault());
-          step.addEventListener("click",()=>{
-            try{ direction>0 ? input.stepUp() : input.stepDown(); }
-            catch(_){
-              const stepValue=Number(input.step||1)||1;
-              const current=Number(input.value||0);
-              let next=current+(direction*stepValue);
-              if(input.min!==""&&Number.isFinite(Number(input.min)))next=Math.max(next,Number(input.min));
-              if(input.max!==""&&Number.isFinite(Number(input.max)))next=Math.min(next,Number(input.max));
-              input.value=String(next);
-            }
-            input.dispatchEvent(new Event("input",{bubbles:true}));
-            input.dispatchEvent(new Event("change",{bubbles:true}));
-            try{input.focus({preventScroll:true});}catch(_){input.focus();}
-          });
-          return step;
-        };
-
-        controls.append(
-          makeStep(1,"▲","Increment value"),
-          makeStep(-1,"▼","Decrement value")
-        );
-        parent.insertBefore(shell,input);
-        shell.append(input,controls);
-      });
-    }
 
     function refreshFocusedEditorState(){
       const active=root.ownerDocument?.activeElement;
@@ -7702,7 +7658,6 @@ function __MLB_STUDIO_FACTORY__(){
       // data, training, generation, serve, cloud, local files). Apply one
       // shared themed stepper pass after every render so browser-native white
       // spinner chrome never leaks into the Studio UI.
-      installNumberSteppers(root);
 
       const nextInspectorKey=inspectorRenderKey();
       const inspectorPos=inspectorScrollPositions[nextInspectorKey]||{left:0,top:0};
