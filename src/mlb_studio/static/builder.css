@@ -2327,3 +2327,13 @@
   text-shadow:0 1px 1px rgba(0,0,0,.75);
 }
 .mlb-beta{margin-left:1px!important}
+
+
+/* MLB Studio V1.0 — embedded optimized logo + universal bottom breathing room */
+.mlb-root{margin-bottom:18px!important;padding-bottom:10px!important;box-sizing:border-box!important}
+.mlb-shell{padding-bottom:8px!important;box-sizing:border-box!important}
+.mlb-statusbar{margin-bottom:8px!important}
+.mlb-logo{display:inline-flex!important;align-items:center!important;height:52px!important;gap:8px!important;flex:0 0 auto!important}
+.mlb-logo-brand{display:block!important;width:172px!important;height:52px!important;flex:0 0 172px!important;object-fit:contain!important;object-position:left center!important}
+.mlb-css-logo{display:none!important}
+.mlb-sidebar{padding-bottom:42px!important;box-sizing:border-box!important}
