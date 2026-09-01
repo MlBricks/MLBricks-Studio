@@ -25,7 +25,7 @@ Version 0.1.2 deliberately removes `anywidget`. The Builder uses Jupyter's stand
 
 - **Add Function** lives in the API Component top toolbar beside **Add Module**.
 - Adjacent graph nodes connect directly side-to-side; only long/skip routes use outside rails.
-- The permanent API helper banner at the bottom of the canvas has been removed.
+- Persistent canvas instruction/helper bars are removed across all Studio workspaces; only temporary action-specific port guidance is shown while wiring.
 - API nodes now distinguish **Function**, **Static Method**, **Class Method**, **Instance Method**, and **Create Object** calls.
 - Instance-method nodes can **Create New Object** or **Use Existing Object** from the same API Component.
 - Objects use stable internal IDs tied to their source node, so renaming the visible node does not break references.

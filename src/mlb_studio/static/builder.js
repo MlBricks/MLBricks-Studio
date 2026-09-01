@@ -698,7 +698,6 @@
         draw();
         return;
       }
-      runtimePanel=null;
       if(!galleryWorkspace.open&&!cloudWorkspace.open)galleryPreviousBottomExpanded=bottomExpanded;
       else if(cloudWorkspace.open)galleryPreviousBottomExpanded=cloudPreviousBottomExpanded;
       cloudWorkspace.open=false;
@@ -718,7 +717,6 @@
     }
 
     function openCloudWorkspace(){
-      runtimePanel=null;
       if(!cloudWorkspace.open&&!galleryWorkspace.open)cloudPreviousBottomExpanded=bottomExpanded;
       else if(galleryWorkspace.open)cloudPreviousBottomExpanded=galleryPreviousBottomExpanded;
       galleryWorkspace.open=false;
@@ -734,6 +732,14 @@
       cloudWorkspace.open=false;
       bottomExpanded=cloudPreviousBottomExpanded;
       setStatus("Cloud & Repositories closed.");
+      draw();
+    }
+
+    function exitRuntimePanel(){
+      if(!runtimePanel)return;
+      const mode=runtimePanel.mode;
+      runtimePanel=null;
+      setStatus((mode==="train"?"Training":mode==="generate"?"Generation":"Runtime")+" view closed.");
       draw();
     }
 
@@ -6218,6 +6224,8 @@
       rememberWorkspaceView();
       root.innerHTML="";
       root.classList.toggle("mlb-custom-editor-active",current(state)?.kind==="custom_edit");
+      const runtimeWorkspaceActive=!!(runtimePanel && state.active_workspace==="model" && !galleryWorkspace.open && !cloudWorkspace.open);
+      root.classList.toggle("mlb-runtime-page-active",runtimeWorkspaceActive);
 
       // Top bar
       const top=document.createElement("div");top.className="mlb-topbar";
@@ -6258,45 +6266,61 @@
         (execution.runtime_kind==="train"||execution.runtime_kind==="generate");
       const dataFetchBusy=state.active_workspace==="data"&&execution.status==="running"&&execution.runtime_kind==="data";
       if(current(state)?.kind!=="custom_edit"){
-        const run=state.active_workspace==="model"
-          ?actionBtn(
-              modelRuntimeBusy
-                ?(execution.runtime_kind==="train"?"Training":"Generating")
-                :"Build",
-              "mlb-run mlb-build mlb-top-build-tab"+(modelRuntimeBusy?" runtime-busy "+execution.runtime_kind:""),
-              modelRuntimeBusy?"activity":"build"
-            )
-          :actionBtn("Fetch Data","mlb-run mlb-build mlb-top-build-tab","fetch");
-        run.disabled=modelRuntimeBusy;
-        run.addEventListener("click",()=>{
-          if(galleryWorkspace.open){closeGallery();return;}
-          if(cloudWorkspace.open){closeCloudWorkspace();return;}
-          (state.active_workspace==="model"?requestModelBuild:requestRun)();
-        });
-        primary.appendChild(run);
-        const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
-        stopBtn.addEventListener("click",requestStop);
-        stopBtn.style.display=(dataFetchBusy||modelRuntimeBusy)?"inline-flex":"none";
-        if(state.active_workspace==="data" || modelRuntimeBusy)primary.appendChild(stopBtn);
-        const galleryBtn=actionBtn("Gallery","mlb-dark-btn mlb-top-gallery-btn"+(galleryWorkspace.open?" active":""),"gallery");
-        galleryBtn.title="Open prebuilt Models, Components and Data";
-        galleryBtn.addEventListener("click",()=>galleryWorkspace.open?closeGallery():openGallery(galleryWorkspace.tab));
-        primary.appendChild(galleryBtn);
+        if(runtimeWorkspaceActive){
+          const cancelBtn=btn("← Cancel","mlb-dark-btn mlb-runtime-back-btn");
+          cancelBtn.title="Return to the previous builder page";
+          cancelBtn.addEventListener("click",exitRuntimePanel);
+          primary.appendChild(cancelBtn);
+          const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
+          stopBtn.disabled=execution.status!=="running"||!(execution.runtime_kind==="train"||execution.runtime_kind==="generate"||execution.runtime_kind==="serve");
+          stopBtn.style.display=(execution.status==="running")?"inline-flex":"none";
+          stopBtn.addEventListener("click",requestStop);
+          primary.appendChild(stopBtn);
+        }else{
+          const run=state.active_workspace==="model"
+            ?actionBtn(
+                modelRuntimeBusy
+                  ?(execution.runtime_kind==="train"?"Training":"Generating")
+                  :"Build",
+                "mlb-run mlb-build mlb-top-build-tab"+(modelRuntimeBusy?" runtime-busy "+execution.runtime_kind:""),
+                modelRuntimeBusy?"activity":"build"
+              )
+            :actionBtn("Fetch Data","mlb-run mlb-build mlb-top-build-tab","fetch");
+          run.disabled=modelRuntimeBusy;
+          run.addEventListener("click",()=>{
+            if(galleryWorkspace.open){closeGallery();return;}
+            if(cloudWorkspace.open){closeCloudWorkspace();return;}
+            (state.active_workspace==="model"?requestModelBuild:requestRun)();
+          });
+          primary.appendChild(run);
+          const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
+          stopBtn.addEventListener("click",requestStop);
+          stopBtn.style.display=(dataFetchBusy||modelRuntimeBusy)?"inline-flex":"none";
+          if(state.active_workspace==="data" || modelRuntimeBusy)primary.appendChild(stopBtn);
+          const galleryBtn=actionBtn("Gallery","mlb-dark-btn mlb-top-gallery-btn"+(galleryWorkspace.open?" active":""),"gallery");
+          galleryBtn.title="Open prebuilt Models, Components and Data";
+          galleryBtn.addEventListener("click",()=>galleryWorkspace.open?closeGallery():openGallery(galleryWorkspace.tab));
+          primary.appendChild(galleryBtn);
+        }
       }
       top.appendChild(primary);
 
       const acts=document.createElement("div");acts.className="mlb-top-actions";
-      const undoBtn=btn("↶ Undo","mlb-dark-btn mlb-history-btn");undoBtn.disabled=undoStack.length===0;undoBtn.title=current(state)?.kind==="custom_edit"?"Undo last edit in this editor":"Undo last model edit";undoBtn.addEventListener("click",undo);
-      const redoBtn=btn("↷ Redo","mlb-dark-btn mlb-history-btn");redoBtn.disabled=redoStack.length===0;redoBtn.title=current(state)?.kind==="custom_edit"?"Redo last edit in this editor":"Redo last undone edit";redoBtn.addEventListener("click",redo);
-      const clearBtn=btn("↻ Clear","mlb-dark-btn");clearBtn.disabled=layoutIsLocked();clearBtn.addEventListener("click",()=>{
-        if(!requireEditableLayout("clear components"))return;
-        const c=current(state);if(!c.nodes.length&&!c.edges.length)return;
-        checkpoint("Clear graph");c.nodes=[];c.edges=[];selected=null;pendingPort=null;setStatus("Graph cleared.");draw();
-      });
-      const cloudBtn=actionBtn("Cloud & Repositories","mlb-dark-btn mlb-top-cloud-btn mlb-top-cloud-action"+(cloudWorkspace.open?" active":""),"cloud");
-      cloudBtn.title="Open Cloud & Repositories";
-      cloudBtn.addEventListener("click",()=>cloudWorkspace.open?closeCloudWorkspace():openCloudWorkspace());
       const fullBtn=!isPopout?document.createElement("a"):null;
+      if(!runtimeWorkspaceActive){
+        const undoBtn=btn("↶ Undo","mlb-dark-btn mlb-history-btn");undoBtn.disabled=undoStack.length===0;undoBtn.title=current(state)?.kind==="custom_edit"?"Undo last edit in this editor":"Undo last model edit";undoBtn.addEventListener("click",undo);
+        const redoBtn=btn("↷ Redo","mlb-dark-btn mlb-history-btn");redoBtn.disabled=redoStack.length===0;redoBtn.title=current(state)?.kind==="custom_edit"?"Redo last edit in this editor":"Redo last undone edit";redoBtn.addEventListener("click",redo);
+        const clearBtn=btn("↻ Clear","mlb-dark-btn");clearBtn.disabled=layoutIsLocked();clearBtn.addEventListener("click",()=>{
+          if(!requireEditableLayout("clear components"))return;
+          const c=current(state);if(!c.nodes.length&&!c.edges.length)return;
+          checkpoint("Clear graph");c.nodes=[];c.edges=[];selected=null;pendingPort=null;setStatus("Graph cleared.");draw();
+        });
+        const cloudBtn=actionBtn("Cloud & Repositories","mlb-dark-btn mlb-top-cloud-btn mlb-top-cloud-action"+(cloudWorkspace.open?" active":""),"cloud");
+        cloudBtn.title="Open Cloud & Repositories";
+        cloudBtn.addEventListener("click",()=>cloudWorkspace.open?closeCloudWorkspace():openCloudWorkspace());
+        acts.append(undoBtn,redoBtn,clearBtn);
+        if(current(state)?.kind!=="custom_edit")acts.appendChild(cloudBtn);
+      }
       if(fullBtn){
         fullBtn.className="mlb-dark-btn mlb-full-window-btn";
         fullBtn.textContent="↗ Full Window";
@@ -6304,9 +6328,7 @@
         fullBtn.title="Open MLB Studio in a separate full-window browser tab";
         fullBtn.addEventListener("click",activateFullWindowLink);
       }
-      acts.append(undoBtn,redoBtn,clearBtn);
-      if(current(state)?.kind!=="custom_edit")acts.appendChild(cloudBtn);
-      if(fullBtn)acts.appendChild(fullBtn);
+      if(fullBtn && !runtimeWorkspaceActive)acts.appendChild(fullBtn);
       top.appendChild(acts);
       root.appendChild(top);
 
@@ -6314,6 +6336,7 @@
 
       // Sidebar
       const side=document.createElement("aside");side.className="mlb-sidebar";
+      if(runtimeWorkspaceActive)side.classList.add("mlb-sidebar-hidden");
       const head=document.createElement("div");head.className="mlb-sidehead";head.innerHTML="<span>"+(state.active_workspace==="data"?"DATA LIBRARY":"COMPONENT LIBRARY")+"</span><span>×</span>";side.appendChild(head);
       const sr=document.createElement("div");sr.className="mlb-search-row";
       const searchInput=document.createElement("input");searchInput.className="mlb-search";searchInput.placeholder="Search...";searchInput.setAttribute("aria-label",state.active_workspace==="data"?"Search data steps":"Search components");searchInput.value=search;searchInput.addEventListener("input",()=>{
@@ -6548,11 +6571,12 @@
       }else if(cloudWorkspace.open){
         renderCentralCloud(canvas);
       }
-      if(runtimePanel && state.active_workspace==="model"){
+      if(runtimeWorkspaceActive){
         const entry=builtModelById(runtimePanel.modelId);
         if(entry){renderRuntimeWorkspace(canvas,entry,runtimePanel.mode);}
         else{runtimePanel=null;}
       }
+      if(!galleryWorkspace.open && !cloudWorkspace.open && !runtimeWorkspaceActive){
       const ctop=document.createElement("div");ctop.className="mlb-canvas-top";
       const crumbs=document.createElement("div");crumbs.className="mlb-breadcrumbs";
       state.breadcrumbs.forEach((c,i)=>{const b=btn(c.name,"mlb-crumb");b.addEventListener("click",()=>{
@@ -6642,31 +6666,31 @@
         });
       }
       wrap.appendChild(flow);canvas.appendChild(wrap);
-      // Keep temporary port guidance, but do not occupy canvas space with a
-      // permanent API Component instruction banner.
-      if(pendingPort||!isApiComposerView()){
+      // Keep only action-specific port guidance. Persistent canvas instruction
+      // bars are intentionally disabled across every Studio workspace.
+      if(pendingPort){
         const hint=document.createElement("div");hint.className="mlb-hint";
-        hint.textContent=pendingPort
-          ?"Choose the matching lane: Top ↔ Top, Main ↔ Main, Bottom ↔ Bottom."
-          :(state.active_workspace==="data"
-            ?"Build left to right: one Data Source → Processing → Train/Val/Test → Tokenize → Prepared Dataset. Open Gallery to load a sample pipeline."
-            :"Select a node before adding a component to insert after it. Use Move Left / Move Right in Inspector to reorder. Main flow rewires automatically.");
+        hint.textContent="Choose the matching lane: Top ↔ Top, Main ↔ Main, Bottom ↔ Bottom.";
         canvas.appendChild(hint);
       }
+
+      }
       main.appendChild(canvas);
-      requestAnimationFrame(()=>{
-        // transform:scale changes pixels but not layout. Give the wrapper the
-        // scaled dimensions so zoom creates the correct scroll area instead
-        // of clipping nodes, bottom ports, edges, or the instruction banner.
-        const baseW=Math.max(flow.scrollWidth,flow.offsetWidth);
-        const baseH=Math.max(flow.scrollHeight,flow.offsetHeight);
-        wrap.style.width=Math.ceil(baseW*zoom)+"px";
-        wrap.style.height=Math.ceil(baseH*zoom)+"px";
-        drawEdges(wrap,flow);
-        const pos=workspaceScroll[state.active_workspace]||{left:0,top:0};
-        canvas.scrollLeft=pos.left||0;
-        canvas.scrollTop=pos.top||0;
-      });
+      if(!galleryWorkspace.open && !cloudWorkspace.open && !runtimeWorkspaceActive){
+        requestAnimationFrame(()=>{
+          // transform:scale changes pixels but not layout. Give the wrapper the
+          // scaled dimensions so zoom creates the correct scroll area instead
+          // of clipping nodes, bottom ports, edges, or the instruction banner.
+          const baseW=Math.max(flow.scrollWidth,flow.offsetWidth);
+          const baseH=Math.max(flow.scrollHeight,flow.offsetHeight);
+          wrap.style.width=Math.ceil(baseW*zoom)+"px";
+          wrap.style.height=Math.ceil(baseH*zoom)+"px";
+          drawEdges(wrap,flow);
+          const pos=workspaceScroll[state.active_workspace]||{left:0,top:0};
+          canvas.scrollLeft=pos.left||0;
+          canvas.scrollTop=pos.top||0;
+        });
+      }
 
       // Bottom project drawer is open by default. Train/Generate collapse it on
       // entry; normal design, local import and Serve Model/API keep it open.
