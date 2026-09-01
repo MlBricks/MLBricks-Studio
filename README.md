@@ -19,7 +19,17 @@ builder = Builder()
 builder
 ```
 
-Version 0.1.2 deliberately removes `anywidget`. The Builder uses Jupyter's standard HTML representation protocol instead, so Kaggle does not need to register a custom frontend widget module.
+MLB Studio V1.0 uses Jupyter's standard HTML representation protocol instead of `anywidget`, so Kaggle does not need a custom frontend widget module.
+
+
+## V1.0 production hardening
+
+- Legacy PyTorch checkpoints use restricted `torch.load(..., weights_only=True)` loading by default. Pickle-based legacy files are blocked unless unsafe legacy loading is explicitly enabled for a trusted file.
+- Projects loaded from local files, cloud bundles, or Hub are **untrusted for the current session**. Embedded Python/API imports are blocked until you review the project and call `builder.trust_project()`. Trust is never serialized into a project file.
+- Builder artifacts are stored under `mlbricks_workspace/` rather than a top-level `mlbricks/` directory, preventing collisions with the installed Python package namespace.
+- Cloud ZIP extraction rejects path traversal and symlink entries.
+- The built-in model server binds to `127.0.0.1` by default, requires an API key by default, uses same-origin CORS by default, escapes model names, adds browser security headers, limits request size/prompt length/token count, enforces concurrency and rate limits, and stops overlong generation requests.
+- For permanent internet-facing deployment, place the server behind a production TLS/reverse proxy. The optional ngrok tunnel is intended for temporary notebook sharing and requires API-key protection.
 
 ## MLB Studio V1.0 API editor layout
 
@@ -32,9 +42,7 @@ Version 0.1.2 deliberately removes `anywidget`. The Builder uses Jupyter's stand
 - A created instance is constructed once per compiled API graph and reused by later nodes, preserving object state without recreating it.
 - API results can optionally be registered as reusable objects for later nodes.
 
-MLBricks itself remains a separate dependency and is installed from:
-
-`https://github.com/MlBricks/MLBricks.git`
+MLBricks itself remains a separate dependency. MLB Studio V1.0 pins the compatible release to `mlbricks==1.0.0` for reproducible installs.
 
 ## v0.1.3 UI
 
@@ -1190,7 +1198,10 @@ The trained model is loaded once when the server starts and remains resident.
 
 Bearer API-key protection is enabled by default. If the API-key field is empty,
 Builder generates a random key. API keys and ngrok tokens are session-only and
-are not written into Builder project files.
+are not written into Builder project files. V1.0 also defaults to loopback-only
+binding and same-origin CORS, adds browser security headers, request/prompt/token
+limits, concurrency/rate limiting, and a generation timeout. Public ngrok tunnels
+refuse to start when API-key authentication is disabled.
 
 For public tunnels install:
 

@@ -1,4 +1,4 @@
-(function(){
+function __MLB_STUDIO_FACTORY__(){
   // Always overwrite any renderer left by an older notebook output.
   // Kaggle keeps browser globals even when Python modules are reinstalled.
 
@@ -1835,7 +1835,7 @@
     }
 
     function fullWindowPage(){
-      const assets=payload.popout_assets||{};
+      const assets=payload.popout_assets||{css:window.__MLB_STUDIO_CSS__||"",js:window.__MLB_STUDIO_JS_SOURCE__||""};
       if(!assets.css||!assets.js)return null;
       const popPayload=cp(payload);
       delete popPayload.popout_assets;
@@ -2798,7 +2798,8 @@
     function defaultServeConfig(entry){
       const gen=defaultGenerationConfig(entry);
       return {
-        host:"0.0.0.0",port:8000,cors_origin:"*",require_api_key:true,public_tunnel:"off",
+        host:"127.0.0.1",port:8000,cors_origin:"same-origin",require_api_key:true,public_tunnel:"off",
+        max_request_bytes:1048576,max_prompt_chars:32768,max_server_new_tokens:2048,request_timeout_seconds:120,max_concurrent_requests:2,rate_limit_per_minute:60,
         device:entry?.generation_config?.device||gen.device,
         backend:entry?.generation_config?.backend||gen.backend,
         execution_mode:entry?.generation_config?.execution_mode||gen.execution_mode,
@@ -3286,6 +3287,17 @@
         runtimeField("CORS Origin","text",config.cors_origin,v=>update("cors_origin",v)),runtimeField("Require API Key","checkbox",config.require_api_key,v=>update("require_api_key",v)),
         runtimeField("Public Link","select",config.public_tunnel,v=>update("public_tunnel",v),[{value:"off",label:"Off — Local / LAN only"},{value:"ngrok",label:"ngrok — Public HTTPS"}]));
       access.appendChild(accessGrid);main.appendChild(access);
+
+      const limits=runtimeSection("Safety & Request Limits"),limitsGrid=document.createElement("div");limitsGrid.className="mlb-runtime-grid";
+      limitsGrid.append(
+        runtimeField("Max Request Bytes","number",config.max_request_bytes,v=>update("max_request_bytes",v)),
+        runtimeField("Max Prompt Characters","number",config.max_prompt_chars,v=>update("max_prompt_chars",v)),
+        runtimeField("Max New Tokens","number",config.max_server_new_tokens,v=>update("max_server_new_tokens",v)),
+        runtimeField("Request Timeout (sec)","number",config.request_timeout_seconds,v=>update("request_timeout_seconds",v)),
+        runtimeField("Max Concurrent Requests","number",config.max_concurrent_requests,v=>update("max_concurrent_requests",v)),
+        runtimeField("Rate Limit / Minute","number",config.rate_limit_per_minute,v=>update("rate_limit_per_minute",v))
+      );
+      limits.appendChild(limitsGrid);main.appendChild(limits);
 
       const secretsSection=runtimeSection("Session Credentials"),secGrid=document.createElement("div");secGrid.className="mlb-runtime-grid";
       secGrid.appendChild(runtimeField("API Key (blank = generate one)","password",secret.api_key,v=>secret.api_key=v));
@@ -6513,7 +6525,7 @@
       rememberWorkspaceView();
       return {
         format:"mlb-studio-design",
-        format_version:"0.8.0",
+        format_version:"1.0.0",
         builder_version:"1.0.0",
         saved_at:new Date().toISOString(),
         state:sanitizedProjectState()
@@ -7551,4 +7563,7 @@
   }
 
   window.MLBricksBuilder={mount};
-})();
+}
+window.__MLB_STUDIO_FACTORY__=__MLB_STUDIO_FACTORY__;
+window.__MLB_STUDIO_JS_SOURCE__="("+__MLB_STUDIO_FACTORY__.toString()+")();";
+__MLB_STUDIO_FACTORY__();

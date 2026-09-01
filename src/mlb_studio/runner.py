@@ -377,7 +377,7 @@ def execute_data_pipeline(
                 result = data_api.prepared_dataset_output(
                     result,
                     save_to_disk=_bool(p.get("save_to_disk", False)),
-                    path=p.get("path", "mlbricks/data/prepared_dataset"),
+                    path=p.get("path", "mlbricks_workspace/data/prepared_dataset"),
                 )
 
             else:

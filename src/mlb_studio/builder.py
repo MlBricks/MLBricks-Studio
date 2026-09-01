@@ -23,6 +23,8 @@ from .graph import (
     stateaware_esa_200m_project, soup_200m_project, soup_30m_1l_project,
 )
 from .runtime import get_mlbricks_info
+from .security import project_executable_features, safe_extract_zip, safe_torch_load
+from .version import __version__, FORMAT_VERSION
 from .api_registry import discover_mlbricks_api, refresh_component_api
 from .import_pool import IMPORT_POOL
 from .runner import execute_data_pipeline, validate_data_pipeline, PipelineValidationError, PipelineStopped
@@ -54,6 +56,11 @@ class Builder:
             self.state = soup_30m_1l_project()
         else:
             self.state = new_project()
+        # Trust is deliberately session-local and is never serialized. New/preset
+        # projects are authored in this Python session; externally supplied states
+        # must be explicitly trusted before imports or embedded Python can execute.
+        self._project_trusted = project is None
+        self._project_trust_origin = "local-session" if self._project_trusted else "external-constructor"
         self.catalog = primitive_catalog()
         self.import_pool = IMPORT_POOL
         # Source schema is available immediately; MLBricks modules themselves
@@ -73,6 +80,7 @@ class Builder:
         self.last_data_result = None
         self.last_run_error = None
         self.trained_models = {}
+        self._unsafe_legacy_checkpoints = set()
         self._model_servers = {}
         # Actual Dataset/DatasetDict objects stay in Python memory. The serializable
         # metadata lives in state["prepared_datasets"] and is saved with the design.
@@ -96,7 +104,7 @@ class Builder:
         """Replace legacy Kaggle-only defaults with this session's workspace paths."""
         paths = self.local_environment.get("paths") or {}
         workspace_root = self.local_environment.get("workspace_root") or self.local_environment.get("default_root") or "."
-        data_default = str(Path(paths.get("data") or (Path(workspace_root) / "mlbricks" / "data")) / "prepared_dataset")
+        data_default = str(Path(paths.get("data") or (Path(workspace_root) / "mlbricks_workspace" / "data")) / "prepared_dataset")
 
         for item in self.catalog:
             for field in item.get("api") or []:
@@ -106,7 +114,7 @@ class Builder:
                         field["value"] = str(workspace_root)
                 if item.get("type") == "prepared_dataset" and field.get("key") == "path":
                     current = str(field.get("value") or "")
-                    if current == "mlbricks/data/prepared_dataset" or current.startswith("/kaggle/"):
+                    if current in {"mlbricks_workspace/data/prepared_dataset", "mlbricks/data/prepared_dataset"} or current.startswith("/kaggle/"):
                         field["value"] = data_default
 
         for component in (self.state.get("components") or {}).values():
@@ -116,7 +124,7 @@ class Builder:
                 if node.get("type") == "local_dataset" and (local_path == "." or local_path.startswith("/kaggle/")):
                     params["path"] = str(workspace_root)
                 prepared_path = str(params.get("path") or "")
-                if node.get("type") == "prepared_dataset" and (prepared_path == "mlbricks/data/prepared_dataset" or prepared_path.startswith("/kaggle/")):
+                if node.get("type") == "prepared_dataset" and (prepared_path in {"mlbricks_workspace/data/prepared_dataset", "mlbricks/data/prepared_dataset"} or prepared_path.startswith("/kaggle/")):
                     params["path"] = data_default
 
     def _detect_runtime_capabilities(self):
@@ -199,6 +207,44 @@ class Builder:
     def to_dict(self):
         return json.loads(json.dumps(self.state))
 
+    def project_trust_info(self):
+        features = project_executable_features(self.state)
+        return {
+            "trusted": bool(self._project_trusted),
+            "origin": self._project_trust_origin,
+            "executable_features": features,
+            "requires_trust": bool(features),
+        }
+
+    def trust_project(self, trusted=True):
+        """Explicitly allow or block executable project features for this session.
+
+        The decision is intentionally not saved into the project file, so a project
+        downloaded or reopened later must be reviewed/trusted again.
+        """
+        self._project_trusted = bool(trusted)
+        self._project_trust_origin = "explicit-user-trust" if self._project_trusted else "explicitly-untrusted"
+        return self.project_trust_info()
+
+    def untrust_project(self):
+        return self.trust_project(False)
+
+    def _mark_external_project_untrusted(self, origin):
+        self._project_trusted = False
+        self._project_trust_origin = str(origin or "external-project")
+        self._unsafe_legacy_checkpoints.clear()
+
+    def _runtime_with_project_trust(self, config, *, checkpoint_path=None):
+        runtime = dict(config or {})
+        runtime["allow_user_code"] = bool(self._project_trusted)
+        if checkpoint_path:
+            try:
+                resolved = str(Path(checkpoint_path).expanduser().resolve())
+            except Exception:
+                resolved = str(checkpoint_path)
+            runtime["allow_unsafe_legacy_checkpoint"] = resolved in self._unsafe_legacy_checkpoints
+        return runtime
+
     def save(self, path):
         path = Path(path)
         if path.suffix != ".mlbricks":
@@ -208,6 +254,7 @@ class Builder:
 
     def load(self, path):
         self.state = json.loads(Path(path).read_text(encoding="utf-8"))
+        self._mark_external_project_untrusted("local-project-file")
         return self
 
     def component_api(self, component_type=None, *, ensure_import=False):
@@ -257,6 +304,11 @@ class Builder:
         import_path = str(import_path or "").strip()
         if not import_path:
             raise ValueError("import_path is required")
+        if not self._project_trusted:
+            raise PermissionError(
+                "This project is untrusted. External Python imports are blocked until "
+                "you review the project and call builder.trust_project()."
+            )
         result = self.import_pool.ensure_external(import_path, label=label)
         result["message"] = (
             f"{label or import_path} ready from {import_path}."
@@ -659,7 +711,7 @@ class Builder:
             raise RuntimeError("Select a prepared training dataset first.")
         meta = self._dataset_meta(dataset_id)
         dataset = self.get_prepared_dataset(dataset_id)
-        config = dict(entry.get("training_config") or {})
+        config = self._runtime_with_project_trust(entry.get("training_config") or {})
         self._stop_event.clear()
         def emit(payload):
             if progress_callback:
@@ -693,7 +745,7 @@ class Builder:
             raise RuntimeError("This model has no trained/loaded weights yet.")
         dataset_id = entry.get("selected_dataset_id")
         meta = self._dataset_meta(dataset_id) if dataset_id else copy.deepcopy(entry.get("hub_dataset_meta") or {})
-        config = dict(entry.get("generation_config") or {})
+        config = self._runtime_with_project_trust(entry.get("generation_config") or {}, checkpoint_path=entry.get("checkpoint_path") or entry.get("path"))
         self._stop_event.clear()
 
         def emit(payload):
@@ -751,7 +803,7 @@ class Builder:
         for key in ("device","backend","execution_mode","compile_mode","precision"):
             value=(serve_config or {}).get(key)
             if value not in (None,""): runtime[key]=value
-        return runtime
+        return self._runtime_with_project_trust(runtime, checkpoint_path=entry.get("checkpoint_path") or entry.get("path"))
 
     def start_model_server(self, model_id, *, config=None, api_key=None, ngrok_token=None, progress_callback=None):
         from .model_runtime import load_trained_for_generation
@@ -788,9 +840,16 @@ class Builder:
             compiled=compiled,tokenizer=tokenizer,
             context=entry.get("context_length") or (self.state.get("project") or {}).get("context_length") or 512,
             generation_defaults=entry.get("generation_config") or {},
-            host=config.get("host") or "0.0.0.0",port=config.get("port") if config.get("port") is not None else 8000,
-            cors_origin=config.get("cors_origin") or "*",api_key_required=bool(config.get("require_api_key",True)),
-            api_key=api_key or None)
+            host=config.get("host") or "127.0.0.1",port=config.get("port") if config.get("port") is not None else 8000,
+            cors_origin=config.get("cors_origin") or "same-origin",api_key_required=bool(config.get("require_api_key",True)),
+            api_key=api_key or None,
+            max_request_bytes=config.get("max_request_bytes",1_048_576),
+            max_prompt_chars=config.get("max_prompt_chars",32_768),
+            max_new_tokens=config.get("max_server_new_tokens",2048),
+            request_timeout_seconds=config.get("request_timeout_seconds",120),
+            max_concurrent_requests=config.get("max_concurrent_requests",2),
+            rate_limit_per_minute=config.get("rate_limit_per_minute",60),
+            debug_errors=bool(config.get("debug_errors",False)))
         info=server.start()
 
         # Register the live HTTP server immediately. If a public tunnel later
@@ -809,6 +868,9 @@ class Builder:
 
         safe_config={"host":server.host,"port":info.port,"cors_origin":server.cors_origin,
                      "require_api_key":server.api_key_required,"public_tunnel":tunnel,
+                     "max_request_bytes":server.max_request_bytes,"max_prompt_chars":server.max_prompt_chars,
+                     "max_server_new_tokens":server.max_new_tokens,"request_timeout_seconds":server.request_timeout_seconds,
+                     "max_concurrent_requests":server.max_concurrent_requests,"rate_limit_per_minute":server.rate_limit_per_minute,
                      "device":runtime.get("device","auto"),"backend":runtime.get("backend","pytorch"),
                      "execution_mode":runtime.get("execution_mode","eager"),
                      "compile_mode":runtime.get("compile_mode","reduce-overhead"),
@@ -995,9 +1057,10 @@ class Builder:
         component["id"] = root_id
         self.state.setdefault("components", {})[root_id] = component
         self.state["view_component_id"] = root_id
-        self.state.setdefault("custom_components", {}).update(
-            copy.deepcopy(package.get("custom_components") or {})
-        )
+        imported_custom = copy.deepcopy(package.get("custom_components") or {})
+        self.state.setdefault("custom_components", {}).update(imported_custom)
+        if project_executable_features({"custom_components": imported_custom}):
+            self._mark_external_project_untrusted("huggingface-model")
         self.state.setdefault("component_cache", {}).update(
             copy.deepcopy(package.get("component_cache") or {})
         )
@@ -1072,6 +1135,7 @@ class Builder:
         self.state.setdefault("project_files", [])
         self.prepared_datasets = {}
         self.trained_models = {}
+        self._mark_external_project_untrusted("huggingface-hub")
         return result
 
     @staticmethod
@@ -1161,8 +1225,7 @@ class Builder:
         archive_path = Path(archive_path)
         with tempfile.TemporaryDirectory(prefix="mlbricks_restore_") as td:
             root = Path(td)
-            with zipfile.ZipFile(archive_path, "r") as zf:
-                zf.extractall(root)
+            safe_extract_zip(archive_path, root)
             manifest_path = root / "manifest.json"
             if not manifest_path.exists():
                 raise RuntimeError("Downloaded file is not an MLBricks cloud bundle.")
@@ -1181,6 +1244,7 @@ class Builder:
                 self.state.setdefault("project_files", [])
                 self.prepared_datasets = {}
                 self.trained_models = {}
+                self._mark_external_project_untrusted("cloud-bundle")
                 return {"content_type": "project", "name": manifest.get("name")}
 
             if content_type == "dataset":
@@ -1214,9 +1278,10 @@ class Builder:
                 component["id"] = root_id
                 self.state.setdefault("components", {})[root_id] = component
                 self.state["view_component_id"] = root_id
-                self.state.setdefault("custom_components", {}).update(
-                    copy.deepcopy(package.get("custom_components") or {})
-                )
+                imported_custom = copy.deepcopy(package.get("custom_components") or {})
+                self.state.setdefault("custom_components", {}).update(imported_custom)
+                if project_executable_features({"custom_components": imported_custom}):
+                    self._mark_external_project_untrusted("cloud-model")
                 self.state.setdefault("component_cache", {}).update(
                     copy.deepcopy(package.get("component_cache") or {})
                 )
@@ -1452,7 +1517,7 @@ class Builder:
             "missing": [],
         }
 
-    def _restore_model_checkpoint(self, path):
+    def _restore_model_checkpoint(self, path, *, allow_unsafe_legacy_checkpoint=False):
         """Restore either a unified MLBricks artifact or a legacy Builder checkpoint."""
         import torch
 
@@ -1482,7 +1547,9 @@ class Builder:
             package = copy.deepcopy(metadata.get("builder_package") or {})
             source_entry = copy.deepcopy(package.get("model_entry") or {})
         else:
-            payload = torch.load(path_obj, map_location="cpu", weights_only=False)
+            payload = safe_torch_load(path_obj, map_location="cpu", allow_unsafe_pickle=allow_unsafe_legacy_checkpoint)
+            if allow_unsafe_legacy_checkpoint:
+                self._unsafe_legacy_checkpoints.add(str(path_obj))
             if not isinstance(payload, dict) or "model_state" not in payload:
                 raise RuntimeError(
                     "The selected file is neither an MLBricks model artifact nor a "
@@ -1525,6 +1592,8 @@ class Builder:
         architecture["id"] = root_id
         self.state.setdefault("components", {})[root_id] = architecture
         self.state["view_component_id"] = root_id
+        if project_executable_features({"custom_components": custom_components}):
+            self._mark_external_project_untrusted("loaded-model-artifact")
         self.state.setdefault("custom_components", {}).update(custom_components)
         self.state.setdefault("component_cache", {}).update(
             copy.deepcopy(package.get("component_cache") or {})
@@ -1593,9 +1662,10 @@ class Builder:
         self.state.setdefault("project_files", [])
         self.prepared_datasets = {}
         self.trained_models = {}
+        self._mark_external_project_untrusted("local-project-file")
         return {"content_type": "project", "name": (self.state.get("project") or {}).get("name") or path_obj.name, "path": str(path_obj)}
 
-    def load_local_runtime_path(self, path, *, content_type="auto", tokenizer_name="gpt2", text_column="text"):
+    def load_local_runtime_path(self, path, *, content_type="auto", tokenizer_name="gpt2", text_column="text", allow_unsafe_legacy_checkpoint=False):
         from .local_runtime import detect_local_kind
         path_obj = Path(path).expanduser().resolve()
         info = detect_local_kind(path_obj)
@@ -1605,7 +1675,7 @@ class Builder:
             meta = self.load_local_dataset_path(path_obj, tokenizer_name=tokenizer_name, text_column=text_column)
             return {"content_type": "dataset", "dataset": meta, "name": meta["name"]}
         if requested == "model" or (requested == "auto" and kind in {"model_artifact", "model_checkpoint"}):
-            model = self._restore_model_checkpoint(path_obj)
+            model = self._restore_model_checkpoint(path_obj, allow_unsafe_legacy_checkpoint=allow_unsafe_legacy_checkpoint)
             return {"content_type": "model", "model": model, "name": model.get("name") or path_obj.name}
         if requested == "project" or (requested == "auto" and kind in {"project_json", "project_bin"}):
             return self._load_local_project_file(path_obj)
@@ -2388,8 +2458,8 @@ class Builder:
         available = [k for k, v in self.mlbricks_api.items() if v.get("available")]
         unavailable = {k: v.get("error") for k, v in self.mlbricks_api.items() if not v.get("available")}
         return {
-            "builder_version": "1.0.0",
-            "frontend_version": "1.0.0",
+            "builder_version": __version__,
+            "frontend_version": __version__,
             "mlbricks": info,
             "import_pool": self.import_pool.status(),
             "api_components_available": available,
@@ -2402,6 +2472,7 @@ class Builder:
     def _html(self, bridge=None):
         css = (_STATIC / "builder.css").read_text(encoding="utf-8")
         js = (_STATIC / "builder.js").read_text(encoding="utf-8")
+        trust = self.project_trust_info()
         payload = json.dumps({
             "state": self.state,
             "catalog": self.catalog,
@@ -2410,12 +2481,26 @@ class Builder:
             "runtime_capabilities": self.runtime_capabilities,
             "local_environment": self.local_environment,
             "instance_id": self._instance_id,
-            "popout_assets": {"css": css, "js": js},
+            "project_trust": trust,
         }).replace("</", "<\\/")
+        warning = ""
+        if trust.get("requires_trust") and not trust.get("trusted"):
+            count = len(trust.get("executable_features") or [])
+            warning = (
+                '<div class="mlb-security-warning" style="font:600 12px/1.5 system-ui,sans-serif;'
+                'padding:10px 14px;margin:0 0 8px;border:1px solid #8a6d2f;border-radius:8px;'
+                'background:#2b2212;color:#f4d58a">'
+                f'Untrusted project: {count} executable Python/import binding(s) are blocked. '
+                'Review them, then run <code>builder.trust_project()</code> in Python to enable execution for this session.'
+                '</div>'
+            )
+        style_id = f"{self._instance_id}_assets"
         return f"""
-<style>{css}</style>
-<div id="{html.escape(self._instance_id)}" class="mlb-root" data-mlb-studio-version="1.0.0"></div>
+<style id="{html.escape(style_id)}">{css}</style>
+{warning}
+<div id="{html.escape(self._instance_id)}" class="mlb-root" data-mlb-studio-version="{html.escape(__version__)}"></div>
 <script>
+window.__MLB_STUDIO_CSS__ = document.getElementById({json.dumps(style_id)}).textContent;
 try {{ delete window.MLBricksBuilder; }} catch (e) {{ window.MLBricksBuilder = undefined; }}
 {js}
 window.MLBricksBuilder.mount(

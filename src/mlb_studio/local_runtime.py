@@ -162,7 +162,7 @@ def detect_local_environment() -> dict[str, Any]:
         except Exception:
             resolved_roots.append(str(path))
 
-    mlbricks_root = workspace_root / "mlbricks"
+    mlbricks_root = workspace_root / "mlbricks_workspace"
     paths = {
         "root": str(mlbricks_root),
         "models": str(mlbricks_root / "models"),
@@ -188,7 +188,7 @@ def ensure_mlbricks_workspace(environment: dict[str, Any] | None = None) -> dict
     env = environment or detect_local_environment()
     paths = dict(env.get("paths") or {})
     if not paths:
-        root = Path(env.get("workspace_root") or env.get("default_root") or Path.cwd()) / "mlbricks"
+        root = Path(env.get("workspace_root") or env.get("default_root") or Path.cwd()) / "mlbricks_workspace"
         paths = {
             "root": str(root),
             "models": str(root / "models"),
@@ -204,7 +204,7 @@ def ensure_mlbricks_workspace(environment: dict[str, Any] | None = None) -> dict
     except OSError:
         # A few hosted runtimes expose a read-only cwd. Keep Builder usable by
         # falling back to the user's writable home directory only in that case.
-        root = Path.home() / "mlbricks"
+        root = Path.home() / "mlbricks_workspace"
         fallback = {
             "root": str(root),
             "models": str(root / "models"),

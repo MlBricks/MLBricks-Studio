@@ -1,18 +1,32 @@
 from __future__ import annotations
+
 import importlib
 import importlib.metadata
 
+
 def get_mlbricks_info():
+    """Return installed MLBricks package information without namespace false positives.
+
+    A plain directory named ``mlbricks`` can form an importable namespace package.
+    Production diagnostics therefore verify distribution metadata first instead of
+    treating any successful ``import mlbricks`` as an installed MLBricks release.
+    """
+    try:
+        distribution = importlib.metadata.distribution("mlbricks")
+    except importlib.metadata.PackageNotFoundError:
+        return {"installed": False, "version": None, "module_path": None}
+    except Exception:
+        return {"installed": False, "version": None, "module_path": None}
+
+    version = distribution.version
     try:
         module = importlib.import_module("mlbricks")
+        module_path = getattr(module, "__file__", None)
     except Exception:
-        return {"installed":False,"version":None,"module_path":None}
-    try:
-        version = importlib.metadata.version("mlbricks")
-    except Exception:
-        version = getattr(module, "__version__", None)
+        module_path = None
+
     return {
-        "installed":True,
-        "version":version,
-        "module_path":getattr(module, "__file__", None)
+        "installed": True,
+        "version": version,
+        "module_path": module_path,
     }

@@ -17,6 +17,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .import_pool import IMPORT_POOL
+from .security import safe_torch_load
+from .version import __version__
 
 
 class ModelCompileError(RuntimeError):
@@ -385,6 +387,13 @@ class _APIOperation(nn.Module):
 
         self.api_target = None
         self.created_object = None
+
+        if not _bool(self.runtime.get("allow_user_code", True)):
+            raise ModelCompileError(
+                f"Executable API component {self.label!r} is blocked because this project is untrusted. "
+                "Review the project's Python source/import bindings, then call builder.trust_project() "
+                "in the current session before training, generation, or serving."
+            )
 
         # User-authored source is embedded in the component/project cache.  It is
         # compiled in the user's active Python environment.  Third-party imports
@@ -1414,7 +1423,7 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     validate_every=runtime_int(config.get("validate_every"),100,"Validate Every N Steps",minimum=0)
     val_steps=runtime_int(config.get("validation_steps"),20,"Validation Steps",minimum=1)
     checkpoint_every=runtime_int(config.get("checkpoint_every"),500,"Checkpoint Every N Steps",minimum=0)
-    output=Path(str(config.get("output_dir") or "mlbricks/models"))/_safe_name(model_entry.get("name","model"))
+    output=Path(str(config.get("output_dir") or "mlbricks_workspace/models"))/_safe_name(model_entry.get("name","model"))
     output.mkdir(parents=True,exist_ok=True)
     (output/'checkpoints').mkdir(exist_ok=True)
 
@@ -1423,7 +1432,7 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     custom_components.update(copy.deepcopy(model_entry.get("custom_components_snapshot") or {}))
     builder_package={
         "format":"mlb-studio-model-v2",
-        "builder_version":"1.0.0",
+        "builder_version":__version__,
         "project":copy.deepcopy(state.get("project") or {}),
         "model_component":architecture,
         "custom_components":custom_components,
@@ -1696,7 +1705,7 @@ def load_trained_for_generation(*,state,model_entry,dataset_meta,config,checkpoi
         del loaded
     else:
         # Legacy MLB Studio checkpoint format.
-        payload=torch.load(path,map_location="cpu",weights_only=False)
+        payload=safe_torch_load(path,map_location="cpu",allow_unsafe_pickle=_bool(config.get("allow_unsafe_legacy_checkpoint",False)))
         if not isinstance(payload,dict) or "model_state" not in payload:
             raise RuntimeError("Selected file is neither an MLBricks model artifact nor a legacy Builder checkpoint.")
         compiled.raw_model.load_state_dict(payload["model_state"],strict=True)

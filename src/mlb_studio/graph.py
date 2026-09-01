@@ -261,7 +261,7 @@ def primitive_catalog():
                 {"key": "dataset_name", "label": "Dataset Name", "type": "text", "value": "Prepared Dataset",
                  "help": "Use different names to keep multiple prepared datasets."},
                 {"key": "save_to_disk", "label": "Save To Disk", "type": "select", "value": "false", "options": ["false", "true"]},
-                {"key": "path", "label": "Save Path", "type": "text", "value": "mlbricks/data/prepared_dataset"}
+                {"key": "path", "label": "Save Path", "type": "text", "value": "mlbricks_workspace/data/prepared_dataset"}
             ],
         },
         {
@@ -567,7 +567,7 @@ def _default_data_processing_graph():
     output = _node("prepared_dataset", "Prepared Dataset", {
         "dataset_name": "TinyStories Prepared",
         "save_to_disk": "false",
-        "path": "mlbricks/data/prepared_dataset",
+        "path": "mlbricks_workspace/data/prepared_dataset",
     })
     nodes = [source, clean, split, tokenize, output]
     edges = [
