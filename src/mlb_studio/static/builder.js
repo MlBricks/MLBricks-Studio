@@ -7676,12 +7676,6 @@ function __MLB_STUDIO_FACTORY__(){
         const actions=document.createElement("div");actions.className="mlb-action-grid";
         if(n.definition_id){const def=state.custom_components?.[n.definition_id];const open=btn(String(def?.implementation||"graph")==="api"?"Open API Component":"Open Module");open.addEventListener("click",()=>openInside(n));actions.appendChild(open);}
         const dup=btn("Duplicate");dup.disabled=layoutIsLocked();dup.addEventListener("click",duplicateSelected);actions.appendChild(dup);
-        const disc=btn("Remove All Links");disc.disabled=layoutIsLocked();disc.addEventListener("click",()=>{
-          if(!requireEditableLayout("remove connections"))return;
-          checkpoint("Remove all links from "+n.name);
-          current(state).edges=current(state).edges.filter(e=>e.source!==n.id&&e.target!==n.id);
-          setStatus("All connections removed.");draw();
-        });actions.appendChild(disc);
         const del=btn("Delete");del.disabled=layoutIsLocked();del.addEventListener("click",()=>deleteNode(n.id));actions.appendChild(del);body.appendChild(actions);
         if(current(state).kind==="custom_edit"){
           const parentCfg=document.createElement("div");

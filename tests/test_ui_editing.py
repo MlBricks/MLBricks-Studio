@@ -110,3 +110,24 @@ def test_all_number_inputs_get_shared_themed_steppers():
     assert 'makeStep(1,"+","Increment value")' in text
     assert 'makeStep(-1,"−","Decrement value")' in text
     assert "installNumberSteppers(root);" in text
+
+
+def _builder_css() -> str:
+    return (Path(__file__).resolve().parents[1] / "src/mlb_studio/static/builder.css").read_text(encoding="utf-8")
+
+
+def test_notebook_layout_stays_desktop_and_uses_horizontal_scroll():
+    text = _builder_css()
+    assert "V1.0 stable desktop notebook / Kaggle layout" in text
+    assert "height:720px!important" in text
+    assert "min-width:1120px!important" in text
+    assert "overflow-x:auto!important" in text
+    assert "grid-template-columns:210px minmax(650px,1fr) 260px!important" in text
+    assert "grid-template-columns:1fr;grid-template-rows:auto minmax(420px,1fr) auto" not in text
+    assert "@media" not in text
+
+
+def test_remove_all_links_action_is_not_rendered():
+    text = _builder_js()
+    assert 'btn("Remove All Links")' not in text
+    assert 'checkpoint("Remove all links from "+n.name)' not in text
