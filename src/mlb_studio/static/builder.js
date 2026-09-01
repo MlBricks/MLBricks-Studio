@@ -111,12 +111,33 @@ function __MLB_STUDIO_FACTORY__(){
     // draw(), which replaces the DOM before the target control receives click.
     // Defer only that redraw until the click completes.
     let pointerInteractionActive=false;
+    let focusedEditorActive=false;
     let deferredInteractionDraw=false;
     let interactionReleaseQueued=false;
 
     function isCommitEditor(el){
       return !!(el && el.matches && el.matches('input,textarea,select,[contenteditable="true"]'));
     }
+
+    function refreshFocusedEditorState(){
+      const active=root.ownerDocument?.activeElement;
+      focusedEditorActive=!!(active && root.contains(active) && isCommitEditor(active));
+      if(!focusedEditorActive && deferredInteractionDraw && !pointerInteractionActive){
+        deferredInteractionDraw=false;
+        draw();
+      }
+    }
+
+    // Never replace the Studio DOM while a user is actively editing a value.
+    // Runtime progress, bridge messages and status updates can otherwise call
+    // draw() between keystrokes and make an input appear impossible to edit.
+    root.addEventListener("focusin",ev=>{
+      if(isCommitEditor(ev.target))focusedEditorActive=true;
+    },true);
+    root.addEventListener("focusout",ev=>{
+      if(!isCommitEditor(ev.target))return;
+      queueMicrotask(refreshFocusedEditorState);
+    },true);
 
     function releasePointerInteraction(){
       interactionReleaseQueued=false;
@@ -2352,16 +2373,10 @@ function __MLB_STUDIO_FACTORY__(){
         next[key]=Math.round(n);
       }
 
-      if(key==="embedding_size" && next.embedding_size%next.heads!==0){
-        setStatus("Embedding Size must be divisible by Heads.");
-        draw();
-        return;
-      }
-      if(key==="heads" && next.embedding_size%next.heads!==0){
-        setStatus("Heads must divide Embedding Size exactly.");
-        draw();
-        return;
-      }
+      // Cross-field architecture constraints are intentionally not rejected
+      // here. Users must be able to edit width and head count independently
+      // (for example 384/6 -> 512/8) without an intermediate value snapping
+      // back. Build validation reports an incompatible combination instead.
 
       checkpoint("Update Model Settings");
       syncModelSettingsToGraph(next,oldSettings);
@@ -2388,7 +2403,11 @@ function __MLB_STUDIO_FACTORY__(){
         entry.generation_config.precision=next.precision;
       }
 
-      setStatus("Model setting updated. Rebuild required before training.");
+      if(next.embedding_size%next.heads!==0){
+        setStatus("Model setting updated. Embedding Size must be divisible by Heads before Build.");
+      }else{
+        setStatus("Model setting updated. Rebuild required before training.");
+      }
       draw();
     }
 
@@ -2493,6 +2512,13 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       const nodes=model.nodes||[];
+      const settings=deriveModelSettings(null);
+      if(Number(settings.heads)>0 && Number(settings.embedding_size)%Number(settings.heads)!==0){
+        errors.push({
+          node_ids:[],
+          message:"Embedding Size ("+settings.embedding_size+") must be divisible by Heads ("+settings.heads+") before Build."
+        });
+      }
       const byId=new Map(nodes.map(n=>[n.id,n]));
       const mainEdges=(model.edges||[]).filter(e=>(e.kind||"main")==="main");
       const inputTypes=new Set(["text_input","image_input","audio_input"]);
@@ -6675,7 +6701,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function draw(){
-      if(pointerInteractionActive){
+      if(pointerInteractionActive || focusedEditorActive){
         deferredInteractionDraw=true;
         return;
       }
