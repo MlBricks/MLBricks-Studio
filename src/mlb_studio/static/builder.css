@@ -2166,3 +2166,20 @@
   background:linear-gradient(180deg,#f7f8fa 0%,#bcc3cc 52%,#777f89 100%);
   -webkit-background-clip:text;background-clip:text;color:transparent;
 }
+
+/* MLB Studio V1.0 — API composer toolbar cleanup */
+.mlb-add-function-toolbar{
+  border-color:#6e58c8!important;
+  background:#17152a!important;
+  color:#d9d0ff!important;
+  font-weight:800;
+}
+.mlb-add-function-toolbar:hover{
+  border-color:#8f76ee!important;
+  background:#211d3a!important;
+  color:#fff!important;
+}
+.mlb-edge-main{
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}

@@ -4496,7 +4496,7 @@
     function addPrimitive(item){
       const apiMode=isApiComposerView();
       if(apiMode&&!apiComposerAllowsCatalogItem(item)){
-        setStatus((item?.name||"This component")+" is not available inside API Components yet. Use a supported model component or + Add Function.");draw();return;
+        setStatus((item?.name||"This component")+" is not available inside API Components yet. Use a supported model component or Add Function in the top toolbar.");draw();return;
       }
       if(!requireEditableLayout("add components"))return;
       checkpoint("Add "+item.name);
@@ -4853,8 +4853,6 @@
       });
       const add=btn("+ Add Parameter","mlb-create mlb-custom-add-arg");add.addEventListener("click",()=>{checkpoint("Add API parameter");args.push(customArgDefault(args.length));draw();});body.appendChild(add);
 
-      const addFn=btn("+ Add Function","mlb-create mlb-custom-add-function");addFn.addEventListener("click",addAPIFunction);body.appendChild(addFn);
-
       const previewTitle=document.createElement("div");previewTitle.className="mlb-section-title";previewTitle.textContent="FUNCTION PREVIEW";body.appendChild(previewTitle);
       const pre=document.createElement("pre");pre.className="mlb-code-preview";
       const path=apiBindingImportPath(binding)||"module.Symbol";const parts=path.split(".");const symbol=parts.pop()||"Symbol";const mod=parts.join(".")||"module";
@@ -4867,10 +4865,9 @@
       const steps=apiStepNodes(def);
       const h=document.createElement("div");h.className="mlb-section-title";h.textContent="API EXECUTION GRAPH";body.appendChild(h);
       const help=document.createElement("div");help.className="mlb-api-path";
-      help.textContent="This API Component is one execution graph. Add API functions with + Add Function, or insert supported MLBricks components from the left. Use ports for serial/parallel paths and remove links from the selected block's Connections section.";body.appendChild(help);
+      help.textContent="This API Component is one execution graph. Add API functions from the top toolbar, or insert supported MLBricks components from the left. Use ports for serial/parallel paths and remove links from the selected block's Connections section.";body.appendChild(help);
       const summary=document.createElement("div");summary.className="mlb-summary";
       [["Functions",steps.length],["Connections",(current(state)?.edges||[]).length],["Rule","API functions only"]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";summary.appendChild(r);});body.appendChild(summary);
-      const addFn=btn("+ Add Function","mlb-create mlb-custom-add-function");addFn.addEventListener("click",addAPIFunction);body.appendChild(addFn);
     }
 
     function removeAPIFunction(step){
@@ -5663,8 +5660,35 @@
           p.setAttribute("d",`M ${x1} ${y1} C ${x1+16} ${y1}, ${x1+16} ${bottomY}, ${x1+34} ${bottomY} L ${x2-34} ${bottomY} C ${x2-16} ${bottomY}, ${x2-16} ${y2}, ${x2} ${y2}`);
           p.setAttribute("class","mlb-edge-extra");
         }else{
-          const mid=(x1+x2)/2;
-          p.setAttribute("d",`M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`);
+          // Main-lane wires use a lower routing rail instead of a center-to-center
+          // Bezier. This keeps connections outside component cards, including
+          // long links that skip over one or more intermediate blocks.
+          const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
+          const left=Math.min(x1,x2), right=Math.max(x1,x2);
+          let lowest=Math.max(ab.bottom-wr.top,bb.bottom-wr.top);
+          flow.querySelectorAll(".mlb-node").forEach(nodeEl=>{
+            if(nodeEl===a||nodeEl===b)return;
+            const nr=nodeEl.getBoundingClientRect();
+            const nl=nr.left-wr.left, nrgt=nr.right-wr.left;
+            if(nrgt>=left&&nl<=right)lowest=Math.max(lowest,nr.bottom-wr.top);
+          });
+          const routeY=lowest+20;
+          const dir=x2>=x1?1:-1;
+          const exitX=x1+dir*18;
+          const entryX=x2-dir*18;
+          const corner=10;
+          const down1=Math.max(y1+corner,routeY-corner);
+          const down2=Math.max(y2+corner,routeY-corner);
+          p.setAttribute("d",
+            `M ${x1} ${y1} `+
+            `C ${x1+dir*8} ${y1}, ${exitX} ${y1}, ${exitX} ${y1+corner} `+
+            `L ${exitX} ${down1} `+
+            `Q ${exitX} ${routeY} ${exitX+dir*corner} ${routeY} `+
+            `L ${entryX-dir*corner} ${routeY} `+
+            `Q ${entryX} ${routeY} ${entryX} ${down2} `+
+            `L ${entryX} ${y2+corner} `+
+            `C ${entryX} ${y2}, ${x2-dir*8} ${y2}, ${x2} ${y2}`
+          );
           p.setAttribute("class","mlb-edge-main");
         }
         svg.appendChild(p);
@@ -6264,6 +6288,12 @@
           newModule.addEventListener("click",()=>createNestedCustom(selected||null));
           toolbar.appendChild(newModule);
         }else if(isApiComposerView()){
+          const addFunction=btn("Add Function","mlb-tool mlb-add-function-toolbar");
+          addFunction.title="Add a Python / PyTorch API function after the selected block";
+          addFunction.disabled=layoutIsLocked();
+          addFunction.addEventListener("click",addAPIFunction);
+          toolbar.appendChild(addFunction);
+
           const addModule=btn("Add Module","mlb-tool mlb-new-module-toolbar");
           addModule.title="Create an empty nested Module after the selected API block";
           addModule.disabled=layoutIsLocked();
@@ -6324,7 +6354,7 @@
         if(comp.kind==="custom_edit"){
           const def=state.custom_components?.[comp.definition_id];
           e.innerHTML=String(def?.implementation||"graph")==="api"
-            ?"<strong>API Component execution graph.</strong><br><br>Add API functions or Components from the left. Use Add Module to create an empty nested Module after the selected block."
+            ?"<strong>API Component execution graph.</strong><br><br>Use Add Function or Add Module in the top toolbar, or insert supported Components from the left."
             :"<strong>Empty Module.</strong><br><br>Add Components from the left, or use Add Module above for a nested Module.";
         }else if(state.active_workspace==="data"){
           e.innerHTML="<strong>Build your data pipeline step by step.</strong><br><br>Start with Hugging Face, Kaggle, URL, Local or Manual Data.";

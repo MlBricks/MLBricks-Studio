@@ -21,6 +21,12 @@ builder
 
 Version 0.1.2 deliberately removes `anywidget`. The Builder uses Jupyter's standard HTML representation protocol instead, so Kaggle does not need to register a custom frontend widget module.
 
+## MLB Studio V1.0 API editor layout
+
+- **Add Function** now lives in the API Component top toolbar beside **Add Module**.
+- The Inspector stays focused on the selected function/class, parameters, preview, and connections.
+- Main graph connections route through a lower rail outside component cards instead of drawing across card interiors.
+
 MLBricks itself remains a separate dependency and is installed from:
 
 `https://github.com/MlBricks/MLBricks.git`
