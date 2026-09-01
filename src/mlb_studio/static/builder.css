@@ -2186,5 +2186,5 @@
 
 
 .mlb-runtime-page-active .mlb-shell{grid-template-columns:0 minmax(500px,1fr) 300px}
-.mlb-sidebar-hidden{display:none !important}
+.mlb-sidebar-hidden{visibility:hidden !important;pointer-events:none !important;overflow:hidden !important;padding:0 !important;border:0 !important;width:0 !important;min-width:0 !important}
 .mlb-runtime-back-btn{font-weight:700}
