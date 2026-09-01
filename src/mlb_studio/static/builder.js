@@ -7176,8 +7176,8 @@
         }
       }
 
-      // Bottom project drawer is open by default. Train/Generate collapse it on
-      // entry; normal design, local import and Serve Model/API keep it open.
+      // Bottom Model/Data Workspace drawer belongs only to design workspaces.
+      // Runtime pages (Training / Generation / Serve) intentionally omit it.
       const details=document.createElement("div");details.className="mlb-details";
 
       const detailsBar=document.createElement("div");detailsBar.className="mlb-details-bar";
@@ -7259,7 +7259,7 @@
         details.appendChild(panels);
       }
 
-      if(!galleryWorkspace.open&&!cloudWorkspace.open)main.appendChild(details);
+      if(!galleryWorkspace.open&&!cloudWorkspace.open&&!runtimeWorkspaceActive)main.appendChild(details);
 
       // Inspector
       const ins=document.createElement("aside");ins.className="mlb-inspector";

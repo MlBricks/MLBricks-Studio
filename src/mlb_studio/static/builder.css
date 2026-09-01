@@ -2337,3 +2337,7 @@
 .mlb-logo-brand{display:block!important;width:172px!important;height:52px!important;flex:0 0 172px!important;object-fit:contain!important;object-position:left center!important}
 .mlb-css-logo{display:none!important}
 .mlb-sidebar{padding-bottom:42px!important;box-sizing:border-box!important}
+
+
+/* Runtime pages are focused views: never show the Model/Data Workspace bottom drawer. */
+.mlb-runtime-page-active .mlb-details{display:none!important}
