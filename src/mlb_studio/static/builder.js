@@ -4644,7 +4644,15 @@
     }
 
     function apiStepNodes(def){
-      return (def?.nodes||[]).filter(n=>n&&n.type==="api_step");
+      // While an API Component is open, its editable graph lives in the
+      // transient custom_edit component until Save/Done copies it back to the
+      // definition. Use that live graph so newly created objects are
+      // immediately available to later API nodes in the same editor session.
+      const live=current(state);
+      const nodes=(live?.kind==="custom_edit"&&live.definition_id===def?.id)
+        ?(live.nodes||[])
+        :(def?.nodes||[]);
+      return nodes.filter(n=>n&&n.type==="api_step");
     }
 
     function ensureAPIDefinitionSteps(def){
@@ -6619,7 +6627,8 @@
           });
           const meta=card.querySelector(".node-meta");
           if(n.type==="api_step"){
-            meta.textContent=apiCallTypeLabel(binding.call_type)+" · explicit graph connections";
+            const metaBinding=ensureAPIStepObjectIds(n);
+            meta.textContent=apiCallTypeLabel(metaBinding.call_type)+" · explicit graph connections";
           }else if(n.type==="custom"){
             const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · lazy imports":"Nested Module · 3-lane interface";
           }else meta.textContent=(apiInfo(n).public_name||n.type)+" · Skip / Main / Extra";
