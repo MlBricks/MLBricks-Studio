@@ -279,7 +279,7 @@ def _bound_parameter_value(spec: dict[str, Any], params: dict[str, Any], runtime
         raw = runtime.get("batch_size", params.get(name, spec.get("default")))
     else:
         raw = params.get(name, spec.get("default"))
-    if raw in {None, ""} and not spec.get("required"):
+    if (raw is None or (isinstance(raw, str) and raw == "")) and not spec.get("required"):
         return None
     return _custom_coerce(raw, str(spec.get("type") or "str"), label=name)
 
@@ -294,40 +294,87 @@ def _api_binding_import_path(binding: dict[str, Any]) -> str:
 
 
 class _APIOperation(nn.Module):
-    """One Python/PyTorch operation inside a user-authored API Component graph."""
+    """One Python/PyTorch operation inside a user-authored API Component graph.
 
-    def __init__(self, *, binding, params, runtime, label):
+    V1.0 object-aware API nodes distinguish imports from object instances.  A
+    node can create/register an object once, call normal/static/class methods,
+    or reuse an object created by another node.  The registry is scoped to one
+    TensorGraph instance so state is preserved across later API nodes without
+    re-constructing the object.
+    """
+
+    _CALL_TYPES = {"function", "static_method", "class_method", "instance_method", "constructor"}
+
+    def __init__(self, *, binding, params, runtime, label, object_registry=None):
         super().__init__()
         self.binding = deepcopy(binding or {})
         self.params = deepcopy(params or {})
         self.runtime = deepcopy(runtime or {})
         self.label = str(label or "API Function")
+        self.object_registry = object_registry if object_registry is not None else {}
+        self.parameters = list(self.binding.get("parameters") or [])
+
+        legacy_kind = str(self.binding.get("target_kind") or "module").lower()
+        call_type = str(self.binding.get("call_type") or "").strip().lower()
+        if not call_type:
+            call_type = "function" if legacy_kind == "function" else "instance_method"
+        if call_type not in self._CALL_TYPES:
+            raise ModelCompileError(f"API function {self.label!r} has unsupported call type {call_type!r}.")
+        self.call_type = call_type
+        self.object_mode = "existing" if str(self.binding.get("object_mode") or "new").lower() == "existing" else "new"
+        self.object_id = str(self.binding.get("object_id") or f"object::{self.label}").strip()
+        self.object_name = str(self.binding.get("object_name") or self.label).strip()
+        self.object_ref = str(self.binding.get("object_ref") or "").strip()
+        self.result_object_id = str(self.binding.get("result_object_id") or f"result::{self.label}").strip()
+        self.result_object_name = str(self.binding.get("result_object_name") or f"{self.label} result").strip()
+        self.auto_main_input = bool(self.binding.get("auto_main_input", True))
+        self.register_result_object = bool(self.binding.get("register_result_object"))
+        self.result_output_mode = "passthrough" if str(self.binding.get("result_output_mode") or "result").lower() == "passthrough" else "result"
+
+        self.api_target = None
+        self.created_object = None
+
+        # Reusing an existing object does not need another import or constructor.
+        if self.call_type == "instance_method" and self.object_mode == "existing":
+            if not self.object_ref:
+                raise ModelCompileError(f"API instance method {self.label!r} has no existing object selected.")
+            return
+
         import_path = _api_binding_import_path(self.binding)
         if not import_path:
             raise ModelCompileError(f"API function {self.label!r} has no import/module + function/class configured.")
         target = IMPORT_POOL.resolve_external(import_path)
-        self.target_kind = str(self.binding.get("target_kind") or "module").lower()
-        self.parameters = list(self.binding.get("parameters") or [])
-        init_specs = [spec for spec in self.parameters if str(spec.get("stage") or "init").lower() == "init"]
-        init_args, init_kwargs = self._build_arguments(init_specs, x=None)
-        if self.target_kind in {"module", "class", "nn_module"}:
+        self.api_target = target
+
+        if self.call_type in {"constructor", "instance_method"} and self.object_mode == "new":
+            init_specs = [spec for spec in self.parameters if str(spec.get("stage") or "init").lower() == "init"]
+            init_args, init_kwargs = self._build_arguments(init_specs, x=None)
+            if not callable(target):
+                raise ModelCompileError(f"API target {import_path} is not constructible/callable.")
             try:
                 instance = target(*init_args, **init_kwargs)
             except Exception as exc:
                 raise ModelCompileError(
-                    f"Could not construct API function {self.label!r} from {import_path}: {exc}"
+                    f"Could not construct API object {self.object_name!r} for {self.label!r} from {import_path}: {exc}"
                 ) from exc
-            if not isinstance(instance, nn.Module):
-                raise ModelCompileError(
-                    f"API target {import_path} was configured as a Module/Class but returned {type(instance).__name__}."
-                )
-            self.module = instance
-            self.function = None
-        else:
+            # If this is an nn.Module, assigning it here registers its parameters
+            # exactly once with PyTorch.  Reuser nodes keep only the plain shared
+            # registry reference and therefore do not duplicate module ownership.
+            self.created_object = instance
+            self.object_registry[self.object_id] = instance
+        elif self.call_type == "function":
             if not callable(target):
                 raise ModelCompileError(f"API target {import_path} is not callable.")
-            self.module = None
-            self.function = target
+        elif self.call_type in {"static_method", "class_method"}:
+            method = str(self.binding.get("call_method") or "").strip()
+            if not method:
+                raise ModelCompileError(f"API {self.call_type.replace('_', ' ')} {self.label!r} needs a method name.")
+            try:
+                candidate = getattr(target, method)
+            except Exception as exc:
+                raise ModelCompileError(f"API target {import_path} has no method {method!r}.") from exc
+            if not callable(candidate):
+                raise ModelCompileError(f"API target {import_path}.{method} is not callable.")
 
     def _build_arguments(self, specs, x, skip=None, extra=None):
         positional = []
@@ -365,26 +412,63 @@ class _APIOperation(nn.Module):
             return getattr(value, text)
         raise ModelCompileError(f"API output selector {text!r} could not be applied for {self.label!r}.")
 
+    def _resolve_call_target(self):
+        method = str(self.binding.get("call_method") or "").strip()
+        if self.call_type == "function":
+            return self.api_target
+        if self.call_type in {"static_method", "class_method"}:
+            return getattr(self.api_target, method)
+        if self.call_type == "instance_method":
+            if self.object_mode == "existing":
+                if self.object_ref not in self.object_registry:
+                    raise ModelCompileError(
+                        f"API node {self.label!r} references object {self.object_ref!r}, but it is not available yet. "
+                        "Create/register that object in an upstream API node first."
+                    )
+                instance = self.object_registry[self.object_ref]
+            else:
+                instance = self.created_object
+            if instance is None:
+                raise ModelCompileError(f"API node {self.label!r} has no object instance available.")
+            if method and method not in {"__call__", "forward"}:
+                try:
+                    return getattr(instance, method)
+                except Exception as exc:
+                    raise ModelCompileError(
+                        f"Object {self.object_name!r} used by {self.label!r} has no method {method!r}."
+                    ) from exc
+            return instance
+        raise ModelCompileError(f"API node {self.label!r} is a constructor and has no call target.")
+
     def forward(self, x, skip=None, extra=None):
-        call_specs = [spec for spec in self.parameters if str(spec.get("stage") or "init").lower() == "call"]
+        # A constructor is an object-lifecycle node, not a tensor transform.  It
+        # creates/registers the object once in __init__ and transparently passes
+        # the Main lane through at execution time.
+        if self.call_type == "constructor":
+            return x
+
+        call_specs = [spec for spec in self.parameters if str(spec.get("stage") or "call").lower() == "call"]
         if call_specs:
             args, kwargs = self._build_arguments(call_specs, x=x, skip=skip, extra=extra)
             tensor_bound = any(
                 str(spec.get("source") or "user").lower() in {"input", "main", "skip", "extra"}
                 for spec in call_specs
             )
-            if not tensor_bound:
+            if not tensor_bound and self.auto_main_input:
                 args = [x, *args]
         else:
-            args, kwargs = [x], {}
-        target = self.module if self.module is not None else self.function
-        method = str(self.binding.get("call_method") or "").strip()
-        if method and method not in {"__call__", "forward"}:
-            target = getattr(target, method)
+            args, kwargs = ([x], {}) if self.auto_main_input else ([], {})
+
+        target = self._resolve_call_target()
         try:
             out = target(*args, **kwargs)
         except Exception as exc:
             raise RuntimeError(f"API function {self.label!r} failed: {exc}") from exc
+
+        if self.register_result_object:
+            self.object_registry[self.result_object_id] = out
+            if self.result_output_mode == "passthrough":
+                return x
         return self._select_output(out, self.binding.get("output_selector"))
 
 
@@ -415,6 +499,7 @@ class _APIBoundComponent(nn.Module):
                 params=self.params,
                 runtime=self.runtime,
                 label=self.definition.get("name") or "API Component",
+                object_registry={},
             )
             return
 
@@ -464,6 +549,10 @@ class TensorGraph(nn.Module):
         self._custom_stack=tuple(_custom_stack or ())
         self.order=_topological(self.nodes,self.edges)
         self.by_id={n["id"]:n for n in self.nodes}
+        # Shared only by API operation nodes in this graph instance.  Directly
+        # created objects are registered during module construction; results can
+        # be registered during forward for later upstream-connected API nodes.
+        self.api_object_registry={}
         self.in_main={n["id"]:[] for n in self.nodes}
         self.in_skip={n["id"]:[] for n in self.nodes}
         self.in_extra={n["id"]:[] for n in self.nodes}
@@ -500,6 +589,7 @@ class TensorGraph(nn.Module):
                 params=step_params,
                 runtime=self.runtime,
                 label=node.get("name") or "API Function",
+                object_registry=self.api_object_registry,
             )
         if t in {"text_input","text_output","logits_output"}: return _Identity()
         if t=="embedding":

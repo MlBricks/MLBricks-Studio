@@ -4534,11 +4534,34 @@
         module_path:"",
         symbol:"",
         import_path:"",
-        target_kind:"module",
+        // target_kind is kept for backward compatibility with V1.0 designs.
+        target_kind:"function",
+        call_type:"function",
+        object_mode:"new",
+        object_id:"",
+        object_name:"",
+        object_ref:"",
         call_method:"",
+        auto_main_input:true,
+        register_result_object:false,
+        result_object_id:"",
+        result_object_name:"",
+        result_output_mode:"result",
         output_selector:"auto",
         parameters:[]
       };
+    }
+
+    const apiCallTypeLabels={
+      function:"Function",
+      static_method:"Static Method",
+      class_method:"Class Method",
+      instance_method:"Instance Method",
+      constructor:"Create Object"
+    };
+
+    function apiCallTypeLabel(value){
+      return apiCallTypeLabels[String(value||"")]||"Instance Method";
     }
 
     function normalizeAPIBinding(binding){
@@ -4553,6 +4576,24 @@
       binding.module_path=String(binding.module_path||"").trim();
       binding.symbol=String(binding.symbol||"").trim();
       binding.import_path=[binding.module_path,binding.symbol].filter(Boolean).join(".");
+      if(!binding.call_type){
+        binding.call_type=String(binding.target_kind||"module").toLowerCase()==="function"?"function":"instance_method";
+      }
+      binding.call_type=String(binding.call_type||"instance_method").toLowerCase();
+      if(!Object.prototype.hasOwnProperty.call(apiCallTypeLabels,binding.call_type))binding.call_type="instance_method";
+      binding.object_mode=String(binding.object_mode||"new").toLowerCase()==="existing"?"existing":"new";
+      binding.object_id=String(binding.object_id||"").trim();
+      binding.object_name=String(binding.object_name||"").trim();
+      binding.object_ref=String(binding.object_ref||"").trim();
+      binding.call_method=String(binding.call_method||"").trim();
+      if(binding.auto_main_input===undefined)binding.auto_main_input=true;
+      binding.auto_main_input=!!binding.auto_main_input;
+      binding.register_result_object=!!binding.register_result_object;
+      binding.result_object_id=String(binding.result_object_id||"").trim();
+      binding.result_object_name=String(binding.result_object_name||"").trim();
+      binding.result_output_mode=String(binding.result_output_mode||"result").toLowerCase()==="passthrough"?"passthrough":"result";
+      // Keep the legacy field synchronized for old runtimes/design readers.
+      binding.target_kind=binding.call_type==="function"?"function":"module";
       if(!Array.isArray(binding.parameters))binding.parameters=[];
       return binding;
     }
@@ -4561,11 +4602,45 @@
       return normalizeAPIBinding(binding).import_path||"";
     }
 
+    function apiSafeObjectName(value,fallback="object"){
+      const clean=String(value||"").trim().replace(/[^A-Za-z0-9_]+/g,"_").replace(/^_+|_+$/g,"");
+      const base=clean||fallback;
+      return /^[A-Za-z_]/.test(base)?base:("obj_"+base);
+    }
+
+    function ensureAPIStepObjectIds(step){
+      if(!step)return defaultAPIBinding();
+      step.api_binding=normalizeAPIBinding(step.api_binding||defaultAPIBinding());
+      const b=step.api_binding;
+      if(!b.object_id)b.object_id="object::"+step.id;
+      if(!b.result_object_id)b.result_object_id="result::"+step.id;
+      return b;
+    }
+
+    function apiObjectCandidates(def,excludeStepId=""){
+      const out=[];
+      apiStepNodes(def).forEach(step=>{
+        if(!step||step.id===excludeStepId)return;
+        const b=ensureAPIStepObjectIds(step);
+        const source=step.name||"API Function";
+        const createsDirect=b.call_type==="constructor"||(b.call_type==="instance_method"&&b.object_mode==="new");
+        if(createsDirect){
+          out.push({id:b.object_id,name:b.object_name||apiSafeObjectName(b.symbol||source),source,kind:"created"});
+        }
+        if(b.register_result_object){
+          out.push({id:b.result_object_id,name:b.result_object_name||apiSafeObjectName(source+"_result"),source,kind:"result"});
+        }
+      });
+      return out;
+    }
+
     function defaultAPIStep(index=0){
-      return {
+      const step={
         id:uid("api_step"),type:"api_step",name:"Function "+(index+1),display_name:"Function "+(index+1),
         repeat:1,params:{},input_count:3,output_count:3,position:{x:0,y:0},api_binding:defaultAPIBinding()
       };
+      ensureAPIStepObjectIds(step);
+      return step;
     }
 
     function apiStepNodes(def){
@@ -4788,11 +4863,20 @@
     }
 
     function requestCustomAPIImport(def,step=null){
-      const binding=normalizeAPIBinding(step?.api_binding||def?.api_binding||defaultAPIBinding());
+      const binding=step?ensureAPIStepObjectIds(step):normalizeAPIBinding(def?.api_binding||defaultAPIBinding());
+      const statusKey=step?def.id+":"+step.id:def.id;
+      if(binding.call_type==="instance_method"&&binding.object_mode==="existing"){
+        const candidate=apiObjectCandidates(def,step?.id||"").find(x=>x.id===binding.object_ref);
+        if(!candidate){
+          customImportStatus[statusKey]={status:"error",message:"Choose an existing object first."};
+          setStatus("Choose an existing object from this API Component first.");draw();return;
+        }
+        customImportStatus[statusKey]={status:"done",message:"Using object "+candidate.name+" from "+candidate.source+"."};
+        setStatus("Bound to existing object "+candidate.name+" from "+candidate.source+".");draw();return;
+      }
       const importPath=apiBindingImportPath(binding);
       if(!importPath){setStatus("Enter Import / Module and Function / Class first.");return;}
       if(!bridgeReady()){setStatus("Kernel bridge is offline. Re-run the Builder cell, then test the API again.");return;}
-      const statusKey=step?def.id+":"+step.id:def.id;
       const label=(step?.name||def?.name||importPath);
       const command={action:"ensure_external_import",import_path:importPath,label,definition_id:statusKey,ts:Date.now()};
       if(!setBridgeState()||!setBridgeCommand(command)){setStatus("Could not send custom API import check to Python.");return;}
@@ -4805,34 +4889,124 @@
       const row=document.createElement("div");row.className="mlb-custom-binding-field";
       const label=document.createElement("label");label.textContent=labelText;row.appendChild(label);
       let input;
-      if(opts.select){input=document.createElement("select");(opts.options||[]).forEach(opt=>{const o=document.createElement("option");o.value=String(opt);o.textContent=String(opt);if(String(value)===String(opt))o.selected=true;input.appendChild(o);});}
+      if(opts.select){
+        input=document.createElement("select");
+        (opts.options||[]).forEach(opt=>{
+          const isObj=opt&&typeof opt==="object";
+          const optValue=isObj?opt.value:opt;
+          const optLabel=isObj?(opt.label??opt.value):opt;
+          const o=document.createElement("option");o.value=String(optValue??"");o.textContent=String(optLabel??"");
+          if(String(value??"")===String(optValue??""))o.selected=true;input.appendChild(o);
+        });
+      }
       else if(opts.textarea){input=document.createElement("textarea");input.rows=opts.rows||2;input.value=value??"";}
       else {input=document.createElement("input");input.type=opts.type||"text";input.value=value??"";}
       input.addEventListener(opts.select?"change":"input",()=>onInput(input.value));row.appendChild(input);return row;
     }
 
     function renderAPIStepBindingEditor(body,def,step){
-      step.api_binding=normalizeAPIBinding(step.api_binding||defaultAPIBinding());const binding=step.api_binding;
+      const binding=ensureAPIStepObjectIds(step);
       const intro=document.createElement("div");intro.className="mlb-api-path";
-      intro.textContent="Each API block is one Python/PyTorch module or function. You can also insert supported MLBricks components from the left library, then wire all blocks into one serial or parallel execution graph.";body.appendChild(intro);
+      intro.textContent="Bind a Python API as a function, class/static method, object constructor, or instance method. Objects created by one node can be reused by later nodes without recreating the instance.";body.appendChild(intro);
 
       const title=document.createElement("div");title.className="mlb-section-title";title.textContent="FUNCTION / API";body.appendChild(title);
-      body.appendChild(editorRow("Function Name",step.name||"Function",v=>{const clean=String(v||"").trim();if(clean){step.name=clean;step.display_name=clean;}},{type:"text"}));
-      body.appendChild(editorRow("Import / Module",binding.module_path||"",v=>{binding.module_path=v;normalizeAPIBinding(binding);customImportStatus[def.id+":"+step.id]=null;},{type:"text"}));
-      body.appendChild(editorRow("Function / Class",binding.symbol||"",v=>{binding.symbol=v;normalizeAPIBinding(binding);customImportStatus[def.id+":"+step.id]=null;},{type:"text"}));
-      body.appendChild(editorRow("Type",binding.target_kind||"module",v=>binding.target_kind=v,{select:true,options:["module","function"]}));
-      body.appendChild(editorRow("Call Method",binding.call_method||"",v=>binding.call_method=v,{type:"text"}));
-      body.appendChild(editorRow("Output Selector",binding.output_selector||"auto",v=>binding.output_selector=v,{type:"text"}));
+      body.appendChild(editorRow("Node Name",step.name||"Function",v=>{const clean=String(v||"").trim();if(clean){step.name=clean;step.display_name=clean;}},{type:"text"}));
+
+      const callTypeOptions=Object.entries(apiCallTypeLabels).map(([value,label])=>({value,label}));
+      body.appendChild(editorRow("Call Type",binding.call_type||"function",v=>{
+        binding.call_type=v;
+        binding.target_kind=v==="function"?"function":"module";
+        const args=Array.isArray(binding.parameters)?binding.parameters:[];
+        if(v==="constructor")args.forEach(spec=>spec.stage="init");
+        else if(v!=="instance_method"||binding.object_mode==="existing")args.forEach(spec=>spec.stage="call");
+        customImportStatus[def.id+":"+step.id]=null;draw();
+      },{select:true,options:callTypeOptions}));
+
+      const callType=binding.call_type;
+      const isExisting=callType==="instance_method"&&binding.object_mode==="existing";
+      const needsImport=!isExisting;
+      const classLike=["static_method","class_method","instance_method","constructor"].includes(callType);
+
+      if(callType==="instance_method"){
+        body.appendChild(editorRow("Object Source",binding.object_mode||"new",v=>{
+          binding.object_mode=v;
+          if(v==="existing"){
+            (binding.parameters||[]).forEach(spec=>spec.stage="call");
+          }
+          customImportStatus[def.id+":"+step.id]=null;draw();
+        },{select:true,options:[{value:"new",label:"Create New Object"},{value:"existing",label:"Use Existing Object"}]}));
+      }
+
+      if(needsImport){
+        body.appendChild(editorRow("Import / Module",binding.module_path||"",v=>{binding.module_path=v;normalizeAPIBinding(binding);customImportStatus[def.id+":"+step.id]=null;},{type:"text"}));
+        body.appendChild(editorRow(classLike?"Class / Symbol":"Function / Symbol",binding.symbol||"",v=>{
+          binding.symbol=v;normalizeAPIBinding(binding);
+          if(!binding.object_name&&(binding.call_type==="constructor"||(binding.call_type==="instance_method"&&binding.object_mode==="new"))){
+            binding.object_name=apiSafeObjectName(v||step.name);
+          }
+          customImportStatus[def.id+":"+step.id]=null;
+        },{type:"text"}));
+      }
+
+      if(callType==="constructor"||(callType==="instance_method"&&binding.object_mode==="new")){
+        if(!binding.object_name)binding.object_name=apiSafeObjectName(binding.symbol||step.name);
+        body.appendChild(editorRow("Object Name",binding.object_name||"",v=>binding.object_name=apiSafeObjectName(v||"object"),{type:"text"}));
+        const objInfo=document.createElement("div");objInfo.className="mlb-api-path";
+        objInfo.textContent="Reusable object ID is tied to this node, not its visible name. Renaming the node will not break later references.";body.appendChild(objInfo);
+      }
+
+      let selectedObject=null;
+      if(isExisting){
+        const candidates=apiObjectCandidates(def,step.id);
+        if(!binding.object_ref&&candidates.length)binding.object_ref=candidates[0].id;
+        selectedObject=candidates.find(x=>x.id===binding.object_ref)||null;
+        const options=candidates.length
+          ?candidates.map(x=>({value:x.id,label:x.name+"  —  "+x.source}))
+          :[{value:"",label:"No reusable objects yet"}];
+        body.appendChild(editorRow("Existing Object",binding.object_ref||"",v=>{binding.object_ref=v;customImportStatus[def.id+":"+step.id]=null;draw();},{select:true,options}));
+        const objInfo=document.createElement("div");objInfo.className="mlb-api-path";
+        objInfo.textContent=selectedObject
+          ?("Reusing “"+selectedObject.name+"” created by node “"+selectedObject.source+"”.")
+          :"Create an object in another API node first, then select it here.";
+        body.appendChild(objInfo);
+      }
+
+      if(["static_method","class_method","instance_method"].includes(callType)){
+        body.appendChild(editorRow("Method",binding.call_method||"",v=>binding.call_method=v,{type:"text"}));
+      }
+
+      if(callType!=="constructor"){
+        body.appendChild(editorRow("Implicit Main Input",binding.auto_main_input?"true":"false",v=>binding.auto_main_input=v==="true",{select:true,options:[{value:"true",label:"Auto prepend Main"},{value:"false",label:"Do not inject Main"}]}));
+        body.appendChild(editorRow("Output Selector",binding.output_selector||"auto",v=>binding.output_selector=v,{type:"text"}));
+        body.appendChild(editorRow("Register Result as Object",binding.register_result_object?"true":"false",v=>{
+          binding.register_result_object=v==="true";
+          if(binding.register_result_object&&!binding.result_object_name)binding.result_object_name=apiSafeObjectName((step.name||"result")+"_result");
+          draw();
+        },{select:true,options:[{value:"false",label:"No"},{value:"true",label:"Yes"}]}));
+        if(binding.register_result_object){
+          if(!binding.result_object_name)binding.result_object_name=apiSafeObjectName((step.name||"result")+"_result");
+          body.appendChild(editorRow("Result Object Name",binding.result_object_name||"",v=>binding.result_object_name=apiSafeObjectName(v||"result_object"),{type:"text"}));
+          body.appendChild(editorRow("After Registering",binding.result_output_mode||"result",v=>binding.result_output_mode=v,{select:true,options:[{value:"result",label:"Send Result to Main Output"},{value:"passthrough",label:"Pass Main Input Through"}]}));
+        }
+      }
 
       const apiActions=document.createElement("div");apiActions.className="mlb-action-grid";
-      const test=btn("Bind / Test API","mlb-custom-api-test");test.addEventListener("click",()=>requestCustomAPIImport(def,step));apiActions.appendChild(test);body.appendChild(apiActions);
+      const test=btn(isExisting?"Bind Existing Object":"Bind / Test API","mlb-custom-api-test");test.addEventListener("click",()=>requestCustomAPIImport(def,step));apiActions.appendChild(test);body.appendChild(apiActions);
       const st=customImportStatus[def.id+":"+step.id];if(st){const msg=document.createElement("div");msg.className="mlb-api-status "+(st.status==="done"?"available":st.status==="error"?"unavailable":"utility");msg.textContent=st.message||st.status;body.appendChild(msg);}
 
       const argTitle=document.createElement("div");argTitle.className="mlb-section-title";argTitle.textContent="PARAMETERS";body.appendChild(argTitle);
-      const note=document.createElement("div");note.className="mlb-api-path";note.textContent="Add as many init/call parameters as the API requires. Tensor sources Main / Skip / Extra are supplied by the three visual input lanes; other sources can bind model settings or user values.";body.appendChild(note);
+      const note=document.createElement("div");note.className="mlb-api-path";
+      note.textContent=callType==="constructor"
+        ?"Constructor parameters are evaluated once when the API Component is built. The created object is registered and this node passes Main data through unchanged."
+        :(callType==="instance_method"&&binding.object_mode==="new"
+          ?"Init parameters create the reusable object once; Call parameters are supplied whenever this method executes."
+          :"Call parameters execute on every pass. Tensor sources Main / Skip / Extra come from the visual lanes; other sources can bind model settings or user values.");
+      body.appendChild(note);
 
       const args=Array.isArray(binding.parameters)?binding.parameters:(binding.parameters=[]);
+      const allowedStages=callType==="constructor"?["init"]:(callType==="instance_method"&&binding.object_mode==="new"?["init","call"]:["call"]);
       args.forEach((spec,index)=>{
+        if(!allowedStages.includes(String(spec.stage||"")))spec.stage=allowedStages[0];
         const box=document.createElement("div");box.className="mlb-custom-arg-card";
         const head=document.createElement("div");head.className="mlb-custom-arg-head";
         const name=document.createElement("strong");name.textContent=(spec.label||spec.name||("Parameter "+(index+1)));
@@ -4840,7 +5014,7 @@
         head.append(name,remove);box.appendChild(head);
         box.appendChild(editorRow("Parameter Name",spec.name||"",v=>{spec.name=v;spec.label=spec.label||v;}));
         box.appendChild(editorRow("UI Label",spec.label||spec.name||"",v=>spec.label=v));
-        box.appendChild(editorRow("Stage",spec.stage||"init",v=>spec.stage=v,{select:true,options:["init","call"]}));
+        box.appendChild(editorRow("Stage",spec.stage||allowedStages[0],v=>spec.stage=v,{select:true,options:allowedStages}));
         box.appendChild(editorRow("Type",spec.type||"str",v=>{spec.type=v;setTimeout(draw,0);},{select:true,options:["int","float","str","bool","select","json","dict","list","tuple"]}));
         box.appendChild(editorRow("Source",spec.source||"user",v=>{spec.source=v;setTimeout(draw,0);},{select:true,options:["user","main","skip","extra","model_dim","heads","context","batch","device","dtype"]}));
         if(String(spec.source||"user")==="user"){
@@ -4851,14 +5025,32 @@
         box.appendChild(editorRow("Required",spec.required?"true":"false",v=>spec.required=(v==="true"),{select:true,options:["false","true"]}));
         body.appendChild(box);
       });
-      const add=btn("+ Add Parameter","mlb-create mlb-custom-add-arg");add.addEventListener("click",()=>{checkpoint("Add API parameter");args.push(customArgDefault(args.length));draw();});body.appendChild(add);
+      const add=btn("+ Add Parameter","mlb-create mlb-custom-add-arg");add.addEventListener("click",()=>{
+        checkpoint("Add API parameter");const spec=customArgDefault(args.length);spec.stage=allowedStages[0];args.push(spec);draw();
+      });body.appendChild(add);
 
       const previewTitle=document.createElement("div");previewTitle.className="mlb-section-title";previewTitle.textContent="FUNCTION PREVIEW";body.appendChild(previewTitle);
       const pre=document.createElement("pre");pre.className="mlb-code-preview";
       const path=apiBindingImportPath(binding)||"module.Symbol";const parts=path.split(".");const symbol=parts.pop()||"Symbol";const mod=parts.join(".")||"module";
-      const initArgs=args.filter(a=>String(a.stage||"init")==="init").map(a=>(a.positional?"":String(a.name||"arg")+"=")+String(a.source||"user")).join(", ");
-      const callArgs=args.filter(a=>String(a.stage||"init")==="call").map(a=>(a.positional?"":String(a.name||"arg")+"=")+String(a.source||"user")).join(", ")||"main";
-      pre.textContent="from "+mod+" import "+symbol+"\n\n"+(binding.target_kind==="function"?("y = "+symbol+"("+callArgs+")"):("layer = "+symbol+"("+initArgs+")\ny = layer("+callArgs+")"));body.appendChild(pre);
+      const renderArg=a=>(a.positional?"":String(a.name||"arg")+"=")+String(a.source||"user");
+      const initArgs=args.filter(a=>String(a.stage||"init")==="init").map(renderArg).join(", ");
+      const explicitCallArgs=args.filter(a=>String(a.stage||"call")==="call").map(renderArg).join(", ");
+      const callArgs=explicitCallArgs||(binding.auto_main_input?"main":"");
+      const objectName=binding.object_name||apiSafeObjectName(symbol||step.name);
+      let code="";
+      if(!isExisting)code+="from "+mod+" import "+symbol+"\n\n";
+      if(callType==="function")code+="y = "+symbol+"("+callArgs+")";
+      else if(callType==="static_method"||callType==="class_method")code+="y = "+symbol+"."+(binding.call_method||"method")+"("+callArgs+")";
+      else if(callType==="constructor")code+=objectName+" = "+symbol+"("+initArgs+")\n# registered for later nodes\ny = main";
+      else if(binding.object_mode==="existing"){
+        const reuseName=selectedObject?.name||"existing_object";
+        code+="# object from "+(selectedObject?.source||"another node")+"\ny = "+reuseName+(binding.call_method?("."+binding.call_method):"")+"("+callArgs+")";
+      }else{
+        code+=objectName+" = "+symbol+"("+initArgs+")\n";
+        code+="y = "+objectName+(binding.call_method?("."+binding.call_method):"")+"("+callArgs+")";
+      }
+      if(binding.register_result_object)code+="\n"+(binding.result_object_name||apiSafeObjectName(step.name+"_result"))+" = y  # registered for reuse"+(binding.result_output_mode==="passthrough"?"\ny = main":"");
+      pre.textContent=code;body.appendChild(pre);
     }
 
     function renderAPICustomOverview(body,def){
@@ -4867,7 +5059,7 @@
       const help=document.createElement("div");help.className="mlb-api-path";
       help.textContent="This API Component is one execution graph. Add API functions from the top toolbar, or insert supported MLBricks components from the left. Use ports for serial/parallel paths and remove links from the selected block's Connections section.";body.appendChild(help);
       const summary=document.createElement("div");summary.className="mlb-summary";
-      [["Functions",steps.length],["Connections",(current(state)?.edges||[]).length],["Rule","API functions only"]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";summary.appendChild(r);});body.appendChild(summary);
+      [["API Nodes",steps.length],["Reusable Objects",apiObjectCandidates(def).length],["Connections",(current(state)?.edges||[]).length]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";summary.appendChild(r);});body.appendChild(summary);
     }
 
     function removeAPIFunction(step){
@@ -4875,10 +5067,17 @@
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
       if(win&&typeof win.confirm==="function"&&!win.confirm('Remove function "'+(step.name||"Function")+'" from this API Component?'))return;
       checkpoint("Remove API function");
+      const removedBinding=ensureAPIStepObjectIds(step);
+      const removedObjectIds=new Set([removedBinding.object_id,removedBinding.result_object_id].filter(Boolean));
       c.nodes=(c.nodes||[]).filter(n=>n.id!==step.id);
       c.edges=(c.edges||[]).filter(e=>e.source!==step.id&&e.target!==step.id);
+      let clearedRefs=0;
+      apiStepNodes(c).forEach(other=>{
+        const b=ensureAPIStepObjectIds(other);
+        if(removedObjectIds.has(b.object_ref)){b.object_ref="";clearedRefs++;}
+      });
       selected=c.nodes[0]?.id||null;pendingPort=null;
-      setStatus((step.name||"Function")+" removed from API Component.");draw();
+      setStatus((step.name||"Function")+" removed from API Component."+(clearedRefs?" Cleared "+clearedRefs+" object reference"+(clearedRefs===1?"":"s")+".":""));draw();
     }
 
     function renderAPIStepConnections(body,step){
@@ -4899,11 +5098,11 @@
     function renderAPIStepInspector(body,def,step){
       const selectedWrap=document.createElement("div");selectedWrap.className="mlb-selected";
       const title=document.createElement("strong");title.textContent=step.name||"Function";
-      const pill=document.createElement("span");pill.className="mlb-pill";pill.textContent="API Function";selectedWrap.append(title,pill);body.appendChild(selectedWrap);
+      const pill=document.createElement("span");pill.className="mlb-pill";pill.textContent=apiCallTypeLabel(ensureAPIStepObjectIds(step).call_type);selectedWrap.append(title,pill);body.appendChild(selectedWrap);
       renderAPIStepBindingEditor(body,def,step);
       renderAPIStepConnections(body,step);
       const actions=document.createElement("div");actions.className="mlb-action-grid mlb-api-step-actions";
-      const remove=btn("Remove Function","mlb-danger-btn");remove.addEventListener("click",()=>removeAPIFunction(step));actions.appendChild(remove);body.appendChild(actions);
+      const remove=btn("Remove API Node","mlb-danger-btn");remove.addEventListener("click",()=>removeAPIFunction(step));actions.appendChild(remove);body.appendChild(actions);
       appendCustomSaveActions(body);
     }
 
@@ -5660,35 +5859,54 @@
           p.setAttribute("d",`M ${x1} ${y1} C ${x1+16} ${y1}, ${x1+16} ${bottomY}, ${x1+34} ${bottomY} L ${x2-34} ${bottomY} C ${x2-16} ${bottomY}, ${x2-16} ${y2}, ${x2} ${y2}`);
           p.setAttribute("class","mlb-edge-extra");
         }else{
-          // Main-lane wires use a lower routing rail instead of a center-to-center
-          // Bezier. This keeps connections outside component cards, including
-          // long links that skip over one or more intermediate blocks.
+          // Main lane routing:
+          // 1) Neighboring blocks connect directly through the empty gap between
+          //    their side ports.
+          // 2) Only links that jump across another block (or travel backwards)
+          //    are moved onto an outside rail.
           const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
           const left=Math.min(x1,x2), right=Math.max(x1,x2);
           let lowest=Math.max(ab.bottom-wr.top,bb.bottom-wr.top);
+          let blocked=false;
           flow.querySelectorAll(".mlb-node").forEach(nodeEl=>{
             if(nodeEl===a||nodeEl===b)return;
             const nr=nodeEl.getBoundingClientRect();
             const nl=nr.left-wr.left, nrgt=nr.right-wr.left;
-            if(nrgt>=left&&nl<=right)lowest=Math.max(lowest,nr.bottom-wr.top);
+            if(nrgt>left+4&&nl<right-4){
+              blocked=true;
+              lowest=Math.max(lowest,nr.bottom-wr.top);
+            }
           });
-          const routeY=lowest+20;
-          const dir=x2>=x1?1:-1;
-          const exitX=x1+dir*18;
-          const entryX=x2-dir*18;
-          const corner=10;
-          const down1=Math.max(y1+corner,routeY-corner);
-          const down2=Math.max(y2+corner,routeY-corner);
-          p.setAttribute("d",
-            `M ${x1} ${y1} `+
-            `C ${x1+dir*8} ${y1}, ${exitX} ${y1}, ${exitX} ${y1+corner} `+
-            `L ${exitX} ${down1} `+
-            `Q ${exitX} ${routeY} ${exitX+dir*corner} ${routeY} `+
-            `L ${entryX-dir*corner} ${routeY} `+
-            `Q ${entryX} ${routeY} ${entryX} ${down2} `+
-            `L ${entryX} ${y2+corner} `+
-            `C ${entryX} ${y2}, ${x2-dir*8} ${y2}, ${x2} ${y2}`
-          );
+
+          const forward=x2>x1;
+          if(forward&&!blocked){
+            // Clean side-to-side connector for adjacent blocks. The control
+            // points stay inside the inter-card gap, so the wire never dives
+            // under the cards just to connect immediate neighbors.
+            const gap=Math.max(1,x2-x1);
+            const handle=Math.max(12,Math.min(44,gap*0.42));
+            p.setAttribute("d",`M ${x1} ${y1} C ${x1+handle} ${y1}, ${x2-handle} ${y2}, ${x2} ${y2}`);
+          }else{
+            // Long/return connections use a lower rail so they cannot cut
+            // through any component between source and target.
+            const routeY=lowest+24;
+            const dir=x2>=x1?1:-1;
+            const exitX=x1+dir*18;
+            const entryX=x2-dir*18;
+            const corner=10;
+            const down1=Math.max(y1+corner,routeY-corner);
+            const down2=Math.max(y2+corner,routeY-corner);
+            p.setAttribute("d",
+              `M ${x1} ${y1} `+
+              `C ${x1+dir*8} ${y1}, ${exitX} ${y1}, ${exitX} ${y1+corner} `+
+              `L ${exitX} ${down1} `+
+              `Q ${exitX} ${routeY} ${exitX+dir*corner} ${routeY} `+
+              `L ${entryX-dir*corner} ${routeY} `+
+              `Q ${entryX} ${routeY} ${entryX} ${down2} `+
+              `L ${entryX} ${y2+corner} `+
+              `C ${entryX} ${y2}, ${x2-dir*8} ${y2}, ${x2} ${y2}`
+            );
+          }
           p.setAttribute("class","mlb-edge-main");
         }
         svg.appendChild(p);
@@ -6384,7 +6602,7 @@
             const binding=normalizeAPIBinding(n.api_binding||defaultAPIBinding());
             card.querySelector(".mlb-node-fields").innerHTML=
               '<div class="mlb-mini-field"><span>API</span><strong>'+(apiBindingImportPath(binding)||"Not bound")+'</strong></div>'+ 
-              '<div class="mlb-mini-field"><span>Type</span><strong>'+((binding.target_kind||"module")==="function"?"Function":"Module")+'</strong></div>'+ 
+              '<div class="mlb-mini-field"><span>Type</span><strong>'+apiCallTypeLabel(binding.call_type)+'</strong></div>'+ 
               '<div class="mlb-mini-field"><span>Parameters</span><strong>'+((binding.parameters||[]).length)+'</strong></div>';
           }else if(n.type==="custom"){
             const def=state.custom_components?.[n.definition_id];const isApi=String(def?.implementation||"graph")==="api";
@@ -6401,7 +6619,7 @@
           });
           const meta=card.querySelector(".node-meta");
           if(n.type==="api_step"){
-            meta.textContent="API function · explicit graph connections";
+            meta.textContent=apiCallTypeLabel(binding.call_type)+" · explicit graph connections";
           }else if(n.type==="custom"){
             const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · lazy imports":"Nested Module · 3-lane interface";
           }else meta.textContent=(apiInfo(n).public_name||n.type)+" · Skip / Main / Extra";
@@ -6415,15 +6633,17 @@
         });
       }
       wrap.appendChild(flow);canvas.appendChild(wrap);
-      const hint=document.createElement("div");hint.className="mlb-hint";
-      hint.textContent=pendingPort
-        ?"Choose the matching lane: Top ↔ Top, Main ↔ Main, Bottom ↔ Bottom."
-        :(isApiComposerView()
-          ?"API Component: mix API functions, supported MLBricks components, and reusable Modules. Wire blocks explicitly; branch for parallel paths and merge with Main / Skip / Extra inputs."
+      // Keep temporary port guidance, but do not occupy canvas space with a
+      // permanent API Component instruction banner.
+      if(pendingPort||!isApiComposerView()){
+        const hint=document.createElement("div");hint.className="mlb-hint";
+        hint.textContent=pendingPort
+          ?"Choose the matching lane: Top ↔ Top, Main ↔ Main, Bottom ↔ Bottom."
           :(state.active_workspace==="data"
             ?"Build left to right: one Data Source → Processing → Train/Val/Test → Tokenize → Prepared Dataset. Open Gallery to load a sample pipeline."
-            :"Select a node before adding a component to insert after it. Use Move Left / Move Right in Inspector to reorder. Main flow rewires automatically."));
-      canvas.appendChild(hint);
+            :"Select a node before adding a component to insert after it. Use Move Left / Move Right in Inspector to reorder. Main flow rewires automatically.");
+        canvas.appendChild(hint);
+      }
       main.appendChild(canvas);
       requestAnimationFrame(()=>{
         // transform:scale changes pixels but not layout. Give the wrapper the
@@ -6568,9 +6788,9 @@
         renderAPIStepInspector(body,def,n);
       }else if(n.type==="api_step"&&isApiComposerView()&&inspectorTab==="info"){
         const binding=normalizeAPIBinding(n.api_binding||defaultAPIBinding());
-        body.innerHTML='<div class="mlb-selected"><strong>'+String(n.name||"Function")+'</strong><span class="mlb-pill">API Function</span></div>';
+        body.innerHTML='<div class="mlb-selected"><strong>'+String(n.name||"Function")+'</strong><span class="mlb-pill">'+apiCallTypeLabel(binding.call_type)+'</span></div>';
         const s=document.createElement("div");s.className="mlb-summary";
-        [["Import",apiBindingImportPath(binding)||"Not bound"],["Type",binding.target_kind||"module"],["Parameters",(binding.parameters||[]).length],["Connections",(current(state).edges||[]).filter(e=>e.source===n.id||e.target===n.id).length]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";s.appendChild(r);});body.appendChild(s);
+        [["Import",(binding.call_type==="instance_method"&&binding.object_mode==="existing")?(apiObjectCandidates(state.custom_components?.[current(state).definition_id],n.id).find(x=>x.id===binding.object_ref)?.name||"Existing object"):(apiBindingImportPath(binding)||"Not bound")],["Type",apiCallTypeLabel(binding.call_type)],["Parameters",(binding.parameters||[]).length],["Connections",(current(state).edges||[]).filter(e=>e.source===n.id||e.target===n.id).length]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";s.appendChild(r);});body.appendChild(s);
       }else if(inspectorTab==="info"){
         const api=apiInfo(n);const item=n.type==="custom"?{category:"Modules / API",description:"Reusable Module or API Component."}:cat(catalog,n.type);
         body.innerHTML='<div class="mlb-selected"><strong>'+nodeDisplayName(n)+'</strong><span class="mlb-pill">'+(api.public_name||"Custom")+'</span></div>';

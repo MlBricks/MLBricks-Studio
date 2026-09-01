@@ -23,9 +23,14 @@ Version 0.1.2 deliberately removes `anywidget`. The Builder uses Jupyter's stand
 
 ## MLB Studio V1.0 API editor layout
 
-- **Add Function** now lives in the API Component top toolbar beside **Add Module**.
-- The Inspector stays focused on the selected function/class, parameters, preview, and connections.
-- Main graph connections route through a lower rail outside component cards instead of drawing across card interiors.
+- **Add Function** lives in the API Component top toolbar beside **Add Module**.
+- Adjacent graph nodes connect directly side-to-side; only long/skip routes use outside rails.
+- The permanent API helper banner at the bottom of the canvas has been removed.
+- API nodes now distinguish **Function**, **Static Method**, **Class Method**, **Instance Method**, and **Create Object** calls.
+- Instance-method nodes can **Create New Object** or **Use Existing Object** from the same API Component.
+- Objects use stable internal IDs tied to their source node, so renaming the visible node does not break references.
+- A created instance is constructed once per compiled API graph and reused by later nodes, preserving object state without recreating it.
+- API results can optionally be registered as reusable objects for later nodes.
 
 MLBricks itself remains a separate dependency and is installed from:
 
