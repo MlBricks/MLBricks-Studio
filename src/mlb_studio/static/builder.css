@@ -2201,3 +2201,16 @@
 
 /* Stop is present in the data toolbar for live state updates, but stays invisible until a fetch is running. */
 .mlb-top-primary>.mlb-center-stop[style*="display: none"]{display:none!important}
+
+/* MLB Studio V1.0 — runtime action-state polish */
+.mlb-top-actions>.mlb-top-cloud-action:disabled{
+  opacity:.42!important;
+  cursor:not-allowed!important;
+  filter:saturate(.45)!important;
+  pointer-events:none!important;
+}
+.mlb-runtime-page-active .mlb-full-window-btn{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+}

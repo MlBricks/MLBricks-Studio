@@ -765,6 +765,38 @@
 
     function cancelTrainingToModelEditor(entry){cancelRuntimeToModelEditor(entry,"train");}
 
+    function trainingIsRunning(){
+      return execution.status==="running" && execution.runtime_kind==="train";
+    }
+
+    function startTrainingFromRuntime(entry){
+      if(!entry || trainingIsRunning())return;
+      entry.training_status="starting";
+      entry.training_history=[];
+      entry.training_live={
+        status:"running",phase:"starting",overall:0,step:0,max_steps:entry.training_config?.max_steps??null,
+        tokens_seen:0,tokens_per_sec:null,avg_tokens_per_sec:null,end_to_end_tokens_per_sec:null,avg_end_to_end_tokens_per_sec:null,loss:null,ppl:null,val_loss:null,val_ppl:null,
+        memory_allocated_gb:null,memory_reserved_gb:null,memory_peak_gb:null,memory_total_gb:null,
+        elapsed_seconds:null,compile_seconds:null,message:"Starting training in Python…"
+      };
+      runtimePanel={mode:"train",modelId:entry.id,tab:"status"};
+      draw();
+      setTimeout(()=>requestRuntimeCommand("train",entry),80);
+    }
+
+    function trainingActionButton(entry,valid){
+      if(trainingIsRunning()){
+        const stop=btn("Stop Training","mlb-runtime-stop");
+        stop.addEventListener("click",requestStop);
+        return stop;
+      }
+      const start=btn("Start Training","mlb-runtime-start");
+      start.disabled=valid ? !valid.ok : false;
+      start.title=(valid && !valid.ok)?"Fix training compatibility/settings before starting":"Start training";
+      start.addEventListener("click",()=>startTrainingFromRuntime(entry));
+      return start;
+    }
+
     function bridgeDocuments(){
       const docs=[];
       const add=doc=>{if(doc && !docs.includes(doc))docs.push(doc);};
@@ -2944,8 +2976,9 @@
 
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";const dev=selectedRuntimeDevice(config);
       summary.innerHTML="<h3>Training Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Backend</span><strong>"+config.backend+"</strong></div><div><span>Execution</span><strong>"+config.execution_mode+"</strong></div><div><span>Precision</span><strong>"+config.precision+"</strong></div>";side.appendChild(summary);
-      const stop=btn("Stop Training","mlb-runtime-stop");stop.disabled=!(execution.status==="running"&&execution.runtime_kind==="train");stop.addEventListener("click",requestStop);side.appendChild(stop);
-      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop training and return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
+      const statusValid=trainingConfigValid(entry,config);
+      side.appendChild(trainingActionButton(entry,statusValid));
+      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=trainingIsRunning()?"Stop training and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
       if(entry.weights_ready){const gen=btn("Open Generation","mlb-generate-btn");gen.addEventListener("click",()=>openRuntimePanel("generate",entry));side.appendChild(gen);}
     }
 
@@ -3258,24 +3291,8 @@
         const valid=trainingConfigValid(entry,config);
         side.appendChild(compatibilityCard(valid.compat));
         if(!valid.ok){const errors=document.createElement("div");errors.className="mlb-runtime-errors";errors.innerHTML=valid.errors.map(x=>"<div>✕ "+x+"</div>").join("");side.appendChild(errors);}
-        const start=btn("Start Training","mlb-runtime-start");start.disabled=!valid.ok||execution.status==="running";
-        start.addEventListener("click",()=>{
-          entry.training_status="starting";
-          entry.training_history=[];
-          // A new attempt must not display metrics left over from an older run.
-          entry.training_live={
-            status:"running",phase:"starting",overall:0,step:0,max_steps:entry.training_config?.max_steps??null,
-            tokens_seen:0,tokens_per_sec:null,avg_tokens_per_sec:null,end_to_end_tokens_per_sec:null,avg_end_to_end_tokens_per_sec:null,loss:null,ppl:null,val_loss:null,val_ppl:null,
-            memory_allocated_gb:null,memory_reserved_gb:null,memory_peak_gb:null,memory_total_gb:null,
-            elapsed_seconds:null,compile_seconds:null,message:"Starting training in Python…"
-          };
-          runtimePanel={mode:"train",modelId:entry.id,tab:"status"};
-          draw();
-          setTimeout(()=>requestRuntimeCommand("train",entry),80);
-        });side.appendChild(start);
-        const stop=btn("Stop Training","mlb-runtime-stop");stop.disabled=execution.status!=="running";
-        stop.addEventListener("click",requestStop);side.appendChild(stop);
-        const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title="Stop training and return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
+        side.appendChild(trainingActionButton(entry,valid));
+        const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=trainingIsRunning()?"Stop training and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
       }else{
         const weights=document.createElement("div");weights.className="mlb-weight-status "+(entry.weights_ready?"ready":"missing");
         weights.textContent=entry.weights_ready?"✓ Model weights available":"✕ No trained/loaded weights yet";side.appendChild(weights);
@@ -6296,7 +6313,7 @@
       if(current(state)?.kind!=="custom_edit"){
         if(runtimeWorkspaceActive){
           const mode=runtimePanel?.mode||"train";
-          const runtimeActuallyBusy=execution.status==="running" && execution.runtime_kind===mode;
+          const runtimeActuallyBusy=mode==="train"?trainingIsRunning():(execution.status==="running" && execution.runtime_kind===mode);
           if(runtimeActuallyBusy){
             const runtimeLabel=mode==="train"?"Training":mode==="generate"?"Generating":"Serving";
             const runtimeIndicator=actionBtn(runtimeLabel,"mlb-run mlb-build mlb-top-build-tab runtime-busy "+mode,"activity");
@@ -6353,20 +6370,30 @@
           const c=current(state);if(!c.nodes.length&&!c.edges.length)return;
           checkpoint("Clear graph");c.nodes=[];c.edges=[];selected=null;pendingPort=null;setStatus("Graph cleared.");draw();
         });
-        const cloudBtn=actionBtn("Cloud & Repositories","mlb-dark-btn mlb-top-cloud-btn mlb-top-cloud-action"+(cloudWorkspace.open?" active":""),"cloud");
-        cloudBtn.title="Open Cloud & Repositories";
-        cloudBtn.addEventListener("click",()=>cloudWorkspace.open?closeCloudWorkspace():openCloudWorkspace());
         acts.append(undoBtn,redoBtn,clearBtn);
-        if(current(state)?.kind!=="custom_edit")acts.appendChild(cloudBtn);
       }
+
+      if(current(state)?.kind!=="custom_edit"){
+        const cloudBtn=actionBtn("Cloud & Repositories","mlb-dark-btn mlb-top-cloud-btn mlb-top-cloud-action"+(cloudWorkspace.open?" active":""),"cloud");
+        const lockCloud=runtimeWorkspaceActive && trainingIsRunning();
+        cloudBtn.disabled=lockCloud;
+        cloudBtn.title=lockCloud?"Cloud & Repositories is unavailable while training":"Open Cloud & Repositories";
+        cloudBtn.addEventListener("click",()=>{
+          if(lockCloud)return;
+          cloudWorkspace.open?closeCloudWorkspace():openCloudWorkspace();
+        });
+        acts.appendChild(cloudBtn);
+      }
+
       if(fullBtn){
         fullBtn.className="mlb-dark-btn mlb-full-window-btn";
         fullBtn.textContent="↗ Full Window";
         fullBtn.href="#";
         fullBtn.title="Open MLB Studio in a separate full-window browser tab";
         fullBtn.addEventListener("click",activateFullWindowLink);
+        // Keep Full Window visible in notebook/Kaggle runtime pages too.
+        acts.appendChild(fullBtn);
       }
-      if(fullBtn && !runtimeWorkspaceActive)acts.appendChild(fullBtn);
       top.appendChild(acts);
       root.appendChild(top);
 
