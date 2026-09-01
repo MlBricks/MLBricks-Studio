@@ -1,12 +1,16 @@
 .mlb-root{
   --bg:#0b1118;--panel:#101720;--panel2:#151e28;--panel3:#18232f;
+  width:100%;
+  max-width:100%;
+  container-type:inline-size;
+  container-name:studio;
   --border:#26323f;--border2:#334252;--text:#e8edf4;--muted:#8c98a8;
   --purple:#815ff3;--green:#55c78a;--blue:#5e9df0;--pink:#e86fae;
   --orange:#f5a849;--cyan:#4bc1cb;--yellow:#d6b64d;--red:#e56a6a;
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   background:var(--bg);color:var(--text);border:1px solid #202a35;border-radius:12px;
-  overflow:hidden;min-width:1080px;box-shadow:0 8px 24px rgba(0,0,0,.18);
-  height:min(910px,92vh);min-height:720px;max-height:910px;
+  overflow:hidden;min-width:0;box-shadow:0 8px 24px rgba(0,0,0,.18);
+  height:min(910px,92vh);min-height:640px;max-height:910px;
   display:flex;flex-direction:column
 }
 .mlb-topbar{
@@ -2420,3 +2424,94 @@
 .mlb-percent-row .mlb-number-step{width:18px;font-size:9px}
 /* The model-settings card uses a 25px control height; keep its steppers tidy. */
 .mlb-model-setting-field .mlb-number-step{font-size:9px;border-radius:3px}
+
+
+/* ------------------------------------------------------------------
+   V1.0 responsive notebook / Kaggle layout
+   ------------------------------------------------------------------ */
+.mlb-root *{box-sizing:border-box}
+.mlb-main,.mlb-sidebar,.mlb-inspector,.mlb-ins-body,.mlb-canvas{min-width:0}
+
+@container studio (max-width: 1550px){
+  .mlb-shell{grid-template-columns:220px minmax(0,1fr) 278px}
+  .mlb-project-title{margin-left:12px;font-size:14px}
+}
+
+@container studio (max-width: 1380px){
+  .mlb-topbar{padding:0 12px;gap:10px}
+  .mlb-shell{grid-template-columns:200px minmax(0,1fr) 250px}
+  .mlb-sidebar{padding:7px}
+  .mlb-ins-body{padding:9px}
+  .mlb-node{width:118px}
+  .mlb-flow{gap:12px;padding:0 16px}
+  .mlb-minimap{display:none}
+  .mlb-model-settings{grid-template-columns:1fr}
+  .mlb-cloud-provider-bar{grid-template-columns:1fr}
+}
+
+@container studio (max-width: 1180px){
+  .mlb-topbar{height:auto;grid-template-columns:1fr;gap:8px;padding:10px 12px}
+  .mlb-topbar>div,.mlb-topbar .mlb-top-actions,.mlb-topbar .mlb-logo{min-width:0}
+  .mlb-project-title{margin-left:8px;white-space:normal;line-height:1.25}
+  .mlb-top-actions{justify-content:flex-start;flex-wrap:wrap}
+  .mlb-shell{grid-template-columns:188px minmax(0,1fr) 236px}
+  .mlb-toolbar{height:auto;min-height:48px;flex-wrap:wrap;align-items:center;padding:8px 10px}
+  .mlb-toolspacer{display:none}
+  .mlb-canvas-top{flex-wrap:wrap;gap:8px;align-items:flex-start}
+  .mlb-breadcrumbs{flex-wrap:wrap}
+  .mlb-output-list{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+  .mlb-files-row{grid-template-columns:minmax(140px,1.4fr) minmax(88px,.7fr) minmax(115px,1fr) minmax(86px,.65fr)}
+}
+
+@container studio (max-width: 1040px){
+  .mlb-shell{grid-template-columns:180px minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(220px,36cqh)}
+  .mlb-sidebar{grid-column:1;grid-row:1 / span 2}
+  .mlb-main{grid-column:2;grid-row:1}
+  .mlb-inspector{grid-column:2;grid-row:2;border-left:0;border-top:1px solid var(--border);min-height:220px;max-height:none}
+  .mlb-ins-tabs{height:34px;flex:0 0 34px}
+  .mlb-details{position:relative;left:auto;right:auto;bottom:auto}
+  .mlb-output-directory,.mlb-files-view,.mlb-hub-view,.mlb-cloud-view{max-height:240px}
+  .mlb-bottom-panels{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mlb-run-live{max-width:none;width:100%}
+}
+
+@container studio (max-width: 860px){
+  .mlb-root{height:auto;min-height:0;max-height:none}
+  .mlb-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(420px,1fr) auto}
+  .mlb-sidebar{grid-column:1;grid-row:1;border-right:0;border-bottom:1px solid var(--border);max-height:34dvh}
+  .mlb-main{grid-column:1;grid-row:2;min-height:420px}
+  .mlb-inspector{grid-column:1;grid-row:3;border-top:1px solid var(--border);min-height:260px;max-height:44dvh}
+  .mlb-logo-brand{width:150px!important;flex-basis:150px!important}
+  .mlb-project-title{margin-left:0}
+  .mlb-toolbar{gap:6px}
+  .mlb-tool,.mlb-dark-btn,.mlb-run,.mlb-stop{font-size:11px;padding:6px 8px}
+  .mlb-zoom span{padding:6px 8px}
+  .mlb-flow{padding:0 10px}
+  .mlb-node{width:112px;height:302px;padding:9px 7px}
+  .mlb-details-left{flex-wrap:wrap}
+  .mlb-details-select{min-width:0;width:100%}
+  .mlb-output-list,.mlb-output-list.compact{grid-template-columns:1fr}
+  .mlb-files-row{grid-template-columns:1fr;gap:4px}
+  .mlb-files-row.header{display:none}
+  .mlb-file-actions{justify-content:flex-start}
+  .mlb-hub-grid,.mlb-cloud-grid,.mlb-cloud-mini-grid,.mlb-model-settings,.mlb-action-grid,.mlb-validation-status-grid,.mlb-status-metrics,.mlb-split-values,.mlb-dataset-splits{grid-template-columns:1fr}
+  .mlb-status-sample>div,.mlb-prompt-grid,.mlb-train-grid,.mlb-generate-grid,.mlb-runtime-grid,.mlb-serve-grid,.mlb-serve-sample-grid{grid-template-columns:1fr!important}
+  .mlb-bottom-panels{grid-template-columns:1fr}
+}
+
+@container studio (max-width: 680px){
+  .mlb-logo{height:auto!important;align-items:flex-start!important;flex-wrap:wrap}
+  .mlb-logo-brand{width:138px!important;height:42px!important;flex-basis:138px!important}
+  .mlb-beta{height:24px;font-size:10.5px;padding:0 6px}
+  .mlb-shell{grid-template-rows:auto minmax(360px,1fr) auto}
+  .mlb-sidebar{max-height:30dvh}
+  .mlb-main{min-height:360px}
+  .mlb-inspector{max-height:none}
+  .mlb-node{width:104px;height:292px}
+  .mlb-node .node-desc{font-size:10.5px;min-height:28px}
+  .mlb-mini-field{grid-template-columns:1fr;gap:3px}
+  .mlb-mini-field strong{text-align:left}
+  .mlb-number-shell{grid-template-columns:minmax(0,1fr) 18px}
+  .mlb-number-step{width:18px;font-size:9px}
+  .mlb-field input,.mlb-field select,.mlb-field textarea,.mlb-model-setting-field input,.mlb-model-setting-field select{font-size:11px}
+}

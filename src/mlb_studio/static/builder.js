@@ -7381,7 +7381,9 @@ function __MLB_STUDIO_FACTORY__(){
             if(!flow||!flow.isConnected){edgeObserver.disconnect();return;}
             requestAnimationFrame(renderConnections);
           });
-          edgeObserver.observe(flow);
+          [flow,wrap,canvas,root].forEach(target=>{
+            try{ if(target) edgeObserver.observe(target); }catch(_){ }
+          });
         }
       }
 
