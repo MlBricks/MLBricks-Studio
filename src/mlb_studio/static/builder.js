@@ -52,6 +52,7 @@
     let popoutSyncTimer=null;
     const runtimeCaps=cp(payload.runtime_capabilities||{devices:[{id:"auto",label:"Auto"},{id:"cpu",label:"CPU"}]});
     const localEnvironment=cp(payload.local_environment||{kind:"python",name:"Python / Jupyter Environment",roots:["."],default_root:"."});
+    const brandLogo=String(payload.brand_logo||"");
     const localDefaultRoot=localEnvironment.workspace_root||localEnvironment.default_root||(localEnvironment.roots||[])[0]||".";
     const localPaths=cp(localEnvironment.paths||{});
     let runtimePanel=null;
@@ -6671,7 +6672,15 @@
       const frontendVersion=root.dataset.mlbricksBuilderVersion||"1.0.0";
 
       const topLeft=document.createElement("div");topLeft.className="mlb-top-left";
-      const logo=document.createElement("div");logo.className="mlb-logo";logo.innerHTML='<span class="mlb-studio-brand" aria-label="MLB Studio"><span class="mlb-studio-mark">MLB</span><span class="mlb-studio-word">Studio</span></span><span class="mlb-beta">V1.0</span>';
+      const logo=document.createElement("div");logo.className="mlb-logo";
+      if(brandLogo){
+        const logoImg=document.createElement("img");logoImg.className="mlb-logo-brand";logoImg.src=brandLogo;logoImg.alt="MLBRICKS STUDIO";
+        logo.appendChild(logoImg);
+      }else{
+        const fallback=document.createElement("span");fallback.className="mlb-studio-brand";fallback.setAttribute("aria-label","MLB Studio");fallback.innerHTML='<span class="mlb-studio-mark">MLB</span><span class="mlb-studio-word">Studio</span>';
+        logo.appendChild(fallback);
+      }
+      const versionBadge=document.createElement("span");versionBadge.className="mlb-beta";versionBadge.textContent="V1.0";logo.appendChild(versionBadge);
       const title=document.createElement("div");
       const focusedCustom=current(state)?.kind==="custom_edit";
       title.className="mlb-project-title"+(focusedCustom?"":" mlb-project-title-editable");
@@ -6803,7 +6812,7 @@
         searchFocusRestore={start:searchInput.selectionStart??search.length,end:searchInput.selectionEnd??search.length};
         draw();
       });
-      sr.append(searchInput,btn("☷","mlb-filter-btn"));side.appendChild(sr);
+      sr.appendChild(searchInput);side.appendChild(sr);
       if(current(state)?.kind!=="custom_edit"){
         const workspaceBox=document.createElement("div");workspaceBox.className="mlb-workspace-box";
         const workspaceLabel=document.createElement("label");workspaceLabel.textContent="BUILD WORKSPACE";

@@ -2221,3 +2221,30 @@
 .mlb-user-port-label.in{text-align:left}.mlb-user-port-label.out{text-align:right}
 .mlb-edge-named{stroke:#f0a84a;stroke-width:2;stroke-linecap:round}
 .mlb-user-function-named .node-desc{padding-left:5px;padding-right:5px}
+
+
+/* MLB Studio V1.0 — brand/logo and component-library spacing polish */
+.mlb-logo{
+  align-items:center!important;
+  height:46px!important;
+  gap:8px!important;
+}
+.mlb-logo-brand{
+  display:block!important;
+  width:205px!important;
+  height:46px!important;
+  flex:0 0 205px!important;
+  object-fit:contain!important;
+  object-position:left center!important;
+}
+.mlb-beta{margin-top:0!important;align-self:center!important}
+.mlb-search-row{
+  display:block!important;
+  grid-template-columns:none!important;
+  gap:0!important;
+}
+.mlb-search-row .mlb-search{width:100%!important}
+.mlb-sidebar{
+  padding-bottom:34px!important;
+  box-sizing:border-box!important;
+}
