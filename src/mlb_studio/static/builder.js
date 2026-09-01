@@ -2615,7 +2615,9 @@
           nodes:Object.fromEntries(nodes.map(n=>[n.id,{status:"done",message:"Built"}]))
         };
         bottomView="outputs";
-        bottomExpanded=false;
+        // Keep the workspace collapsed by default, but open it after a successful
+        // build so the newly built model is immediately available for selection.
+        bottomExpanded=true;
         outputDirectorySelection=entry.id;
         selected=null;
         scrollBuiltModelActionsOnce=true;
