@@ -3367,6 +3367,60 @@
       return box;
     }
 
+    function renderRuntimeContextInspector(body,entry,mode){
+      if(!entry)return;
+      ensureRuntimeConfigs(entry);
+      const dataset=preparedDatasetById(entry.selected_dataset_id)||null;
+      const req=entry.requirements||{};
+      const isTrain=mode==="train";
+      const running=execution.status==="running"&&execution.runtime_kind===mode&&execution.model_id===entry.id;
+      const config=isTrain?entry.training_config:(mode==="generate"?entry.generation_config:entry.serve_config);
+      const device=selectedRuntimeDevice(config||{});
+
+      const head=document.createElement("div");head.className="mlb-selected";
+      head.innerHTML="<strong>"+entry.name+"</strong><span class='mlb-pill'>"+(isTrain?"Training":"Runtime")+"</span>";
+      body.appendChild(head);
+
+      const statusBox=document.createElement("div");
+      statusBox.className="mlb-api-status "+(running?"ok":"utility");
+      statusBox.textContent=running
+        ?("● "+(isTrain?"Training":"Runtime")+" active · "+(execution.message||"Running"))
+        :(isTrain?"Training configuration ready":"Runtime configuration ready");
+      body.appendChild(statusBox);
+
+      detailSection(body,"MODEL",[
+        ["Status",entry.status||"built"],
+        ["Layers",entry.nodes??"—"],
+        ["Parameters",entry.estimated_parameters??"—"],
+        ["Input",req.modality||"unknown"],
+        ["Output",req.output_type||"unknown"],
+      ]);
+
+      detailSection(body,"RUNTIME",[
+        ["Device",device?.label||"Auto"],
+        ["Backend",config?.backend||"auto"],
+        ["Execution",config?.execution_mode||"eager"],
+        ["Precision",config?.precision||"auto"],
+      ]);
+
+      if(isTrain){
+        const compat=modelDatasetCompatibility(entry,dataset);
+        const compTitle=document.createElement("div");compTitle.className="mlb-section-title";compTitle.textContent="COMPATIBILITY";body.appendChild(compTitle);
+        body.appendChild(compatibilityCard(compat));
+        if(dataset)body.appendChild(datasetSummaryCard(dataset,"TRAINING DATA"));
+        else{
+          const empty=document.createElement("div");empty.className="mlb-api-path";empty.textContent="No prepared training dataset selected.";body.appendChild(empty);
+        }
+        const note=document.createElement("div");note.className="mlb-runtime-note";
+        note.textContent=running
+          ?"Model and dataset details are read-only context while training is running. Use the center runtime controls to stop or cancel training."
+          :"Training controls and settings are in the center workspace. This panel shows the model, runtime and selected data context.";
+        body.appendChild(note);
+      }else if(mode==="generate"){
+        const weights=document.createElement("div");weights.className="mlb-weight-status "+(entry.weights_ready?"ready":"missing");weights.textContent=entry.weights_ready?"✓ Model weights available":"✕ No trained/loaded weights yet";body.appendChild(weights);
+      }
+    }
+
     function renderBuiltModelInspector(body,entry){
       const dataset=preparedDatasetById(entry.selected_dataset_id)||null;
       const compat=modelDatasetCompatibility(entry,dataset);
@@ -6868,14 +6922,18 @@
 
       // Inspector
       const ins=document.createElement("aside");ins.className="mlb-inspector";
+      const runtimeInspectorEntry=runtimeWorkspaceActive?builtModelById(runtimePanel?.modelId):null;
       const tabs=document.createElement("div");tabs.className="mlb-ins-tabs";
-      [["settings","Inspector"],["info","Info"]].forEach(([k,t])=>{const b=btn(t);if(inspectorTab===k)b.className="active";b.addEventListener("click",()=>{inspectorTab=k;draw();});tabs.appendChild(b);});ins.appendChild(tabs);
+      const primaryInspectorLabel=runtimeInspectorEntry?(runtimePanel?.mode==="train"?"Training":"Runtime"):"Inspector";
+      [["settings",primaryInspectorLabel],["info","Info"]].forEach(([k,t])=>{const b=btn(t);if(inspectorTab===k)b.className="active";b.addEventListener("click",()=>{inspectorTab=k;draw();});tabs.appendChild(b);});ins.appendChild(tabs);
       const body=document.createElement("div");body.className="mlb-ins-body";
       const outputDataset=selectedOutputDataset();
       const outputModel=selectedOutputModel();
       const n=selectedNode();
 
-      if(outputDataset){
+      if(runtimeInspectorEntry){
+        renderRuntimeContextInspector(body,runtimeInspectorEntry,runtimePanel?.mode||"train");
+      }else if(outputDataset){
         renderPreparedDatasetInspector(body,outputDataset);
       }else if(outputModel){
         renderBuiltModelInspector(body,outputModel);
