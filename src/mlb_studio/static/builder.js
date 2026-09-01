@@ -6296,12 +6296,15 @@
       if(current(state)?.kind!=="custom_edit"){
         if(runtimeWorkspaceActive){
           const mode=runtimePanel?.mode||"train";
-          const runtimeLabel=mode==="train"?"Training":mode==="generate"?"Generating":"Serving";
-          const runtimeIndicator=actionBtn(runtimeLabel,"mlb-run mlb-build mlb-top-build-tab runtime-busy "+mode,"activity");
-          runtimeIndicator.disabled=true;
-          runtimeIndicator.title=runtimeLabel+" in progress";
-          runtimeIndicator.setAttribute("aria-disabled","true");
-          primary.appendChild(runtimeIndicator);
+          const runtimeActuallyBusy=execution.status==="running" && execution.runtime_kind===mode;
+          if(runtimeActuallyBusy){
+            const runtimeLabel=mode==="train"?"Training":mode==="generate"?"Generating":"Serving";
+            const runtimeIndicator=actionBtn(runtimeLabel,"mlb-run mlb-build mlb-top-build-tab runtime-busy "+mode,"activity");
+            runtimeIndicator.disabled=true;
+            runtimeIndicator.title=runtimeLabel+" in progress";
+            runtimeIndicator.setAttribute("aria-disabled","true");
+            primary.appendChild(runtimeIndicator);
+          }
         }else{
           const run=state.active_workspace==="model"
             ?actionBtn(
@@ -6311,21 +6314,30 @@
                 "mlb-run mlb-build mlb-top-build-tab"+(modelRuntimeBusy?" runtime-busy "+execution.runtime_kind:""),
                 modelRuntimeBusy?"activity":"build"
               )
-            :actionBtn("Fetch Data","mlb-run mlb-build mlb-top-build-tab","fetch");
-          run.disabled=modelRuntimeBusy;
+            :actionBtn(
+                dataFetchBusy?"Fetching":"Fetch Data",
+                "mlb-run mlb-build mlb-top-build-tab"+(dataFetchBusy?" runtime-busy data":""),
+                dataFetchBusy?"activity":"fetch"
+              );
+          run.disabled=modelRuntimeBusy||dataFetchBusy;
           run.addEventListener("click",()=>{
             if(galleryWorkspace.open){closeGallery();return;}
             if(cloudWorkspace.open){closeCloudWorkspace();return;}
             (state.active_workspace==="model"?requestModelBuild:requestRun)();
           });
           primary.appendChild(run);
-          const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
-          stopBtn.addEventListener("click",requestStop);
-          stopBtn.style.display=(dataFetchBusy||modelRuntimeBusy)?"inline-flex":"none";
-          if(state.active_workspace==="data" || modelRuntimeBusy)primary.appendChild(stopBtn);
+          if(state.active_workspace==="data"||modelRuntimeBusy){
+            const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
+            stopBtn.addEventListener("click",requestStop);
+            stopBtn.style.display=(dataFetchBusy||modelRuntimeBusy)?"inline-flex":"none";
+            primary.appendChild(stopBtn);
+          }
           const galleryBtn=actionBtn("Gallery","mlb-dark-btn mlb-top-gallery-btn"+(galleryWorkspace.open?" active":""),"gallery");
           galleryBtn.title="Open prebuilt Models, Components and Data";
-          galleryBtn.addEventListener("click",()=>galleryWorkspace.open?closeGallery():openGallery(galleryWorkspace.tab));
+          galleryBtn.addEventListener("click",()=>{
+            if(galleryWorkspace.open){closeGallery();return;}
+            openGallery(state.active_workspace==="data"?"data":"models");
+          });
           primary.appendChild(galleryBtn);
         }
       }

@@ -2198,3 +2198,6 @@
 .mlb-runtime-page-active .mlb-top-primary>.mlb-top-build-tab.runtime-busy:disabled{
   opacity:1!important;cursor:default!important;pointer-events:none!important
 }
+
+/* Stop is present in the data toolbar for live state updates, but stays invisible until a fetch is running. */
+.mlb-top-primary>.mlb-center-stop[style*="display: none"]{display:none!important}
