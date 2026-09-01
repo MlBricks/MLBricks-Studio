@@ -6252,6 +6252,11 @@
     }
 
     function drawEdges(wrap,flow){
+      if(!wrap||!flow||!wrap.isConnected||!flow.isConnected)return;
+      // A draw() rebuild can be followed by font/layout/scrollbar changes in
+      // notebook hosts. Always replace the previous edge layer so connections
+      // reflect the final measured port positions instead of a stale first frame.
+      wrap.querySelectorAll(":scope > .mlb-edge-layer").forEach(el=>el.remove());
       const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
       svg.setAttribute("class","mlb-edge-layer");
       const scaledRect=wrap.getBoundingClientRect();
@@ -7145,10 +7150,12 @@
       }
       main.appendChild(canvas);
       if(!galleryWorkspace.open && !cloudWorkspace.open && !runtimeWorkspaceActive){
-        requestAnimationFrame(()=>{
+        let edgeDrawGeneration=0;
+        const renderConnections=()=>{
+          if(!wrap.isConnected||!flow.isConnected)return;
+          const generation=++edgeDrawGeneration;
           // transform:scale changes pixels but not layout. Give the wrapper the
-          // scaled dimensions so zoom creates the correct scroll area instead
-          // of clipping nodes, bottom ports, edges, or the instruction banner.
+          // scaled dimensions so zoom creates the correct scroll area.
           const baseW=Math.max(flow.scrollWidth,flow.offsetWidth);
           const baseH=Math.max(flow.scrollHeight,flow.offsetHeight);
           wrap.style.width=Math.ceil(baseW*zoom)+"px";
@@ -7157,7 +7164,26 @@
           const pos=workspaceScroll[state.active_workspace]||{left:0,top:0};
           canvas.scrollLeft=pos.left||0;
           canvas.scrollTop=pos.top||0;
+          return generation;
+        };
+        // Draw once after DOM insertion, once on the following frame, and once
+        // after notebook/browser layout has settled. This fixes newly inserted
+        // components whose ports were measured before their final card geometry.
+        requestAnimationFrame(()=>{
+          renderConnections();
+          requestAnimationFrame(renderConnections);
         });
+        setTimeout(renderConnections,90);
+        setTimeout(renderConnections,240);
+        // Keep edges synchronized when the flow width changes because a card is
+        // inserted, renamed, expanded, or the notebook output is resized.
+        if(typeof ResizeObserver!=="undefined"){
+          const edgeObserver=new ResizeObserver(()=>{
+            if(!flow.isConnected){edgeObserver.disconnect();return;}
+            requestAnimationFrame(renderConnections);
+          });
+          edgeObserver.observe(flow);
+        }
       }
 
       // Bottom project drawer is open by default. Train/Generate collapse it on

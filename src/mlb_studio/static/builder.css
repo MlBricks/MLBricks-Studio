@@ -2248,3 +2248,12 @@
   padding-bottom:34px!important;
   box-sizing:border-box!important;
 }
+
+
+/* MLB Studio V1.0 — connection visibility + supplied brand asset */
+.mlb-edge-layer{z-index:3!important}
+.mlb-node{z-index:2}
+.mlb-port{z-index:6!important}
+.mlb-user-port-label{z-index:7!important}
+.mlb-logo{height:52px!important}
+.mlb-logo-brand{width:166px!important;height:52px!important;flex:0 0 166px!important;object-fit:contain!important;object-position:left center!important}
