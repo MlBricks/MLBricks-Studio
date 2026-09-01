@@ -107,8 +107,8 @@ def test_all_number_inputs_get_shared_themed_steppers():
     text = _builder_js()
     assert "function installNumberSteppers(scope)" in text
     assert 'input[type="number"]:not([data-mlb-number-ready="1"])' in text
-    assert 'makeStep(1,"+","Increment value")' in text
     assert 'makeStep(-1,"−","Decrement value")' in text
+    assert 'makeStep(1,"+","Increment value")' in text
     assert "installNumberSteppers(root);" in text
 
 
@@ -138,7 +138,9 @@ def test_desktop_control_geometry_does_not_shrink_in_kaggle():
     assert "V1.0 desktop control geometry lock" in text
     assert "grid-template-columns:0 minmax(1040px,1fr) 300px!important" in text
     assert "grid-template-columns:repeat(3,minmax(210px,1fr))!important" in text
-    assert "grid-template-columns:minmax(0,1fr) 28px!important" in text
-    assert "width:28px!important" in text
-    assert "height:38px!important" in text
+    assert "V1.0 compact horizontal number steppers" in text
+    assert "grid-template-columns:minmax(0,1fr) 24px 24px!important" in text
+    assert "display:contents!important" in text
+    assert "height:32px!important" in text
+    assert "height:34px!important" in text
     assert "min-width:112px!important" in text
