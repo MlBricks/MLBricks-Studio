@@ -52,7 +52,6 @@
     let popoutSyncTimer=null;
     const runtimeCaps=cp(payload.runtime_capabilities||{devices:[{id:"auto",label:"Auto"},{id:"cpu",label:"CPU"}]});
     const localEnvironment=cp(payload.local_environment||{kind:"python",name:"Python / Jupyter Environment",roots:["."],default_root:"."});
-    const brandLogo=String(payload.brand_logo||"");
     const localDefaultRoot=localEnvironment.workspace_root||localEnvironment.default_root||(localEnvironment.roots||[])[0]||".";
     const localPaths=cp(localEnvironment.paths||{});
     let runtimePanel=null;
@@ -6678,13 +6677,9 @@
 
       const topLeft=document.createElement("div");topLeft.className="mlb-top-left";
       const logo=document.createElement("div");logo.className="mlb-logo";
-      if(brandLogo){
-        const logoImg=document.createElement("img");logoImg.className="mlb-logo-brand";logoImg.src=brandLogo;logoImg.alt="MLBRICKS STUDIO";
-        logo.appendChild(logoImg);
-      }else{
-        const fallback=document.createElement("span");fallback.className="mlb-studio-brand";fallback.setAttribute("aria-label","MLB Studio");fallback.innerHTML='<span class="mlb-studio-mark">MLB</span><span class="mlb-studio-word">Studio</span>';
-        logo.appendChild(fallback);
-      }
+      const cssLogo=document.createElement("span");cssLogo.className="mlb-css-logo";cssLogo.setAttribute("aria-label","MLBRICKS STUDIO");
+      cssLogo.innerHTML='<span class="mlb-css-logo-main"><span class="mlb-css-ml">ML</span><span class="mlb-css-bricks">BRICKS</span></span><span class="mlb-css-studio">STUDIO</span>';
+      logo.appendChild(cssLogo);
       const versionBadge=document.createElement("span");versionBadge.className="mlb-beta";versionBadge.textContent="V1.0";logo.appendChild(versionBadge);
       const title=document.createElement("div");
       const focusedCustom=current(state)?.kind==="custom_edit";
@@ -7045,6 +7040,7 @@
         if(entry){renderRuntimeWorkspace(canvas,entry,runtimePanel.mode);}
         else{runtimePanel=null;}
       }
+      let wrap=null,flow=null;
       if(!galleryWorkspace.open && !cloudWorkspace.open && !runtimeWorkspaceActive){
       const ctop=document.createElement("div");ctop.className="mlb-canvas-top";
       const crumbs=document.createElement("div");crumbs.className="mlb-breadcrumbs";
@@ -7062,8 +7058,8 @@
       mini.append(miniTitle,mg);
       canvas.appendChild(mini);
 
-      const wrap=document.createElement("div");wrap.className="mlb-flow-wrap"+(isApiComposerView()?" mlb-api-composer-wrap":"");
-      const flow=document.createElement("div");flow.className="mlb-flow"+(isApiComposerView()?" mlb-api-composer-flow":"");
+      wrap=document.createElement("div");wrap.className="mlb-flow-wrap"+(isApiComposerView()?" mlb-api-composer-wrap":"");
+      flow=document.createElement("div");flow.className="mlb-flow"+(isApiComposerView()?" mlb-api-composer-flow":"");
       flow.style.transformOrigin="left top";
       flow.style.transform="scale("+zoom+")";
       const comp=current(state);
@@ -7152,7 +7148,7 @@
       if(!galleryWorkspace.open && !cloudWorkspace.open && !runtimeWorkspaceActive){
         let edgeDrawGeneration=0;
         const renderConnections=()=>{
-          if(!wrap.isConnected||!flow.isConnected)return;
+          if(!wrap||!flow||!wrap.isConnected||!flow.isConnected)return;
           const generation=++edgeDrawGeneration;
           // transform:scale changes pixels but not layout. Give the wrapper the
           // scaled dimensions so zoom creates the correct scroll area.
@@ -7177,9 +7173,9 @@
         setTimeout(renderConnections,240);
         // Keep edges synchronized when the flow width changes because a card is
         // inserted, renamed, expanded, or the notebook output is resized.
-        if(typeof ResizeObserver!=="undefined"){
+        if(typeof ResizeObserver!=="undefined" && flow){
           const edgeObserver=new ResizeObserver(()=>{
-            if(!flow.isConnected){edgeObserver.disconnect();return;}
+            if(!flow||!flow.isConnected){edgeObserver.disconnect();return;}
             requestAnimationFrame(renderConnections);
           });
           edgeObserver.observe(flow);

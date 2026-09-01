@@ -35,7 +35,7 @@ where = ["src"]
 include = ["mlb_studio*"]
 
 [tool.setuptools.package-data]
-mlb_studio = ["static/*.js", "static/*.css", "static/*.png", "*.json"]
+mlb_studio = ["static/*.js", "static/*.css", "*.json"]
 
 
 [project.optional-dependencies]

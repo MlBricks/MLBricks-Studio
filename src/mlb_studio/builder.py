@@ -1,6 +1,5 @@
 from __future__ import annotations
 import html
-import base64
 import ast
 import importlib.util
 import json
@@ -2403,10 +2402,6 @@ class Builder:
     def _html(self, bridge=None):
         css = (_STATIC / "builder.css").read_text(encoding="utf-8")
         js = (_STATIC / "builder.js").read_text(encoding="utf-8")
-        logo_path = _STATIC / "mlbricks-studio-logo.png"
-        brand_logo = ""
-        if logo_path.exists():
-            brand_logo = "data:image/png;base64," + base64.b64encode(logo_path.read_bytes()).decode("ascii")
         payload = json.dumps({
             "state": self.state,
             "catalog": self.catalog,
@@ -2415,7 +2410,6 @@ class Builder:
             "runtime_capabilities": self.runtime_capabilities,
             "local_environment": self.local_environment,
             "instance_id": self._instance_id,
-            "brand_logo": brand_logo,
             "popout_assets": {"css": css, "js": js},
         }).replace("</", "<\\/")
         return f"""

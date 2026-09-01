@@ -2257,3 +2257,73 @@
 .mlb-user-port-label{z-index:7!important}
 .mlb-logo{height:52px!important}
 .mlb-logo-brand{width:166px!important;height:52px!important;flex:0 0 166px!important;object-fit:contain!important;object-position:left center!important}
+
+
+/* MLB Studio V1.0 — CSS-only MLBRICKS STUDIO brand.
+   No PNG/base64 asset is embedded in notebook output. */
+.mlb-logo{
+  display:inline-flex!important;
+  align-items:center!important;
+  height:52px!important;
+  gap:9px!important;
+  flex:0 0 auto!important;
+}
+.mlb-logo-brand{display:none!important}
+.mlb-css-logo{
+  position:relative;
+  display:inline-block;
+  width:178px;
+  height:48px;
+  flex:0 0 178px;
+  font-family:"Arial Black","Segoe UI Black","Helvetica Neue",Arial,sans-serif;
+  font-weight:900;
+  font-style:normal;
+  line-height:1;
+  letter-spacing:-1.7px;
+  white-space:nowrap;
+  user-select:none;
+  filter:drop-shadow(0 2px 1px rgba(0,0,0,.65));
+}
+.mlb-css-logo-main{
+  position:absolute;
+  left:0;
+  top:5px;
+  display:flex;
+  align-items:baseline;
+  height:28px;
+}
+.mlb-css-ml,
+.mlb-css-bricks{
+  display:inline-block;
+  font-size:27px;
+  line-height:28px;
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  -webkit-text-stroke:.35px rgba(255,255,255,.18);
+}
+.mlb-css-ml{
+  margin-right:2px;
+  background-image:linear-gradient(180deg,#fff0a2 0%,#ffcf3f 12%,#d9950b 48%,#8c5200 78%,#ffd354 100%);
+  text-shadow:0 1px 0 rgba(255,229,125,.42),0 3px 2px rgba(35,20,0,.68);
+}
+.mlb-css-bricks{
+  background-image:linear-gradient(180deg,#ffffff 0%,#e4e7eb 14%,#9aa0a8 49%,#5c6269 77%,#e3e6e9 100%);
+  text-shadow:0 1px 0 rgba(255,255,255,.34),0 3px 2px rgba(0,0,0,.72);
+}
+.mlb-css-studio{
+  position:absolute;
+  right:2px;
+  top:34px;
+  display:block;
+  font-size:12px;
+  line-height:12px;
+  letter-spacing:1.8px;
+  background:linear-gradient(180deg,#f9fafb 0%,#b8bec5 50%,#686f77 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  -webkit-text-stroke:.2px rgba(255,255,255,.15);
+  text-shadow:0 1px 1px rgba(0,0,0,.75);
+}
+.mlb-beta{margin-left:1px!important}
