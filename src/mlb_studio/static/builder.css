@@ -3083,3 +3083,16 @@
   font-size:10px!important;
   font-weight:900!important;
 }
+
+
+/* MLB Studio v11 — four-surface named API ports */
+.mlb-node.mlb-complex-api-node{overflow:visible!important}
+.mlb-node.mlb-complex-api-node.mlb-top-ports-3{width:284px!important;min-width:284px!important;max-width:284px!important}
+.mlb-port.named-port.visual-top:hover,.mlb-port.named-port.visual-top.armed,
+.mlb-port.named-port.visual-bottom:hover,.mlb-port.named-port.visual-bottom.armed{transform:translateX(-50%) scale(1.16)!important}
+.mlb-user-port-label.visual-top,.mlb-user-port-label.visual-bottom{
+  text-align:center!important;max-width:88px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important
+}
+.mlb-user-port-label.visual-top{border-top:2px solid var(--named-port-color,#f0a84a)!important}
+.mlb-user-port-label.visual-bottom{border-bottom:2px solid var(--named-port-color,#f0a84a)!important}
+.mlb-edge-side-aware{stroke-linecap:round;stroke-linejoin:round}

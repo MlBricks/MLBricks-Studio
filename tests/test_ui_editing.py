@@ -370,6 +370,8 @@ def test_saffn_catalog_exposes_original_api_named_runtime_ports():
     ports = catalog["saffn"]["runtime_ports"]
     assert [p["id"] for p in ports["inputs"]] == ["x", "esa_update", "previous_esa", "previous_state"]
     assert [p["id"] for p in ports["outputs"]] == ["main", "state"]
+    assert [p["side"] for p in ports["inputs"]] == ["left", "top", "top", "top"]
+    assert [p["side"] for p in ports["outputs"]] == ["right", "bottom"]
 
 
 def test_model_build_validation_counts_named_and_skip_edges_as_real_connectivity():
@@ -388,13 +390,18 @@ def test_complex_named_api_nodes_have_readable_graph_ui():
     css = _builder_css()
     assert 'function namedPortColor(key,index=0)' in js
     assert 'card.classList.add("mlb-complex-api-node")' in js
-    assert 'mlb-edge-named-rail' in js
+    assert 'mlb-edge-side-aware' in js
     assert 'p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);' in js
     assert 'p.classList.add("mlb-edge-focus")' in js
     assert 'p.classList.add("mlb-edge-dim")' in js
     assert 'btn("Fit","mlb-zoom-fit")' in js
     assert '.mlb-node.mlb-complex-api-node{' in css
     assert 'width:196px!important;' in css
+    assert 'function namedPortVisualSide(node,port,ioSide,key)' in js
+    assert 'data-visual-side="' in js
+    assert 'namedBezier(x1,y1,sourceVisual,x2,y2,targetVisual)' in js
+    assert '.mlb-node.mlb-complex-api-node.mlb-top-ports-3{' in css
+    assert 'width:284px!important;' in css
     assert '.mlb-edge-dim{opacity:.13!important}' in css
     assert '.mlb-edge-focus{' in css
     assert '.mlb-zoom-fit{' in css

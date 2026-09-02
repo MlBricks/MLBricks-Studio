@@ -386,14 +386,14 @@ def primitive_catalog():
             # by Studio instead of the generic Main/Skip/Extra lane buttons.
             "runtime_ports": {
                 "inputs": [
-                    {"id": "x", "name": "x"},
-                    {"id": "esa_update", "name": "ESA Update"},
-                    {"id": "previous_esa", "name": "Previous ESA"},
-                    {"id": "previous_state", "name": "Previous State"},
+                    {"id": "x", "name": "x", "side": "left"},
+                    {"id": "esa_update", "name": "ESA Update", "side": "top"},
+                    {"id": "previous_esa", "name": "Previous ESA", "side": "top"},
+                    {"id": "previous_state", "name": "Previous State", "side": "top"},
                 ],
                 "outputs": [
-                    {"id": "main", "name": "Main"},
-                    {"id": "state", "name": "State"},
+                    {"id": "main", "name": "Main", "side": "right"},
+                    {"id": "state", "name": "State", "side": "bottom"},
                 ],
             },
             "api": [

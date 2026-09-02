@@ -6556,19 +6556,44 @@ function __MLB_STUDIO_FACTORY__(){
       return palette[Math.abs(Number(index)||0)%palette.length];
     }
 
+    function namedPortVisualSide(node,port,ioSide,key){
+      const requested=String(port?.side||"").toLowerCase();
+      if(["left","right","top","bottom"].includes(requested))return requested;
+      // Runtime contracts use semantic placement by default: keep the primary
+      // tensor flow horizontal and move auxiliary/state traffic to vertical
+      // surfaces. User-defined API functions without side metadata retain the
+      // older left/right layout for backwards compatibility.
+      const isRuntime=!!cat(catalog,node?.type)?.runtime_ports;
+      if(!isRuntime)return ioSide==="in"?"left":"right";
+      const k=String(key||"").toLowerCase();
+      if(ioSide==="in")return (k==="x"||k==="main"||k.includes("main"))?"left":"top";
+      return (k==="main"||k.includes("main"))?"right":"bottom";
+    }
+
     function portButtons(node, side){
       const namedPorts=namedUserPorts(node,side);
       if(namedPorts){
-        let html="";const count=Math.max(1,namedPorts.length);
+        let html="";
+        const groups={left:[],right:[],top:[],bottom:[]};
         namedPorts.forEach((port,i)=>{
-          const pct=((i+1)/(count+1))*100;
           const key=String(port.id||((side==="in"?"in_":"out_")+(i+1)));
-          const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
-          const sideCss=side==="in"?"left:-6px":"right:-6px";
-          const labelCss=side==="in"?"left:12px":"right:12px";
-          const portColor=namedPortColor(key,i);
-          html+='<button class="mlb-port '+side+' named-port" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" style="'+sideCss+';top:'+pct+'%;transform:translateY(-50%);--named-port-color:'+portColor+'" type="button" aria-label="'+name+'" title="'+name+'"></button>';
-          html+='<span class="mlb-user-port-label '+side+'" style="'+labelCss+';top:'+pct+'%;transform:translateY(-50%);--named-port-color:'+portColor+'">'+name+'</span>';
+          groups[namedPortVisualSide(node,port,side,key)].push({port,i,key});
+        });
+        Object.entries(groups).forEach(([visualSide,items])=>{
+          const count=Math.max(1,items.length);
+          items.forEach((entry,localIndex)=>{
+            const {port,i,key}=entry;
+            const pct=((localIndex+1)/(count+1))*100;
+            const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
+            const portColor=namedPortColor(key,i);
+            let portCss="",labelCss="",transform="";
+            if(visualSide==="left"){portCss='left:-6px;top:'+pct+'%';labelCss='left:12px;top:'+pct+'%';transform='translateY(-50%)';}
+            else if(visualSide==="right"){portCss='right:-6px;top:'+pct+'%';labelCss='right:12px;top:'+pct+'%';transform='translateY(-50%)';}
+            else if(visualSide==="top"){portCss='top:-6px;left:'+pct+'%';labelCss='top:-28px;left:'+pct+'%';transform='translateX(-50%)';}
+            else {portCss='bottom:-6px;left:'+pct+'%';labelCss='bottom:-28px;left:'+pct+'%';transform='translateX(-50%)';}
+            html+='<button class="mlb-port '+side+' named-port visual-'+visualSide+'" data-side="'+side+'" data-visual-side="'+visualSide+'" data-port-index="'+i+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" style="'+portCss+';transform:'+transform+';--named-port-color:'+portColor+'" type="button" aria-label="'+name+'" title="'+name+'"></button>';
+            html+='<span class="mlb-user-port-label '+side+' visual-'+visualSide+'" style="'+labelCss+';transform:'+transform+';--named-port-color:'+portColor+'">'+name+'</span>';
+          });
         });
         return html;
       }
@@ -6636,6 +6661,30 @@ function __MLB_STUDIO_FACTORY__(){
         return el ? el.getBoundingClientRect() : nodeEl.getBoundingClientRect();
       }
 
+      function portVisualSide(nodeEl,side,index,key=""){
+        const selector=key
+          ?('.mlb-port[data-side="'+side+'"][data-port-key="'+key+'"]')
+          :('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
+        const el=nodeEl.querySelector(selector);
+        return el?.dataset?.visualSide||(side==="in"?"left":"right");
+      }
+
+      function sideVector(side){
+        if(side==="left")return [-1,0];
+        if(side==="right")return [1,0];
+        if(side==="top")return [0,-1];
+        return [0,1];
+      }
+
+      function namedBezier(x1,y1,s1,x2,y2,s2){
+        const [dx1,dy1]=sideVector(s1),[dx2,dy2]=sideVector(s2);
+        const distance=Math.hypot(x2-x1,y2-y1);
+        const handle=Math.max(24,Math.min(82,distance*.34));
+        const c1x=x1+dx1*handle,c1y=y1+dy1*handle;
+        const c2x=x2+dx2*handle,c2y=y2+dy2*handle;
+        return `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
+      }
+
       function laneOf(e){
         if(e.kind==="named"||String(e.target_port||"").startsWith("named_in:")) return "named";
         if(e.kind==="residual") return 0;
@@ -6664,27 +6713,14 @@ function __MLB_STUDIO_FACTORY__(){
         p.setAttribute("data-edge-id",e.id);
 
         if(lane==="named"){
-          const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
-          const left=Math.min(x1,x2), right=Math.max(x1,x2);
-          let blocked=false;
-          flow.querySelectorAll(".mlb-node").forEach(nodeEl=>{
-            if(nodeEl===a||nodeEl===b)return;
-            const nr=nodeEl.getBoundingClientRect();
-            const nl=nr.left-wr.left, nrgt=nr.right-wr.left;
-            if(nrgt>left+6&&nl<right-6)blocked=true;
-          });
-          const forward=x2>=x1;
-          if(blocked||!forward){
-            const route=namedRoute++;
-            const topY=Math.min(ab.top-wr.top,bb.top-wr.top)-22-(route%6)*14;
-            const dir=forward?1:-1;
-            p.setAttribute("d",`M ${x1} ${y1} C ${x1+dir*16} ${y1}, ${x1+dir*16} ${topY}, ${x1+dir*34} ${topY} L ${x2-dir*34} ${topY} C ${x2-dir*16} ${topY}, ${x2-dir*16} ${y2}, ${x2} ${y2}`);
-            p.classList.add("mlb-edge-named-rail");
-          }else{
-            const gap=Math.max(1,Math.abs(x2-x1));const dir=1;const handle=Math.max(18,Math.min(54,gap*0.38));
-            p.setAttribute("d",`M ${x1} ${y1} C ${x1+dir*handle} ${y1}, ${x2-dir*handle} ${y2}, ${x2} ${y2}`);
-          }
-          p.setAttribute("class",(p.getAttribute("class")||"")+" mlb-edge-main mlb-edge-named");
+          const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey);
+          const targetVisual=portVisualSide(b,"in",targetIndex,targetKey);
+          // Named API connections respect the physical surface of each port.
+          // Top/bottom ports use their vertical tangent; left/right ports keep
+          // the normal horizontal tangent. This lets complex components use all
+          // four card surfaces without forcing wires back through side rails.
+          p.setAttribute("d",namedBezier(x1,y1,sourceVisual,x2,y2,targetVisual));
+          p.setAttribute("class","mlb-edge-main mlb-edge-named mlb-edge-side-aware");
           p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);
         }else if(lane===0){
           const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
@@ -7679,9 +7715,14 @@ function __MLB_STUDIO_FACTORY__(){
           const namedIn=namedUserPorts(n,"in"),namedOut=namedUserPorts(n,"out");
           if(namedIn||namedOut){
             card.classList.add("mlb-user-function-named");
-            const maxNamed=Math.max(namedIn?.length||0,namedOut?.length||0);
-            if(maxNamed>=3)card.classList.add("mlb-complex-api-node");
-            card.style.height=Math.max(315,(maxNamed+1)*42)+"px";
+            const allNamed=[...(namedIn||[]).map((p,i)=>({p,io:"in",i})),...(namedOut||[]).map((p,i)=>({p,io:"out",i}))];
+            const sideCounts={left:0,right:0,top:0,bottom:0};
+            allNamed.forEach(({p,io,i})=>{const key=String(p.id||((io==="in"?"in_":"out_")+(i+1)));sideCounts[namedPortVisualSide(n,p,io,key)]++;});
+            const maxNamed=Math.max(...Object.values(sideCounts),1);
+            if(allNamed.length>=3)card.classList.add("mlb-complex-api-node");
+            card.classList.add("mlb-top-ports-"+Math.min(sideCounts.top,4));
+            card.classList.add("mlb-bottom-ports-"+Math.min(sideCounts.bottom,4));
+            card.style.height=Math.max(315,(Math.max(sideCounts.left,sideCounts.right)+1)*42)+"px";
           }
           card.addEventListener("click",()=>{outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",()=>{if(n.definition_id)openInside(n);});
           flow.appendChild(card);
