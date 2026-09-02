@@ -232,7 +232,7 @@ def test_initial_studio_render_yields_for_first_paint_and_defers_bridge_work():
     text = _builder_js()
     assert 'class="mlb-startup-shell"' in text
     assert "requestAnimationFrame(()=>" in text
-    assert 'draw().catch(err=>{' in text
+    assert "draw();\n      const beginBackgroundBridge=()=>{" in text
     assert 'if(typeof requestIdleCallback==="function")requestIdleCallback(beginBackgroundBridge,{timeout:1500});' in text
 
 
@@ -251,30 +251,3 @@ def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
     assert "[flow,wrap,canvas,root].forEach" not in text
     assert "if(wrap.style.width!==nextW)wrap.style.width=nextW;" in text
     assert "setTimeout(renderConnections,180);" in text
-
-
-def test_first_mount_progressively_yields_between_ui_sections_and_nodes():
-    text = _builder_js()
-    assert "let progressiveStartupPending=true;" in text
-    assert "async function draw(force=false)" in text
-    assert "async function yieldProgressiveFrame(revision,stage)" in text
-    assert 'yieldProgressiveFrame(revision,"topbar")' in text
-    assert 'yieldProgressiveFrame(revision,"sidebar-shell")' in text
-    assert 'yieldProgressiveFrame(revision,"palette")' in text
-    assert 'yieldProgressiveFrame(revision,"workspace-shell")' in text
-    assert 'yieldProgressiveFrame(revision,"canvas")' in text
-    assert 'yieldProgressiveFrame(revision,"graph-shell")' in text
-    assert 'yieldProgressiveFrame(revision,"graph-components")' in text
-    assert 'yieldProgressiveFrame(revision,"inspector-shell")' in text
-    assert "for(let i=0;i<comp.nodes.length;i++){" in text
-
-
-def test_progressive_shell_is_attached_before_palette_and_graph_population():
-    text = _builder_js()
-    shell = text.index('root.appendChild(shell);')
-    sidebar = text.index('shell.appendChild(side);', shell)
-    palette = text.index('for(const category of [...new Set(visible.map(x=>x.category))]){', sidebar)
-    main = text.index('shell.appendChild(main);', palette)
-    graph = text.index('for(let i=0;i<comp.nodes.length;i++){', main)
-    inspector = text.index('shell.appendChild(ins);', graph)
-    assert shell < sidebar < palette < main < graph < inspector

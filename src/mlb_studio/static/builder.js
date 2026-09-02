@@ -111,20 +111,6 @@ function __MLB_STUDIO_FACTORY__(){
     let componentImportBusy=false;
     const customImportStatus={};
 
-    // First mount is deliberately progressive in hosted notebooks. Rendering
-    // every palette card, graph node, inspector panel and edge in one long task
-    // makes Kaggle appear frozen even when the total work is reasonable.
-    let progressiveStartupPending=true;
-    let drawRevision=0;
-    function nextRenderFrame(){
-      return new Promise(resolve=>requestAnimationFrame(()=>resolve()));
-    }
-    async function yieldProgressiveFrame(revision,stage){
-      root.dataset.loadingStage=stage||"loading";
-      await nextRenderFrame();
-      return revision===drawRevision && root.isConnected;
-    }
-
     // Single-click reliability guard. A focused editor can emit change/blur on
     // pointerdown when the user clicks another control. Those handlers may call
     // draw(), which replaces the DOM before the target control receives click.
@@ -6966,10 +6952,7 @@ function __MLB_STUDIO_FACTORY__(){
       document.body.appendChild(input);input.click();
     }
 
-    async function draw(force=false){
-      const revision=++drawRevision;
-      const progressive=progressiveStartupPending;
-      if(progressive)progressiveStartupPending=false;
+    function draw(force=false){
       if(!force && (pointerInteractionActive || focusedEditorActive)){
         deferredInteractionDraw=true;
         return;
@@ -7121,14 +7104,11 @@ function __MLB_STUDIO_FACTORY__(){
       }
       top.appendChild(acts);
       root.appendChild(top);
-      if(progressive && !await yieldProgressiveFrame(revision,"topbar"))return;
 
       const shell=document.createElement("div");shell.className="mlb-shell";
-      root.appendChild(shell);
 
       // Sidebar
       const side=document.createElement("aside");side.className="mlb-sidebar";
-      shell.appendChild(side);
       if(runtimeWorkspaceActive)side.classList.add("mlb-sidebar-hidden");
       const head=document.createElement("div");head.className="mlb-sidehead";head.innerHTML="<span>"+(state.active_workspace==="data"?"DATA LIBRARY":"COMPONENT LIBRARY")+"</span><span>×</span>";side.appendChild(head);
       const sr=document.createElement("div");sr.className="mlb-search-row";
@@ -7188,8 +7168,6 @@ function __MLB_STUDIO_FACTORY__(){
         },0));
       }
 
-      if(progressive && !await yieldProgressiveFrame(revision,"sidebar-shell"))return;
-
       const apiComposerMode=isApiComposerView();
       if(apiComposerMode){
         const modeBox=document.createElement("div");modeBox.className="mlb-api-composer-sidebar-note";
@@ -7207,7 +7185,7 @@ function __MLB_STUDIO_FACTORY__(){
         return !search || q.includes(search.toLowerCase());
       });
 
-      for(const category of [...new Set(visible.map(x=>x.category))]){
+      [...new Set(visible.map(x=>x.category))].forEach(category=>{
         // Search results always expand so a matching component can never be hidden.
         const collapsed=collapsedCategories.has(category) && !search;
         const h=document.createElement("button");
@@ -7225,17 +7203,15 @@ function __MLB_STUDIO_FACTORY__(){
         const pal=document.createElement("div");
         pal.className="mlb-palette"+(collapsed?" collapsed":"");
         if(!collapsed){
-          for(const item of visible.filter(x=>x.category===category)){
+          visible.filter(x=>x.category===category).forEach(item=>{
             const b=document.createElement("button");b.type="button";b.dataset.type=item.type||"";
             const ico=document.createElement("span");ico.className="mlb-pal-icon";ico.textContent=compactIconLabel(item.icon||"ML");
             const text=document.createElement("span");text.innerHTML="<strong>"+item.name+'</strong><span class="mlb-pal-sub">'+(item.description||"MLBricks component")+"</span>";
             b.append(ico,text);b.disabled=layoutIsLocked();b.title=layoutIsLocked()?"Layout locked — click Edit Layout first":"Add "+item.name;b.addEventListener("click",()=>addPrimitive(item));pal.appendChild(b);
-            if(progressive && !await yieldProgressiveFrame(revision,"palette"))return;
-          }
+          });
         }
         side.appendChild(pal);
-      }
-
+      });
 
       if(isGraphCustomEditor()){
         const nestedEntries=(state.gallery?.components||[]).filter(entry=>{
@@ -7312,8 +7288,6 @@ function __MLB_STUDIO_FACTORY__(){
 
       // Main
       const main=document.createElement("main");main.className="mlb-main";
-      shell.appendChild(main);
-      if(progressive && !await yieldProgressiveFrame(revision,"workspace-shell"))return;
       const toolbar=document.createElement("div");toolbar.className="mlb-toolbar";
       const workspaceBadge=document.createElement("div");workspaceBadge.className="mlb-workspace-badge";
       workspaceBadge.textContent=galleryWorkspace.open
@@ -7397,8 +7371,6 @@ function __MLB_STUDIO_FACTORY__(){
       if(!galleryWorkspace.open&&!cloudWorkspace.open)main.appendChild(toolbar);
 
       const canvas=document.createElement("div");canvas.className="mlb-canvas"+((runtimePanel||galleryWorkspace.open||cloudWorkspace.open)?" runtime-active":"");
-      main.appendChild(canvas);
-      if(progressive && !await yieldProgressiveFrame(revision,"canvas"))return;
       if(galleryWorkspace.open){
         renderCentralGallery(canvas);
       }else if(cloudWorkspace.open){
@@ -7432,9 +7404,6 @@ function __MLB_STUDIO_FACTORY__(){
       flow.style.transformOrigin="left top";
       flow.style.transform="scale("+zoom+")";
       const comp=current(state);
-      wrap.appendChild(flow);
-      canvas.appendChild(wrap);
-      if(progressive && !await yieldProgressiveFrame(revision,"graph-shell"))return;
 
       if(!comp.nodes.length){
         const e=document.createElement("div");e.className="mlb-empty";
@@ -7450,8 +7419,7 @@ function __MLB_STUDIO_FACTORY__(){
         }
         flow.appendChild(e);
       }else{
-        for(let i=0;i<comp.nodes.length;i++){
-          const n=comp.nodes[i];
+        comp.nodes.forEach((n,i)=>{
           if(i&&!isApiComposerView()){
             const a=document.createElement("div");a.className="mlb-arrow";a.textContent="→";flow.appendChild(a);
           }
@@ -7505,11 +7473,9 @@ function __MLB_STUDIO_FACTORY__(){
           if(namedIn||namedOut){card.classList.add("mlb-user-function-named");card.style.height=Math.max(315,(Math.max(namedIn?.length||0,namedOut?.length||0)+1)*38)+"px";}
           card.addEventListener("click",()=>{outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",()=>{if(n.definition_id)openInside(n);});
           flow.appendChild(card);
-          // Reveal graph nodes in series on the first mount. This avoids one
-          // large DOM/layout task and keeps Kaggle responsive while loading.
-          if(progressive && !await yieldProgressiveFrame(revision,"graph-components"))return;
-        }
+        });
       }
+      wrap.appendChild(flow);canvas.appendChild(wrap);
       // Keep only action-specific port guidance. Persistent canvas instruction
       // bars are intentionally disabled across every Studio workspace.
       if(pendingPort){
@@ -7519,6 +7485,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       }
+      main.appendChild(canvas);
       if(!galleryWorkspace.open && !cloudWorkspace.open && !runtimeWorkspaceActive){
         let edgeDrawGeneration=0;
         const renderConnections=()=>{
@@ -7649,8 +7616,6 @@ function __MLB_STUDIO_FACTORY__(){
 
       // Inspector
       const ins=document.createElement("aside");ins.className="mlb-inspector";
-      shell.appendChild(ins);
-      if(progressive && !await yieldProgressiveFrame(revision,"inspector-shell"))return;
       const runtimeInspectorEntry=runtimeWorkspaceActive?builtModelById(runtimePanel?.modelId):null;
       const tabs=document.createElement("div");tabs.className="mlb-ins-tabs";
       const primaryInspectorLabel=runtimeInspectorEntry?(runtimePanel?.mode==="train"?"Training":"Runtime"):"Inspector";
@@ -7864,7 +7829,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
       ins.appendChild(body);
 
-      // shell/sidebar/main/inspector were attached progressively above.
+      shell.append(side,main,ins);root.appendChild(shell);
 
       const stat=document.createElement("div");stat.className="mlb-statusbar";
       let statusDevice="Auto";
@@ -7908,7 +7873,6 @@ function __MLB_STUDIO_FACTORY__(){
           }
         }
       });
-      delete root.dataset.loadingStage;
       if(isPopout)schedulePopoutStateSync();
     }
 
@@ -7917,10 +7881,7 @@ function __MLB_STUDIO_FACTORY__(){
     // prepared.
     root.innerHTML='<div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Loading workspace…</div></div>';
     requestAnimationFrame(()=>{
-      draw().catch(err=>{
-        console.error("MLB Studio progressive render failed",err);
-        root.dataset.loadingStage="error";
-      });
+      draw();
       const beginBackgroundBridge=()=>{
         setupPopoutBridge();
         startBridgePolling();
