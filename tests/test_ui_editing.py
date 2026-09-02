@@ -342,10 +342,25 @@ def test_gallery_contains_tiny_compiler_test_models():
     assert 'loadCompilerTestESABOLT' in js
     assert 'loadCompilerTestResController' in js
     assert 'loadCompilerTestSAFFN' in js
-    assert 'named_out:state' in js
-    assert 'toNamed(saffn1,saffn2,"previous_state","named_out:state")' in js
+    assert 'Previous ESA · Zero Init' in js
+    assert 'Previous State · Zero Init' in js
+    assert 'cat(catalog,"value_buffer")' in js
+    assert 'const esa=makeNode(cat(catalog,"esa"))' in js
+    assert 'const prevEsa=makeNode(cat(catalog,"esa"))' not in js
     assert 'dim:64,heads:4,block:64,batch:2,vocab:2048' in js
     assert 'Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"})' in js
+
+
+def test_previous_value_buffer_is_available_as_builder_utility():
+    from mlb_studio.graph import primitive_catalog
+
+    catalog = {item["type"]: item for item in primitive_catalog()}
+    item = catalog["value_buffer"]
+    assert item["builder_utility"] is True
+    assert item["name"] == "Previous Value Buffer"
+    params = {spec["key"]: spec for spec in item["api"]}
+    assert params["mode"]["value"] == "hold"
+    assert set(params["mode"]["options"]) == {"hold", "zero_init"}
 
 
 def test_saffn_catalog_exposes_original_api_named_runtime_ports():

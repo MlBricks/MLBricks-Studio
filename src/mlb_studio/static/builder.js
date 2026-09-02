@@ -6877,30 +6877,25 @@ function __MLB_STUDIO_FACTORY__(){
     function loadCompilerTestSAFFN(){
       const ctx=compilerTestContext({
         name:"TEST · SAFFN Stateful API",
-        description:"Tiny named-port graph that maps the original StateAwareFFN API exactly and routes layer-1 state into layer-2 previous_state.",
+        description:"Tiny one-ESA SAFFN graph. Previous ESA/state are zero-initialized for the first physical depth using reusable Previous Value Buffer nodes.",
         dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
       });
-      const prevEsa=makeNode(cat(catalog,"esa"));prevEsa.name="Previous ESA";prevEsa.params={...(prevEsa.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
-      const esa=makeNode(cat(catalog,"esa"));esa.name="Current ESA";esa.params={...(esa.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
-      const stateInit=makeNode(cat(catalog,"linear"));stateInit.name="Previous State Init";stateInit.params={...(stateInit.params||{}),in_features:64,out_features:16,bias:false};
-      const saffn1=makeNode(cat(catalog,"saffn"));saffn1.name="SAFFN Layer 1";saffn1.params={...(saffn1.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:0,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
-      const saffn2=makeNode(cat(catalog,"saffn"));saffn2.name="SAFFN Layer 2";saffn2.params={...(saffn2.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:1,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
-      const nodes=[ctx.input,ctx.emb,prevEsa,esa,stateInit,saffn1,saffn2,ctx.norm,ctx.head,ctx.out];
+      const esa=makeNode(cat(catalog,"esa"));esa.name="ESA Update";esa.params={...(esa.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const prevEsa=makeNode(cat(catalog,"value_buffer"));prevEsa.name="Previous ESA · Zero Init";prevEsa.params={...(prevEsa.params||{}),mode:"zero_init",width:0};
+      const prevState=makeNode(cat(catalog,"value_buffer"));prevState.name="Previous State · Zero Init";prevState.params={...(prevState.params||{}),mode:"zero_init",width:16};
+      const saffn=makeNode(cat(catalog,"saffn"));saffn.name="SAFFN Layer 1";saffn.params={...(saffn.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:0,total_layers:1,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const nodes=[ctx.input,ctx.emb,esa,prevEsa,prevState,saffn,ctx.norm,ctx.head,ctx.out];
       const toNamed=(source,target,key,sourcePort="main_out")=>Object.assign(edge(source.id,target.id,"named"),{source_port:sourcePort,target_port:"named_in:"+key});
       const edges=[
         edge(ctx.input.id,ctx.emb.id),
-        edge(ctx.emb.id,prevEsa.id),
         edge(ctx.emb.id,esa.id),
-        edge(ctx.emb.id,stateInit.id),
-        toNamed(ctx.emb,saffn1,"x"),
-        toNamed(esa,saffn1,"esa_update"),
-        toNamed(prevEsa,saffn1,"previous_esa"),
-        toNamed(stateInit,saffn1,"previous_state"),
-        toNamed(saffn1,saffn2,"x","named_out:main"),
-        toNamed(esa,saffn2,"esa_update"),
-        toNamed(prevEsa,saffn2,"previous_esa"),
-        toNamed(saffn1,saffn2,"previous_state","named_out:state"),
-        Object.assign(edge(saffn2.id,ctx.norm.id,"main"),{source_port:"named_out:main",target_port:"main_in"}),
+        edge(esa.id,prevEsa.id),
+        edge(ctx.emb.id,prevState.id),
+        toNamed(ctx.emb,saffn,"x"),
+        toNamed(esa,saffn,"esa_update"),
+        toNamed(prevEsa,saffn,"previous_esa"),
+        toNamed(prevState,saffn,"previous_state"),
+        Object.assign(edge(saffn.id,ctx.norm.id,"main"),{source_port:"named_out:main",target_port:"main_in"}),
         edge(ctx.norm.id,ctx.head.id),
         edge(ctx.head.id,ctx.out.id)
       ];

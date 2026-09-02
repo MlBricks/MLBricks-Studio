@@ -190,6 +190,31 @@ class _Identity(nn.Module):
     def forward(self,x): return x
 
 
+class _PreviousValueBuffer(nn.Module):
+    """Builder utility for previous physical-depth tensors.
+
+    ``hold`` keeps the connected tensor available as the previous-depth value
+    for a later node. ``zero_init`` creates the correctly shaped zero vector
+    used by the first recurrent physical depth. No trainable parameters or
+    hidden mutable Python state are introduced.
+    """
+    def __init__(self, *, mode: str = "hold", width: int = 0):
+        super().__init__()
+        mode = str(mode or "hold").strip().lower()
+        if mode not in {"hold", "zero_init"}:
+            raise ValueError("Previous Value Buffer mode must be 'hold' or 'zero_init'.")
+        self.mode = mode
+        self.width = int(width or 0)
+        if self.width < 0:
+            raise ValueError("Previous Value Buffer width must be 0 (Auto) or a positive integer.")
+
+    def forward(self, x):
+        if self.mode == "hold":
+            return x
+        width = self.width or int(x.shape[-1])
+        return x.new_zeros(*x.shape[:-1], width)
+
+
 class _StateAwareESAStack(nn.Module):
     """Exact StateAware ESA depth stack used by the supplied 200M notebook."""
     def __init__(self, *, dim, state_dim, layers, heads, block, batch, depth_dim,
@@ -768,6 +793,11 @@ class TensorGraph(nn.Module):
                 object_registry=self.api_object_registry,
             )
         if t in {"text_input","text_output","logits_output"}: return _Identity()
+        if t=="value_buffer":
+            return _PreviousValueBuffer(
+                mode=str(p.get("mode") or "hold"),
+                width=runtime_int(p.get("width"),0,f"{node.get('name','Previous Value Buffer')} output width",minimum=0),
+            )
         if t=="embedding":
             Embedding = IMPORT_POOL.resolve_component("embedding")
             vocab=int(self.vocab_override or p.get("vocab_size") or p.get("num_embeddings") or 32000)
@@ -910,7 +940,7 @@ class TensorGraph(nn.Module):
             f"Training compiler does not yet support component {node.get('name')!r} ({t}). "
             "Supported today: declarative MLBricks API components (including BOLT and ResController), API Function, Text Input/Output, "
             "Embedding, Learned/Sinusoidal Position, ESA, StateAware ESA Stack, SOUP, RMSNorm, LayerNorm, Linear, FFN, Residual, "
-            "Dropout, LM Head, nested custom components, and API-bound custom components. "
+            "Dropout, Previous Value Buffer, LM Head, nested custom components, and API-bound custom components. "
             "ElasticBit is a post-training/inference runtime component, not a differentiable training layer."
         )
 

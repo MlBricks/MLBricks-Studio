@@ -357,3 +357,66 @@ def test_weight_tying_traverses_named_api_edges(monkeypatch):
 
     assert graph.mods["head"].tied_to is graph.mods["emb"]
     assert graph.mods["head"].weight is graph.mods["emb"].weight
+
+
+def test_previous_value_buffer_holds_or_zero_initializes_without_parameters():
+    held = TensorGraph(
+        nodes=[{"id": "buf", "type": "value_buffer", "name": "Previous Value", "params": {"mode": "hold", "width": 0}}],
+        edges=[], custom_components={}, runtime=_runtime(),
+    )
+    x = torch.randn(2, 5, 7, requires_grad=True)
+    y = held(x)
+    assert y is x
+    y.sum().backward()
+    assert x.grad is not None
+    assert sum(p.numel() for p in held.parameters()) == 0
+
+    zero_same = TensorGraph(
+        nodes=[{"id": "buf", "type": "value_buffer", "name": "Previous ESA Init", "params": {"mode": "zero_init", "width": 0}}],
+        edges=[], custom_components={}, runtime=_runtime(),
+    )
+    z = zero_same(torch.randn(2, 5, 7))
+    assert z.shape == (2, 5, 7)
+    assert torch.count_nonzero(z).item() == 0
+
+    zero_state = TensorGraph(
+        nodes=[{"id": "buf", "type": "value_buffer", "name": "Previous State Init", "params": {"mode": "zero_init", "width": 3}}],
+        edges=[], custom_components={}, runtime=_runtime(),
+    )
+    state = zero_state(torch.randn(2, 5, 7))
+    assert state.shape == (2, 5, 3)
+    assert torch.count_nonzero(state).item() == 0
+
+
+def test_single_layer_saffn_accepts_zero_initialized_previous_value_buffers(monkeypatch):
+    from mlb_studio import api_graph_runtime
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    monkeypatch.setattr(
+        api_graph_runtime.IMPORT_POOL,
+        "resolve_component",
+        lambda key: _FakeSAFFN if key == "saffn" else original(key),
+    )
+
+    nodes = [
+        {"id": "prev_esa", "type": "value_buffer", "name": "Previous ESA Init", "params": {"mode": "zero_init", "width": 0}},
+        {"id": "prev_state", "type": "value_buffer", "name": "Previous State Init", "params": {"mode": "zero_init", "width": 3}},
+        {"id": "s", "type": "saffn", "name": "SAFFN", "params": {"d_model": 3, "state_dim": 3, "layer_index": 0, "total_layers": 1, "backend": "pytorch"}},
+    ]
+    edges = [
+        {"id":"pe_in","source":"prev_esa","target":"s","kind":"named","source_port":"main_out","target_port":"named_in:previous_esa"},
+        {"id":"ps_in","source":"prev_state","target":"s","kind":"named","source_port":"main_out","target_port":"named_in:previous_state"},
+    ]
+    # x and esa_update deliberately come from graph input through two explicit
+    # named edges; buffer nodes also receive graph input because they have no
+    # upstream Main source.
+    edges += [
+        {"id":"x","source":"prev_esa","target":"s","kind":"named","source_port":"main_out","target_port":"named_in:x"},
+        {"id":"eu","source":"prev_esa","target":"s","kind":"named","source_port":"main_out","target_port":"named_in:esa_update"},
+    ]
+    graph = TensorGraph(nodes=nodes, edges=edges, custom_components={}, runtime={**_runtime(), "model_dim": 3})
+    x = torch.randn(1, 2, 3)
+    # This is only a shape/routing test; the Gallery's real graph feeds x and
+    # esa_update from Embedding/ESA while these buffers initialize prior depth.
+    y = graph(x)
+    assert y.shape == x.shape

@@ -146,6 +146,7 @@ Examples:
   `gated`, `device`, `dtype`
 - StateAwareFFN, MicroVirtualFFN, VirtualStateAwareFFN
 - RMSNorm, LayerNorm, Residual, ResController
+- Previous Value Buffer (zero-init/hold utility for physical-depth state wiring)
 - Vesa/VesaConfig and VisionBolt/VisionBoltConfig
 - ElasticBit, ElasticLinear, ElasticEmbedding
 - RoPE, LearnedPosition, SinusoidalPosition
