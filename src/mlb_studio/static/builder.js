@@ -5360,7 +5360,7 @@ function __MLB_STUDIO_FACTORY__(){
         body.appendChild(editorRow("Function Name",binding.user_function_name||"custom_function",v=>{binding.user_function_name=String(v||"").trim()||"custom_function";customImportStatus[def.id+":"+step.id]=null;},{type:"text"}));
         body.appendChild(editorRow("Python Code",binding.user_code||"def custom_function(x):\n    return x",v=>{binding.user_code=v;binding.dependencies=extractPythonDependencies(v);binding.source_hash=userSourceHash(v);customImportStatus[def.id+":"+step.id]=null;},{textarea:true,rows:10}));
         const userHelp=document.createElement("div");userHelp.className="mlb-api-path";userHelp.textContent="Define one Python function. torch and torch.nn are available automatically; imports inside the editor use the notebook/kernel environment.";body.appendChild(userHelp);
-        body.appendChild(editorRow("Visual Port Mode",binding.port_mode||"standard",v=>{
+        body.appendChild(editorRow("Port Layout",binding.port_mode||"standard",v=>{
           binding.port_mode=v;
           if(v==="named"){
             binding.auto_main_input=false;binding.multi_output=false;
@@ -5368,7 +5368,7 @@ function __MLB_STUDIO_FACTORY__(){
             if(!binding.output_ports.length)binding.output_ports=[defaultUserOutputPort(0)];
           }
           pendingPort=null;draw();
-        },{select:true,options:[{value:"standard",label:"Main / Skip / Extra"},{value:"named",label:"Custom Named Ports"}]}));
+        },{select:true,options:[{value:"standard",label:"Standard"},{value:"named",label:"Custom"}]}));
         if(binding.port_mode==="named"){
           const inTitle=document.createElement("div");inTitle.className="mlb-section-title";inTitle.textContent="INPUT PORTS";body.appendChild(inTitle);
           const inHelp=document.createElement("div");inHelp.className="mlb-api-path";inHelp.textContent="Each connected input port is passed to the Python function using its Function Parameter name. Named ports can connect directly between User Defined Function nodes.";body.appendChild(inHelp);
@@ -5490,7 +5490,7 @@ function __MLB_STUDIO_FACTORY__(){
       const argTitle=document.createElement("div");argTitle.className="mlb-section-title";argTitle.textContent="PARAMETERS";body.appendChild(argTitle);
       const note=document.createElement("div");note.className="mlb-api-path";
       note.textContent=callType==="user_function"
-        ?(binding.port_mode==="named"?"Your function uses custom named visual ports. Connected inputs are passed by parameter name and each output port selects a returned value.":"Your Python function executes on every pass. Use Main / Skip / Extra parameter sources for incoming lanes. Enable Multiple Outputs to map returned values to the node's three output ports.")
+        ?(binding.port_mode==="named"?"Custom layout lets you define the visual input and output ports for this function.":"Standard layout uses the built-in Studio port routing. Configure the function parameters below.")
         :callType==="user_class"
         ?"Constructor parameters create one reusable instance from your cached class source. The object is registered once and later Instance Method nodes can reuse it."
         :callType==="constructor"
@@ -5597,7 +5597,7 @@ function __MLB_STUDIO_FACTORY__(){
 
     function renderAPIStepConnections(body,step){
       const title=document.createElement("div");title.className="mlb-section-title";title.textContent="CONNECTIONS";body.appendChild(title);
-      const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Connect Main / Skip / Extra lanes normally, or connect custom named User Function ports directly. One output may feed multiple downstream blocks.";body.appendChild(help);
+      const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Connect Standard ports normally, or connect Custom User Function ports directly. One output may feed multiple downstream blocks.";body.appendChild(help);
       const rel=(current(state).edges||[]).filter(e=>e.source===step.id||e.target===step.id);
       if(!rel.length){const empty=document.createElement("div");empty.className="mlb-api-path";empty.textContent="No connections for this function.";body.appendChild(empty);}
       else rel.forEach(ed=>{
@@ -6083,7 +6083,7 @@ function __MLB_STUDIO_FACTORY__(){
       const named=portMode==="named"&&portKey;
       if(side==="out"){
         pendingPort={nodeId,side,portIndex,portKey,portName,portMode:named?"named":"standard"};
-        if(named)setStatus((portName||"Output")+" selected. Click a named input port or a standard Main / Skip / Extra input.");
+        if(named)setStatus((portName||"Output")+" selected. Click a Custom input port or a Standard input.");
         else{
           const lane=["Skip","Main","Extra"][portIndex]||"Lane";
           setStatus(lane+" output selected. Click the matching "+lane.toLowerCase()+" input.");

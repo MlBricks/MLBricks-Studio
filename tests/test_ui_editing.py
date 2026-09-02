@@ -153,3 +153,13 @@ def test_numeric_inputs_are_typing_only_without_custom_steppers():
     assert 'makeStep(-1,"▼"' not in text
     assert "V1.0 typing-only numeric inputs" in css
     assert '.mlb-number-stepper,.mlb-number-step{display:none!important}' in css
+
+
+def test_port_layout_labels_are_simple_and_clear():
+    js = (Path(__file__).resolve().parents[1] / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
+    assert 'editorRow("Port Layout"' in js
+    assert '{value:"standard",label:"Standard"}' in js
+    assert '{value:"named",label:"Custom"}' in js
+    assert 'editorRow("Visual Port Mode"' not in js
+    assert 'label:"Main / Skip / Extra"' not in js
+    assert 'label:"Custom Named Ports"' not in js
