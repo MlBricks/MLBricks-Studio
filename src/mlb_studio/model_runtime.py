@@ -316,6 +316,12 @@ class _APINamedOutputs:
 
 
 def _lane_output(value, lane):
+    if isinstance(value, dict):
+        if lane in value:
+            return value[lane]
+        if lane == "main" and "main" in value:
+            return value["main"]
+        raise ModelCompileError(f"API output lane {lane!r} is connected but has no mapped return value.")
     if isinstance(value, _APILaneOutputs):
         selected = getattr(value, lane, None)
         if selected is None:
@@ -332,6 +338,11 @@ def _lane_output(value, lane):
 
 def _named_output(value, key):
     key = str(key or "").strip()
+    if isinstance(value, dict):
+        lookup = "main" if key in {"", "output"} else key
+        if lookup in value:
+            return value[lookup]
+        raise ModelCompileError(f"API contract output has no named output port {key!r}.")
     if isinstance(value, _APINamedOutputs):
         if key in value.values:
             return value.values[key]
@@ -980,6 +991,7 @@ class TensorGraph(nn.Module):
                 if len(main_sources)!=1: raise ModelCompileError(f"{node.get('name')} has {len(main_sources)} Main inputs; merge execution is not implemented.")
                 x=edge_value(self.in_main_edges[nid][0], "main")
             else: x=graph_input
+            stored_value = None
             contract = API_COMPONENTS.get(t)
             if contract is not None:
                 declared=set(contract.input_ports)
@@ -1046,6 +1058,7 @@ class TensorGraph(nn.Module):
                     contract_inputs["main"] = y
                     result = contract.execute(mod, contract_inputs)
                     y = result.get("main")
+                stored_value = result if len(result) > 1 or set(result) != {"main"} else y
             elif t=="residual":
                 if len(skip_sources)!=1: raise ModelCompileError(f"Residual {node.get('name')} needs exactly one Skip input.")
                 if extra_sources: raise ModelCompileError(f"Residual {node.get('name')} does not accept an Extra input.")
@@ -1074,7 +1087,7 @@ class TensorGraph(nn.Module):
                 y=mod(x)
                 repeat=max(1,int(node.get("repeat") or 1))
                 for _ in range(1,repeat): y=mod(y)
-            values[nid]=y
+            values[nid]=stored_value if stored_value is not None else y
         sinks=[n for n in self.order if not self.outgoing[n["id"]]]
         if not sinks: raise ModelCompileError("Graph has no output node.")
         if len(sinks)>1: raise ModelCompileError("Training compiler currently requires one tensor output.")

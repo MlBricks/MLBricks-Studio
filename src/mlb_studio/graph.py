@@ -381,6 +381,21 @@ def primitive_catalog():
             "category": "Core Components",
             "description": "State-Aware Feed-Forward Network conditioned across physical depth.",
             "accent": "pink",
+            # SAFFN's runtime contract is not a simple y=module(x) call.  Named
+            # ports mirror the original MLBricks API exactly and are rendered
+            # by Studio instead of the generic Main/Skip/Extra lane buttons.
+            "runtime_ports": {
+                "inputs": [
+                    {"id": "x", "name": "x"},
+                    {"id": "esa_update", "name": "ESA Update"},
+                    {"id": "previous_esa", "name": "Previous ESA"},
+                    {"id": "previous_state", "name": "Previous State"},
+                ],
+                "outputs": [
+                    {"id": "main", "name": "Main"},
+                    {"id": "state", "name": "State"},
+                ],
+            },
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
                 {"key": "ffn_dim", "label": "FFN Hidden Dim", "type": "number", "value": 1536},

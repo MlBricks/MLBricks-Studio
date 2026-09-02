@@ -171,3 +171,26 @@ API_COMPONENTS.register(APIComponentContract(
         "backend": "backend",
     },
 ))
+# Stateful multi-input/multi-output proof: SAFFN exposes its original forward
+# signature as named graph ports.  The executor maps API return tuple[0] to
+# ``main`` and tuple[1] to ``state``; no SAFFN branch is required in TensorGraph.
+API_COMPONENTS.register(APIComponentContract(
+    component_type="saffn",
+    import_key="saffn",
+    input_ports={
+        "x": "x",
+        "esa_update": "esa_update",
+        "previous_esa": "previous_esa",
+        "previous_state": "previous_state",
+    },
+    output_ports={"main": 0, "state": 1},
+    parameter_aliases={
+        "d_model": ("dim", "hidden_size"),
+        "depth_embedding_dim": ("depth_dim",),
+    },
+    runtime_sources={
+        "d_model": "model_dim",
+        "backend": "backend",
+    },
+))
+

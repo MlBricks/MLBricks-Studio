@@ -337,8 +337,21 @@ def test_gallery_contains_tiny_compiler_test_models():
     assert 'TEST · BOLT Direct API' in js
     assert 'TEST · ESA → BOLT Pipeline' in js
     assert 'TEST · ResController Multi-Input' in js
+    assert 'TEST · SAFFN Stateful API' in js
     assert 'loadCompilerTestBOLT' in js
     assert 'loadCompilerTestESABOLT' in js
     assert 'loadCompilerTestResController' in js
+    assert 'loadCompilerTestSAFFN' in js
+    assert 'named_out:state' in js
+    assert 'toNamed(saffn1,saffn2,"previous_state","named_out:state")' in js
     assert 'dim:64,heads:4,block:64,batch:2,vocab:2048' in js
     assert 'Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"})' in js
+
+
+def test_saffn_catalog_exposes_original_api_named_runtime_ports():
+    from mlb_studio.graph import primitive_catalog
+
+    catalog = {item["type"]: item for item in primitive_catalog()}
+    ports = catalog["saffn"]["runtime_ports"]
+    assert [p["id"] for p in ports["inputs"]] == ["x", "esa_update", "previous_esa", "previous_state"]
+    assert [p["id"] for p in ports["outputs"]] == ["main", "state"]

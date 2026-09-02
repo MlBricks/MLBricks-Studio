@@ -2519,6 +2519,7 @@ function __MLB_STUDIO_FACTORY__(){
           p.dim=settings.embedding_size;
         }else if(t==="ffn"||t==="saffn"){
           const priorDim=numberOr(oldSettings?.embedding_size,384);
+          if(t==="saffn")p.d_model=settings.embedding_size;
           const priorIntermediate=numberOr(p.intermediate_size ?? p.ffn_dim,priorDim*4);
           const ratio=Math.max(1,priorIntermediate/priorDim);
           p.hidden_size=settings.embedding_size;
@@ -4222,7 +4223,7 @@ function __MLB_STUDIO_FACTORY__(){
         samples.appendChild(sampleGrid);
         body.appendChild(samples);
 
-        const tests=makeSection("COMPILER TEST MODELS","3 ready","featured full-width compiler-tests");
+        const tests=makeSection("COMPILER TEST MODELS","4 ready","featured full-width compiler-tests");
         const testGrid=document.createElement("div");testGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
         const loadBoltTest=btn("Open Test","mlb-gallery-action sample");loadBoltTest.addEventListener("click",openAndClose(loadCompilerTestBOLT));
         testGrid.appendChild(card("BOLT Direct API","Tiny · Dim 64 · Heads 4 · validates universal one-input API execution","TEST",[loadBoltTest]));
@@ -4230,6 +4231,8 @@ function __MLB_STUDIO_FACTORY__(){
         testGrid.appendChild(card("ESA → BOLT Pipeline","Tiny · Dim 64 · sequential original-API pipeline validation","TEST",[loadEsaBoltTest]));
         const loadResTest=btn("Open Test","mlb-gallery-action sample");loadResTest.addEventListener("click",openAndClose(loadCompilerTestResController));
         testGrid.appendChild(card("ResController Multi-Input","Tiny · Main + Skip · validates update/residual API argument routing","TEST",[loadResTest]));
+        const loadSaffnTest=btn("Open Test","mlb-gallery-action sample");loadSaffnTest.addEventListener("click",openAndClose(loadCompilerTestSAFFN));
+        testGrid.appendChild(card("SAFFN Stateful API","Tiny · 4 named inputs + main/state outputs · validates stateful multi-output routing","TEST",[loadSaffnTest]));
         tests.appendChild(testGrid);
         body.appendChild(tests);
 
@@ -6532,6 +6535,10 @@ function __MLB_STUDIO_FACTORY__(){
 
 
     function namedUserPorts(node,side){
+      const runtimePorts=cat(catalog,node?.type)?.runtime_ports;
+      if(runtimePorts){
+        return side==="in"?(runtimePorts.inputs||[]):(runtimePorts.outputs||[]);
+      }
       if(node?.type!=="api_step")return null;
       const b=normalizeAPIBinding(node.api_binding||defaultAPIBinding());
       if(b.call_type!=="user_function"||b.port_mode!=="named")return null;
@@ -6826,6 +6833,39 @@ function __MLB_STUDIO_FACTORY__(){
         Object.assign(edge(update.id,rc.id,"main"),{source_port:"main_out",target_port:"main_in"}),
         Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"}),
         edge(rc.id,ctx.norm.id),
+        edge(ctx.norm.id,ctx.head.id),
+        edge(ctx.head.id,ctx.out.id)
+      ];
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestSAFFN(){
+      const ctx=compilerTestContext({
+        name:"TEST · SAFFN Stateful API",
+        description:"Tiny named-port graph that maps the original StateAwareFFN API exactly and routes layer-1 state into layer-2 previous_state.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const prevEsa=makeNode(cat(catalog,"esa"));prevEsa.name="Previous ESA";prevEsa.params={...(prevEsa.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const esa=makeNode(cat(catalog,"esa"));esa.name="Current ESA";esa.params={...(esa.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const stateInit=makeNode(cat(catalog,"linear"));stateInit.name="Previous State Init";stateInit.params={...(stateInit.params||{}),in_features:64,out_features:16,bias:false};
+      const saffn1=makeNode(cat(catalog,"saffn"));saffn1.name="SAFFN Layer 1";saffn1.params={...(saffn1.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:0,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const saffn2=makeNode(cat(catalog,"saffn"));saffn2.name="SAFFN Layer 2";saffn2.params={...(saffn2.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:1,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const nodes=[ctx.input,ctx.emb,prevEsa,esa,stateInit,saffn1,saffn2,ctx.norm,ctx.head,ctx.out];
+      const toNamed=(source,target,key,sourcePort="main_out")=>Object.assign(edge(source.id,target.id,"named"),{source_port:sourcePort,target_port:"named_in:"+key});
+      const edges=[
+        edge(ctx.input.id,ctx.emb.id),
+        edge(ctx.emb.id,prevEsa.id),
+        edge(ctx.emb.id,esa.id),
+        edge(ctx.emb.id,stateInit.id),
+        toNamed(ctx.emb,saffn1,"x"),
+        toNamed(esa,saffn1,"esa_update"),
+        toNamed(prevEsa,saffn1,"previous_esa"),
+        toNamed(stateInit,saffn1,"previous_state"),
+        toNamed(saffn1,saffn2,"x","named_out:main"),
+        toNamed(esa,saffn2,"esa_update"),
+        toNamed(prevEsa,saffn2,"previous_esa"),
+        toNamed(saffn1,saffn2,"previous_state","named_out:state"),
+        Object.assign(edge(saffn2.id,ctx.norm.id,"main"),{source_port:"named_out:main",target_port:"main_in"}),
         edge(ctx.norm.id,ctx.head.id),
         edge(ctx.head.id,ctx.out.id)
       ];

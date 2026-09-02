@@ -202,3 +202,86 @@ def test_rescontroller_requires_skip_residual_input(monkeypatch):
         assert "residual" in str(exc)
     else:
         raise AssertionError("ResController should require the residual Skip input")
+
+class _FakeSAFFN(nn.Module):
+    def __init__(self, d_model, state_dim=3, depth_embedding_dim=2, layer_index=0, total_layers=1, backend="auto", **kwargs):
+        super().__init__()
+        self.d_model = int(d_model)
+        self.state_dim = int(state_dim)
+        self.layer_index = int(layer_index)
+        self.total_layers = int(total_layers)
+        self.backend = backend
+        self.scale = nn.Parameter(torch.tensor(1.0))
+
+    def forward(self, x, esa_update, previous_esa, previous_state):
+        main = self.scale * (x + esa_update - previous_esa)
+        state = previous_state + self.scale
+        return main, state
+
+
+def test_saffn_routes_four_named_inputs_and_state_output_without_tensorgraph_branch(monkeypatch):
+    """SAFFN's original 4-input / 2-output API is described only by its contract."""
+    from mlb_studio import api_graph_runtime
+
+    source_type = "__test_saffn_source__"
+    API_COMPONENTS.register(APIComponentContract(
+        component_type=source_type,
+        import_key=source_type,
+        input_ports={"main": "x"},
+        output_ports={"main": None},
+    ))
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    def resolve(key):
+        if key == "saffn":
+            return _FakeSAFFN
+        if key == source_type:
+            return _Echo
+        return original(key)
+    monkeypatch.setattr(api_graph_runtime.IMPORT_POOL, "resolve_component", resolve)
+
+    nodes = [
+        {"id": "x", "type": source_type, "name": "X", "params": {}},
+        {"id": "esa", "type": source_type, "name": "ESA", "params": {}},
+        {"id": "prev", "type": source_type, "name": "Previous ESA", "params": {}},
+        {"id": "state0", "type": source_type, "name": "State Init", "params": {}},
+        {"id": "s1", "type": "saffn", "name": "SAFFN 1", "params": {"d_model": 3, "state_dim": 3, "layer_index": 0, "total_layers": 2, "backend": "pytorch"}},
+        {"id": "s2", "type": "saffn", "name": "SAFFN 2", "params": {"d_model": 3, "state_dim": 3, "layer_index": 1, "total_layers": 2, "backend": "pytorch"}},
+    ]
+
+    def named(edge_id, source, target, target_key, source_key="main"):
+        source_port = f"named_out:{source_key}" if source.startswith("s") else "main_out"
+        return {
+            "id": edge_id,
+            "source": source,
+            "target": target,
+            "kind": "named",
+            "source_port": source_port,
+            "target_port": f"named_in:{target_key}",
+        }
+
+    edges = [
+        named("1", "x", "s1", "x"),
+        named("2", "esa", "s1", "esa_update"),
+        named("3", "prev", "s1", "previous_esa"),
+        named("4", "state0", "s1", "previous_state"),
+        named("5", "s1", "s2", "x", "main"),
+        named("6", "esa", "s2", "esa_update"),
+        named("7", "prev", "s2", "previous_esa"),
+        named("8", "s1", "s2", "previous_state", "state"),
+    ]
+
+    graph = TensorGraph(
+        nodes=nodes,
+        edges=edges,
+        custom_components={},
+        runtime={**_runtime(), "model_dim": 3},
+    )
+
+    x = torch.zeros(1, 2, 3, requires_grad=True)
+    y = graph(x)
+    assert y.shape == x.shape
+    y.sum().backward()
+    assert x.grad is not None
+    assert graph.mods["s1"].scale.grad is not None
+    assert graph.mods["s2"].scale.grad is not None
