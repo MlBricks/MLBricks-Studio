@@ -2502,7 +2502,7 @@ class Builder:
         return f"""
 <style id="{html.escape(style_id)}">{css}</style>
 {warning}
-<div id="{html.escape(self._instance_id)}" class="mlb-root" data-mlb-studio-version="{html.escape(__version__)}"></div>
+<div id="{html.escape(self._instance_id)}" class="mlb-root" data-mlb-studio-version="{html.escape(__version__)}"><div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Loading interface…</div></div></div>
 <script>
 window.__MLB_STUDIO_CSS_ELEMENT__ = document.getElementById({json.dumps(style_id)});
 try {{ delete window.MLBricksBuilder; }} catch (e) {{ window.MLBricksBuilder = undefined; }}
