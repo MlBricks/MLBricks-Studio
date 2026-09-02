@@ -3037,3 +3037,49 @@
   margin:0 auto!important;
   object-position:center center!important;
 }
+
+/* MLB Studio v9 — complex API graph readability */
+.mlb-node.mlb-complex-api-node{
+  width:196px!important;
+  min-width:196px!important;
+  max-width:196px!important;
+  padding-left:10px!important;
+  padding-right:10px!important;
+}
+.mlb-node.mlb-complex-api-node .node-head{padding:0 6px}
+.mlb-node.mlb-complex-api-node .node-desc{padding-left:8px!important;padding-right:8px!important}
+.mlb-node.mlb-complex-api-node .mlb-node-fields{margin-left:24px;margin-right:24px}
+.mlb-port.named-port{
+  background:var(--named-port-color,#f0a84a)!important;
+  border-color:color-mix(in srgb,var(--named-port-color,#f0a84a) 55%,white)!important;
+  box-shadow:0 0 0 2px rgba(8,13,19,.92),0 0 8px color-mix(in srgb,var(--named-port-color,#f0a84a) 35%,transparent)!important;
+}
+.mlb-port.named-port:hover,.mlb-port.named-port.armed{
+  background:color-mix(in srgb,var(--named-port-color,#f0a84a) 72%,white)!important;
+  border-color:#fff!important;
+  transform:translateY(-50%) scale(1.16)!important;
+}
+.mlb-user-port-label{
+  max-width:102px!important;
+  padding:2px 5px!important;
+  border:1px solid color-mix(in srgb,var(--named-port-color,#f0a84a) 45%,#24313e)!important;
+  background:rgba(10,16,23,.94)!important;
+  color:#e7edf5!important;
+  font-size:9.5px!important;
+  font-weight:800!important;
+  box-shadow:0 2px 6px rgba(0,0,0,.22)!important;
+}
+.mlb-user-port-label.in{border-left:2px solid var(--named-port-color,#f0a84a)!important}
+.mlb-user-port-label.out{border-right:2px solid var(--named-port-color,#f0a84a)!important}
+.mlb-edge-named{stroke-width:2.15!important;opacity:.9}
+.mlb-edge-named-rail{stroke-dasharray:none}
+.mlb-edge-dim{opacity:.13!important}
+.mlb-edge-focus{opacity:1!important;stroke-width:3.1!important;filter:drop-shadow(0 0 3px rgba(218,225,255,.3))}
+.mlb-zoom-fit{
+  min-width:34px!important;
+  padding:0 7px!important;
+  color:#c9baff!important;
+  border-right:1px solid #3b4654!important;
+  font-size:10px!important;
+  font-weight:900!important;
+}

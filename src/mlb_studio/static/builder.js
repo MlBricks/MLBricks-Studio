@@ -6546,6 +6546,16 @@ function __MLB_STUDIO_FACTORY__(){
       return side==="in"?(b.input_ports||[]):(b.output_ports||[]);
     }
 
+    function namedPortColor(key,index=0){
+      const k=String(key||"").toLowerCase();
+      if(k==="x"||k==="main"||k.includes("main"))return "#7087ff";
+      if(k.includes("state"))return "#35c8b5";
+      if(k.includes("esa_update")||k.includes("update"))return "#f0a84a";
+      if(k.includes("previous_esa")||k.includes("prev_esa"))return "#a96dff";
+      const palette=["#7087ff","#f0a84a","#a96dff","#35c8b5","#e16b9f","#59a9d8"];
+      return palette[Math.abs(Number(index)||0)%palette.length];
+    }
+
     function portButtons(node, side){
       const namedPorts=namedUserPorts(node,side);
       if(namedPorts){
@@ -6555,9 +6565,10 @@ function __MLB_STUDIO_FACTORY__(){
           const key=String(port.id||((side==="in"?"in_":"out_")+(i+1)));
           const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
           const sideCss=side==="in"?"left:-6px":"right:-6px";
-          const labelCss=side==="in"?"left:10px":"right:10px";
-          html+='<button class="mlb-port '+side+' named-port" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" style="'+sideCss+';top:'+pct+'%;transform:translateY(-50%)" type="button" aria-label="'+name+'" title="'+name+'"></button>';
-          html+='<span class="mlb-user-port-label '+side+'" style="'+labelCss+';top:'+pct+'%;transform:translateY(-50%)">'+name+'</span>';
+          const labelCss=side==="in"?"left:12px":"right:12px";
+          const portColor=namedPortColor(key,i);
+          html+='<button class="mlb-port '+side+' named-port" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" style="'+sideCss+';top:'+pct+'%;transform:translateY(-50%);--named-port-color:'+portColor+'" type="button" aria-label="'+name+'" title="'+name+'"></button>';
+          html+='<span class="mlb-user-port-label '+side+'" style="'+labelCss+';top:'+pct+'%;transform:translateY(-50%);--named-port-color:'+portColor+'">'+name+'</span>';
         });
         return html;
       }
@@ -6615,7 +6626,7 @@ function __MLB_STUDIO_FACTORY__(){
       svg.setAttribute("height",Math.max(wrap.clientHeight,scaledRect.height,650));
       wrap.appendChild(svg);
       const wr=wrap.getBoundingClientRect();
-      let skipRoute=0, extraRoute=0;
+      let skipRoute=0, extraRoute=0, namedRoute=0;
 
       function portRect(nodeEl,side,index,key=""){
         const selector=key
@@ -6653,9 +6664,28 @@ function __MLB_STUDIO_FACTORY__(){
         p.setAttribute("data-edge-id",e.id);
 
         if(lane==="named"){
-          const gap=Math.max(1,Math.abs(x2-x1));const dir=x2>=x1?1:-1;const handle=Math.max(18,Math.min(58,gap*0.42));
-          p.setAttribute("d",`M ${x1} ${y1} C ${x1+dir*handle} ${y1}, ${x2-dir*handle} ${y2}, ${x2} ${y2}`);
-          p.setAttribute("class","mlb-edge-main mlb-edge-named");
+          const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
+          const left=Math.min(x1,x2), right=Math.max(x1,x2);
+          let blocked=false;
+          flow.querySelectorAll(".mlb-node").forEach(nodeEl=>{
+            if(nodeEl===a||nodeEl===b)return;
+            const nr=nodeEl.getBoundingClientRect();
+            const nl=nr.left-wr.left, nrgt=nr.right-wr.left;
+            if(nrgt>left+6&&nl<right-6)blocked=true;
+          });
+          const forward=x2>=x1;
+          if(blocked||!forward){
+            const route=namedRoute++;
+            const topY=Math.min(ab.top-wr.top,bb.top-wr.top)-22-(route%6)*14;
+            const dir=forward?1:-1;
+            p.setAttribute("d",`M ${x1} ${y1} C ${x1+dir*16} ${y1}, ${x1+dir*16} ${topY}, ${x1+dir*34} ${topY} L ${x2-dir*34} ${topY} C ${x2-dir*16} ${topY}, ${x2-dir*16} ${y2}, ${x2} ${y2}`);
+            p.classList.add("mlb-edge-named-rail");
+          }else{
+            const gap=Math.max(1,Math.abs(x2-x1));const dir=1;const handle=Math.max(18,Math.min(54,gap*0.38));
+            p.setAttribute("d",`M ${x1} ${y1} C ${x1+dir*handle} ${y1}, ${x2-dir*handle} ${y2}, ${x2} ${y2}`);
+          }
+          p.setAttribute("class",(p.getAttribute("class")||"")+" mlb-edge-main mlb-edge-named");
+          p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);
         }else if(lane===0){
           const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
           const route=skipRoute++;
@@ -6718,6 +6748,10 @@ function __MLB_STUDIO_FACTORY__(){
             );
           }
           p.setAttribute("class","mlb-edge-main");
+        }
+        if(selected){
+          if(e.source===selected||e.target===selected)p.classList.add("mlb-edge-focus");
+          else p.classList.add("mlb-edge-dim");
         }
         svg.appendChild(p);
       });
@@ -7532,10 +7566,19 @@ function __MLB_STUDIO_FACTORY__(){
         }
 
         const z=document.createElement("div");z.className="mlb-zoom";
+        const fit=btn("Fit","mlb-zoom-fit");fit.title="Fit the whole graph in the visible canvas";fit.addEventListener("click",()=>{
+          const liveCanvas=root.querySelector(".mlb-canvas");
+          const liveFlow=root.querySelector(".mlb-flow");
+          if(!liveCanvas||!liveFlow)return;
+          const baseWidth=Math.max(1,liveFlow.scrollWidth||liveFlow.getBoundingClientRect().width/Math.max(.01,zoom));
+          const available=Math.max(320,liveCanvas.clientWidth-48);
+          zoom=Math.max(.65,Math.min(1.5,Math.floor((available/baseWidth)*100)/100));
+          draw();
+        });
         const zm=btn("−");zm.addEventListener("click",()=>{zoom=Math.max(.65,zoom-.1);draw();});
         const zs=document.createElement("span");zs.textContent=Math.round(zoom*100)+"%";
         const zp=btn("+");zp.addEventListener("click",()=>{zoom=Math.min(1.5,zoom+.1);draw();});
-        z.append(zm,zs,zp);toolbar.appendChild(z);
+        z.append(fit,zm,zs,zp);toolbar.appendChild(z);
       }
       if(!galleryWorkspace.open&&!cloudWorkspace.open)main.appendChild(toolbar);
 
@@ -7639,7 +7682,12 @@ function __MLB_STUDIO_FACTORY__(){
             portEl.addEventListener("click",ev=>portClick(n.id,side,idx,ev,key,name,mode));
           });
           const namedIn=namedUserPorts(n,"in"),namedOut=namedUserPorts(n,"out");
-          if(namedIn||namedOut){card.classList.add("mlb-user-function-named");card.style.height=Math.max(315,(Math.max(namedIn?.length||0,namedOut?.length||0)+1)*38)+"px";}
+          if(namedIn||namedOut){
+            card.classList.add("mlb-user-function-named");
+            const maxNamed=Math.max(namedIn?.length||0,namedOut?.length||0);
+            if(maxNamed>=3)card.classList.add("mlb-complex-api-node");
+            card.style.height=Math.max(315,(maxNamed+1)*42)+"px";
+          }
           card.addEventListener("click",()=>{outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",()=>{if(n.definition_id)openInside(n);});
           flow.appendChild(card);
         });

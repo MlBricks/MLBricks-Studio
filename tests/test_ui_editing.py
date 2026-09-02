@@ -366,3 +366,20 @@ def test_model_build_validation_counts_named_and_skip_edges_as_real_connectivity
     assert 'executionEdges.forEach(e=>' in block
     assert 'const mainEdges=(model.edges||[]).filter(e=>(e.kind||"main")==="main");' not in block
     assert 'Model execution graph contains a cycle.' in block
+
+
+def test_complex_named_api_nodes_have_readable_graph_ui():
+    js = _builder_js()
+    css = _builder_css()
+    assert 'function namedPortColor(key,index=0)' in js
+    assert 'card.classList.add("mlb-complex-api-node")' in js
+    assert 'mlb-edge-named-rail' in js
+    assert 'p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);' in js
+    assert 'p.classList.add("mlb-edge-focus")' in js
+    assert 'p.classList.add("mlb-edge-dim")' in js
+    assert 'btn("Fit","mlb-zoom-fit")' in js
+    assert '.mlb-node.mlb-complex-api-node{' in css
+    assert 'width:196px!important;' in css
+    assert '.mlb-edge-dim{opacity:.13!important}' in css
+    assert '.mlb-edge-focus{' in css
+    assert '.mlb-zoom-fit{' in css
