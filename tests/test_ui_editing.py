@@ -251,3 +251,36 @@ def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
     assert "[flow,wrap,canvas,root].forEach" not in text
     assert "if(wrap.style.width!==nextW)wrap.style.width=nextW;" in text
     assert "setTimeout(renderConnections,180);" in text
+
+
+def test_library_subtext_is_descriptive_and_backend_neutral():
+    from mlb_studio.graph import primitive_catalog
+
+    catalog = {item["type"]: item for item in primitive_catalog()}
+    assert catalog["embedding"]["description"] == "Token embedding layer that maps token IDs into dense vector representations."
+    assert catalog["esa"]["description"] == "Entangled State Attention sequence-mixing layer."
+    assert catalog["ffn"]["description"] == "Feed-Forward Network for transforming features within each layer."
+    assert catalog["rmsnorm"]["description"] == "Root Mean Square Normalization layer for stabilizing activations."
+    assert catalog["hf_dataset"]["description"].startswith("Dataset source")
+    assert catalog["tokenize_text"]["description"].startswith("Tokenization step")
+
+    visible_descriptions = " ".join(item.get("description", "") for item in catalog.values()).lower()
+    assert "pytorch" not in visible_descriptions
+    assert "native" not in visible_descriptions
+    assert "builder utility node" not in visible_descriptions
+
+
+def test_elasticbit_card_uses_simple_name():
+    from mlb_studio.graph import primitive_catalog
+
+    catalog = {item["type"]: item for item in primitive_catalog()}
+    elastic = catalog["elasticbit_runtime"]
+    assert elastic["name"] == "ElasticBit"
+    assert "4–32" not in elastic["name"]
+    assert "4-32" not in elastic["name"]
+
+
+def test_library_subtext_is_clamped_to_two_lines():
+    css = _builder_css()
+    assert "-webkit-line-clamp:2;" in css
+    assert "line-clamp:2;" in css

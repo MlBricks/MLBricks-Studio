@@ -147,7 +147,7 @@ def _inspect_one(component_type: str, fallback: dict[str, Any]) -> dict[str, Any
                     runtime_available = False
                     runtime_error = f"{type(exc).__name__}: {exc}"
             if not runtime_available and runtime_error is None:
-                runtime_error = "ElasticBit native 4-32 CUDA runtime is not built in this environment."
+                runtime_error = "ElasticBit runtime is not built in this environment."
 
         info = IMPORT_POOL.import_info(component_type)
         return {

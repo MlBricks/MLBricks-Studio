@@ -10,7 +10,7 @@
       "public_name": "Embedding",
       "import_path": "mlbricks.components.Embedding",
       "signature": "Embedding(vocab_size: int, embedding_dim: int)",
-      "description": "Embedding layer for token representations.",
+      "description": "Token embedding layer that maps token IDs into dense vector representations.",
       "parameters": [
         {
           "key": "vocab_size",
@@ -201,7 +201,7 @@
       "public_name": "SOUP",
       "import_path": "mlbricks.soup.SOUP",
       "signature": "SOUP(dim=512, width=1116, depth=2, mixer='esa', ffn='saffn', mixer_config=None, ffn_config=None, backend='auto', precision='fp16', memory_dim=128, fusion_hidden=768)",
-      "description": "State-Oriented Unified Processing architecture.",
+      "description": "State-Oriented Unified Processing architecture with mixers, FFNs, state, memory, and fusion.",
       "parameters": [
         {
           "key": "dim",
@@ -332,7 +332,7 @@
       "public_name": "Bolt",
       "import_path": "mlbricks.bolt.Bolt",
       "signature": "Bolt(d_model: int, num_heads: int, latent_dim: int = 32, bias: bool = False, dropout: float = 0.0, causal: bool = True, backend: str = 'auto', autotune_kernels: bool = True, eps: float = 1e-06, use_sdpa: bool = True, position=None, native_full_sequence: bool = False)",
-      "description": "Bolt attention layer with routed latent mixing.",
+      "description": "BOLT sequence-mixing layer for routed latent feature processing.",
       "parameters": [
         {
           "key": "d_model",
@@ -453,7 +453,7 @@
       "public_name": "FFN",
       "import_path": "mlbricks.components.FFN",
       "signature": "FFN(hidden_size: int, intermediate_size: int | None = None, activation: ActivationLike = 'gelu', dropout: float = 0.0, bias: bool = True, gated: bool = False, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
-      "description": "Feed-Forward Network layer.",
+      "description": "Feed-Forward Network for transforming features within each layer.",
       "parameters": [
         {
           "key": "hidden_size",
@@ -550,7 +550,7 @@
       "public_name": "StateAwareFFN",
       "import_path": "mlbricks.ffnbrick.StateAwareFFN",
       "signature": "StateAwareFFN(d_model: int, state_dim: int = 256, depth_embedding_dim: int = 64, layer_index: int = 0, total_layers: int = 1, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
-      "description": "State-Aware Feed-Forward Network.",
+      "description": "State-Aware Feed-Forward Network conditioned across physical depth.",
       "parameters": [
         {
           "key": "d_model",
@@ -632,7 +632,7 @@
       "public_name": "MicroVirtualFFN",
       "import_path": "mlbricks.ffnbrick.MicroVirtualFFN",
       "signature": "MicroVirtualFFN(d_model: int, hidden_dim: int = 64, refinements: int = 1, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
-      "description": "Micro Feed-Forward Network for virtual passes.",
+      "description": "Micro Feed-Forward Network for lightweight virtual refinement.",
       "parameters": [
         {
           "key": "d_model",
@@ -698,7 +698,7 @@
       "public_name": "VirtualStateAwareFFN",
       "import_path": "mlbricks.ffnbrick.VirtualStateAwareFFN",
       "signature": "VirtualStateAwareFFN(d_model: int, state_dim: int = 256, depth_embedding_dim: int = 64, layer_index: int = 0, total_layers: int = 1, virtual_refinements: int = 2, virtual_hidden_dim: int = 128, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
-      "description": "Virtual State-Aware Feed-Forward Network.",
+      "description": "Virtual State-Aware Feed-Forward Network for recurrent refinement.",
       "parameters": [
         {
           "key": "d_model",
@@ -796,7 +796,7 @@
       "public_name": "RMSNorm",
       "import_path": "mlbricks.components.RMSNorm",
       "signature": "RMSNorm(normalized_shape: int | Sequence[int], eps: float = 1e-06, elementwise_affine: bool = True, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
-      "description": "Root Mean Square Normalization layer.",
+      "description": "Root Mean Square Normalization layer for stabilizing activations.",
       "parameters": [
         {
           "key": "normalized_shape",
@@ -861,7 +861,7 @@
       "public_name": "LayerNorm",
       "import_path": "mlbricks.components.LayerNorm",
       "signature": "LayerNorm(normalized_shape: int | Sequence[int], eps: float = 1e-05, elementwise_affine: bool = True, bias: bool = True, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
-      "description": "Layer Normalization layer.",
+      "description": "Layer Normalization for stabilizing activations across features.",
       "parameters": [
         {
           "key": "normalized_shape",
@@ -934,7 +934,7 @@
       "public_name": "Residual",
       "import_path": "mlbricks.components.Residual",
       "signature": "Residual(dropout: float = 0.0)",
-      "description": "Residual connection layer.",
+      "description": "Residual connection block that adds the skip path to the main path.",
       "parameters": [
         {
           "key": "dropout",
@@ -955,7 +955,7 @@
       "public_name": "ResController",
       "import_path": "mlbricks.residualbrick.ResController",
       "signature": "ResController(update_ratio: float, stream_ratio: float = 1.08, update_softness: float = 8.0, stream_softness: float = 8.0, eps: float = 1e-12, use_native: bool | None = None, fused_cuda: bool = True, backend: str = 'auto')",
-      "description": "Residual control layer for update scaling.",
+      "description": "Residual Controller for regulating residual update strength.",
       "parameters": [
         {
           "key": "update_ratio",
@@ -1037,7 +1037,7 @@
       "public_name": "LMHead",
       "import_path": "mlbricks.components.LMHead",
       "signature": "LMHead(hidden_size: int, vocab_size: int, bias: bool = False, tie_to: nn.Module | None = None, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
-      "description": "Language modeling output head.",
+      "description": "Language Modeling Head that projects hidden features into vocabulary logits.",
       "parameters": [
         {
           "key": "hidden_size",
@@ -1113,7 +1113,7 @@
       "public_name": "ElasticBit",
       "import_path": "mlbricks.elasticbit.ElasticBit",
       "signature": "ElasticBit.RuntimeMatrix.from_auto(weights, calibration, threshold=0.01, runtime_mode='compact', min_bits=4, max_bits=32)",
-      "description": "Adaptive 4–32-bit matrix runtime.",
+      "description": "Adaptive precision runtime for selecting efficient 4–32-bit storage.",
       "parameters": [
         {
           "key": "threshold",
@@ -1174,7 +1174,7 @@
       "public_name": "RoPE",
       "import_path": "mlbricks.position.RoPE",
       "signature": "RoPE(dim: int | None = None, base: float = 10000.0)",
-      "description": "Rotary positional embedding transform.",
+      "description": "Rotary Positional Embedding for encoding token position through rotation.",
       "parameters": [
         {
           "key": "dim",
@@ -1203,7 +1203,7 @@
       "public_name": "LearnedPosition",
       "import_path": "mlbricks.position.LearnedPosition",
       "signature": "LearnedPosition(dim: int, max_seq_len: int)",
-      "description": "Learned positional embedding layer.",
+      "description": "Learned positional embedding for trainable sequence position information.",
       "parameters": [
         {
           "key": "dim",
@@ -1232,7 +1232,7 @@
       "public_name": "SinusoidalPosition",
       "import_path": "mlbricks.position.SinusoidalPosition",
       "signature": "SinusoidalPosition(dim: int, max_seq_len: int = 65536, base: float = 10000.0)",
-      "description": "Sinusoidal positional embedding layer.",
+      "description": "Sinusoidal positional encoding for deterministic sequence positions.",
       "parameters": [
         {
           "key": "dim",
@@ -1269,7 +1269,7 @@
       "public_name": "Vesa",
       "import_path": "mlbricks.vesa.Vesa",
       "signature": "Vesa(config: VesaConfig | VisionConfig | None = None, **kwargs)",
-      "description": "Vision Entangled State Attention layer.",
+      "description": "Vision Entangled State Attention for image and vision processing.",
       "parameters": [
         {
           "key": "image_size",
@@ -1871,7 +1871,7 @@
       "public_name": "VisionBolt",
       "import_path": "mlbricks.visionbolt.VisionBolt",
       "signature": "VisionBolt(config: VisionBoltConfig | VisionConfig | None = None, **kwargs)",
-      "description": "Vision Bolt layer.",
+      "description": "Vision BOLT layer for image and visual feature processing.",
       "parameters": [
         {
           "key": "image_size",
@@ -2473,7 +2473,7 @@
       "public_name": "Text Input",
       "import_path": null,
       "signature": "Text Input",
-      "description": "Text prompt or prepared dataset input.",
+      "description": "Text input for prompts or prepared dataset samples.",
       "parameters": [
         {
           "key": "prompt",
@@ -2494,7 +2494,7 @@
       "public_name": "Image Input",
       "import_path": null,
       "signature": "Image Input",
-      "description": "Image input for vision models.",
+      "description": "Image input for vision and multimodal models.",
       "parameters": [
         {
           "key": "image_size",
@@ -2522,7 +2522,7 @@
       "public_name": "Audio Input",
       "import_path": null,
       "signature": "Audio Input",
-      "description": "Audio input for speech models.",
+      "description": "Audio input for speech and audio models.",
       "parameters": [
         {
           "key": "sample_rate",
@@ -2543,7 +2543,7 @@
       "public_name": "Dropout",
       "import_path": null,
       "signature": "Dropout",
-      "description": "Dropout regularization layer.",
+      "description": "Regularization layer that randomly drops activations during training.",
       "parameters": [
         {
           "key": "p",
@@ -2564,7 +2564,7 @@
       "public_name": "Classifier Head",
       "import_path": null,
       "signature": "Classifier Head",
-      "description": "Classification output head.",
+      "description": "Classification Head that maps model features to class scores.",
       "parameters": [
         {
           "key": "hidden_size",
@@ -2592,7 +2592,7 @@
       "public_name": "Text Output",
       "import_path": null,
       "signature": "Text Output",
-      "description": "Decode text from model outputs.",
+      "description": "Text output block for decoding generated tokens into readable text.",
       "parameters": [
         {
           "key": "max_new_tokens",
@@ -2627,7 +2627,7 @@
       "public_name": "Logits Output",
       "import_path": null,
       "signature": "Logits Output",
-      "description": "View logits or output scores.",
+      "description": "Output block for exposing model logits and prediction scores.",
       "parameters": [],
       "builder_utility": true,
       "builder_python_api": false,
@@ -2640,7 +2640,7 @@
       "public_name": "Linear",
       "import_path": "mlbricks.components.Linear",
       "signature": "Linear(in_features: int, out_features: int, bias: bool = True, device: torch.device | str | None = None, dtype: torch.dtype | None = None)",
-      "description": "Linear projection layer.",
+      "description": "Linear projection layer for mapping features between dimensions.",
       "parameters": [
         {
           "key": "in_features",

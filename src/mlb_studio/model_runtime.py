@@ -892,7 +892,7 @@ class TensorGraph(nn.Module):
             f"Training compiler does not yet support component {node.get('name')!r} ({t}). "
             "Supported today: API Function, Text Input/Output, Embedding, Learned/Sinusoidal Position, ESA, StateAware ESA Stack, SOUP, "
             "RMSNorm, LayerNorm, Linear, FFN, Residual, Dropout, LM Head, nested custom components, and API-bound custom components. "
-            "ElasticBit 4–32 is a post-training/inference runtime component, not a differentiable training layer."
+            "ElasticBit is a post-training/inference runtime component, not a differentiable training layer."
         )
 
     def _nearest_upstream_embedding(self, node_id, expected_shape):

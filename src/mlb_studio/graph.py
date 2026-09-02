@@ -17,7 +17,7 @@ def primitive_catalog():
             "name": "Text Input",
             "icon": "TXT",
             "category": "Inputs",
-            "description": "Text prompt or prepared dataset input.",
+            "description": "Text input for prompts or prepared dataset samples.",
             "accent": "green",
             "api": [
                 {"key": "input_mode", "label": "Input Source", "type": "select", "value": "prompt",
@@ -36,7 +36,7 @@ def primitive_catalog():
             "name": "Image Input",
             "icon": "IMG",
             "category": "Inputs",
-            "description": "Image input for vision models.",
+            "description": "Image input for vision and multimodal models.",
             "accent": "green",
             "api": [
                 {"key": "channels", "label": "Channels", "type": "number", "value": 3},
@@ -49,7 +49,7 @@ def primitive_catalog():
             "name": "Audio Input",
             "icon": "AUD",
             "category": "Inputs",
-            "description": "Audio input for speech models.",
+            "description": "Audio input for speech and audio models.",
             "accent": "green",
             "api": [
                 {"key": "sample_rate", "label": "Sample Rate", "type": "number", "value": 16000},
@@ -63,7 +63,7 @@ def primitive_catalog():
             "name": "Hugging Face Dataset",
             "icon": "HF",
             "category": "Data Source",
-            "description": "Load a dataset from the Hugging Face Hub.",
+            "description": "Dataset source for loading data from the Hugging Face Hub.",
             "accent": "cyan",
             "api": [
                 {"key": "dataset_id", "label": "Dataset ID", "type": "text", "value": "roneneldan/TinyStories"},
@@ -81,7 +81,7 @@ def primitive_catalog():
             "name": "Kaggle Dataset",
             "icon": "KG",
             "category": "Data Source",
-            "description": "Load a dataset from Kaggle.",
+            "description": "Dataset source for loading data from Kaggle.",
             "accent": "blue",
             "api": [
                 {"key": "dataset_handle", "label": "Dataset Handle", "type": "text", "value": "owner/dataset-name"},
@@ -98,7 +98,7 @@ def primitive_catalog():
             "name": "URL Dataset",
             "icon": "URL",
             "category": "Data Source",
-            "description": "Load text data from a URL.",
+            "description": "Dataset source for loading data from a web URL.",
             "accent": "green",
             "api": [
                 {"key": "url", "label": "Dataset URL", "type": "text", "value": "https://example.com/data.txt"},
@@ -114,7 +114,7 @@ def primitive_catalog():
             "name": "Local Dataset",
             "icon": "FILE",
             "category": "Data Source",
-            "description": "Load a local file or dataset.",
+            "description": "Dataset source for loading files from the current environment.",
             "accent": "green",
             "api": [
                 {"key": "path", "label": "Path", "type": "text", "value": "."},
@@ -130,7 +130,7 @@ def primitive_catalog():
             "name": "Text Processing",
             "icon": "TXT+",
             "category": "Text",
-            "description": "Clean and normalize text data.",
+            "description": "Text processing step for cleaning and normalizing dataset text.",
             "accent": "orange",
             "api": [
                 {"key": "text_column", "label": "Text Column", "type": "text", "value": "text"},
@@ -150,7 +150,7 @@ def primitive_catalog():
             "name": "Train / Validation / Test Split",
             "icon": "SPLT",
             "category": "Splitting",
-            "description": "Split data into train, validation, and test sets.",
+            "description": "Dataset split step for training, validation, and test sets.",
             "accent": "purple",
             "api": [
                 {"key": "train_size", "label": "Training", "type": "percent", "value": 90, "min": 0, "max": 100, "step": 1,
@@ -172,7 +172,7 @@ def primitive_catalog():
             "name": "Tokenize Text",
             "icon": "TOK",
             "category": "Text",
-            "description": "Convert text into model tokens.",
+            "description": "Tokenization step that converts text into model-ready token IDs.",
             "accent": "blue",
             "api": [
                 {"key": "tokenizer_name", "label": "Tokenizer", "type": "text", "value": "gpt2"},
@@ -190,7 +190,7 @@ def primitive_catalog():
             "name": "Manual Text Data",
             "icon": "TXT",
             "category": "Data Source",
-            "description": "Paste a small text dataset directly.",
+            "description": "Text dataset source for entering samples directly in Studio.",
             "accent": "green",
             "api": [
                 {"key": "text", "label": "Text Data", "type": "textarea", "value": "Once upon a time"},
@@ -205,7 +205,7 @@ def primitive_catalog():
             "name": "Image Processing",
             "icon": "IMG+",
             "category": "Image",
-            "description": "Resize and prepare image data.",
+            "description": "Image processing step for resizing and preparing visual samples.",
             "accent": "orange",
             "api": [
                 {"key": "image_column", "label": "Image Column", "type": "text", "value": "image"},
@@ -222,7 +222,7 @@ def primitive_catalog():
             "name": "Audio Processing",
             "icon": "AUD+",
             "category": "Audio",
-            "description": "Resample and prepare audio data.",
+            "description": "Audio processing step for resampling and preparing audio samples.",
             "accent": "orange",
             "api": [
                 {"key": "audio_column", "label": "Audio Column", "type": "text", "value": "audio"},
@@ -239,7 +239,7 @@ def primitive_catalog():
             "name": "Batch / DataLoader",
             "icon": "BTC",
             "category": "Dataset",
-            "description": "Create batches for training.",
+            "description": "Batching step for grouping prepared samples for training.",
             "accent": "blue",
             "api": [
                 {"key": "batch_size", "label": "Batch Size", "type": "number", "value": 16},
@@ -255,7 +255,7 @@ def primitive_catalog():
             "name": "Prepared Dataset",
             "icon": "DATA",
             "category": "Output",
-            "description": "Save processed data for model use.",
+            "description": "Dataset output that registers processed data for model training.",
             "accent": "green",
             "api": [
                 {"key": "dataset_name", "label": "Dataset Name", "type": "text", "value": "Prepared Dataset",
@@ -269,7 +269,7 @@ def primitive_catalog():
             "name": "Embedding",
             "icon": "EMB",
             "category": "Core Components",
-            "description": "Embedding layer for token representations.",
+            "description": "Token embedding layer that maps token IDs into dense vector representations.",
             "accent": "blue",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -285,7 +285,7 @@ def primitive_catalog():
             "name": "ESA",
             "icon": "ESA",
             "category": "Core Components",
-            "description": "Entangled State Attention layer.",
+            "description": "Entangled State Attention sequence-mixing layer.",
             "accent": "purple",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -305,7 +305,7 @@ def primitive_catalog():
             "name": "SOUP",
             "icon": "SUP",
             "category": "Core Components",
-            "description": "State-Oriented Unified Processing architecture.",
+            "description": "State-Oriented Unified Processing architecture with mixers, FFNs, state, memory, and fusion.",
             "accent": "purple",
             "api": [],
         },
@@ -314,7 +314,7 @@ def primitive_catalog():
             "name": "StateAware ESA Stack",
             "icon": "ESA",
             "category": "Core Components",
-            "description": "StateAware ESA stack with recurrent feature flow.",
+            "description": "State-Aware ESA stack that carries recurrent feature state across model depth.",
             "accent": "purple",
             "library_hidden": True,
             "api": [
@@ -336,7 +336,7 @@ def primitive_catalog():
             "name": "VESA",
             "icon": "VES",
             "category": "Core Components",
-            "description": "Vision Entangled State Attention layer.",
+            "description": "Vision Entangled State Attention for image and vision processing.",
             "accent": "lime",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -350,7 +350,7 @@ def primitive_catalog():
             "name": "RMSNorm",
             "icon": "RMS",
             "category": "Core Components",
-            "description": "Root Mean Square Normalization layer.",
+            "description": "Root Mean Square Normalization layer for stabilizing activations.",
             "accent": "orange",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -362,7 +362,7 @@ def primitive_catalog():
             "name": "FFN",
             "icon": "FFN",
             "category": "Core Components",
-            "description": "Feed-Forward Network layer.",
+            "description": "Feed-Forward Network for transforming features within each layer.",
             "accent": "pink",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -379,7 +379,7 @@ def primitive_catalog():
             "name": "SAFFN",
             "icon": "SAF",
             "category": "Core Components",
-            "description": "State-Aware Feed-Forward Network.",
+            "description": "State-Aware Feed-Forward Network conditioned across physical depth.",
             "accent": "pink",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -393,7 +393,7 @@ def primitive_catalog():
             "name": "Residual Add",
             "icon": "ADD",
             "category": "Core Components",
-            "description": "Residual connection layer.",
+            "description": "Residual connection block that adds the skip path to the main path.",
             "accent": "cyan",
             "inputs": ["main", "skip"],
             "api": [
@@ -410,7 +410,7 @@ def primitive_catalog():
             "name": "Dropout",
             "icon": "DRP",
             "category": "Core Components",
-            "description": "Dropout regularization layer.",
+            "description": "Regularization layer that randomly drops activations during training.",
             "accent": "purple",
             "api": [
                 {"key": "p", "label": "Probability", "type": "number", "value": 0.1},
@@ -421,7 +421,7 @@ def primitive_catalog():
             "name": "BOLT",
             "icon": "BLT",
             "category": "Core Components",
-            "description": "Bolt attention layer.",
+            "description": "BOLT sequence-mixing layer for routed latent feature processing.",
             "accent": "blue",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -434,7 +434,7 @@ def primitive_catalog():
             "name": "VisualBOLT",
             "icon": "VBL",
             "category": "Core Components",
-            "description": "Vision Bolt layer.",
+            "description": "Vision BOLT layer for image and visual feature processing.",
             "accent": "cyan",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -442,22 +442,22 @@ def primitive_catalog():
                  "options": ["auto", "native", "pytorch"]},
             ],
         },
-        {"type":"linear","name":"Linear","icon":"LIN","category":"Core Blocks","description":"MLBricks linear projection","accent":"blue","api":[]},
-        {"type":"layernorm","name":"LayerNorm","icon":"LN","category":"Core Blocks","description":"MLBricks LayerNorm","accent":"orange","api":[]},
-        {"type":"rescontroller","name":"ResController","icon":"RSC","category":"Core Blocks","description":"Adaptive residual controller","accent":"cyan","api":[]},
-        {"type":"micro_ffn","name":"MicroVirtualFFN","icon":"MVF","category":"Core Blocks","description":"Micro virtual FFN","accent":"pink","api":[]},
-        {"type":"virtual_saffn","name":"VirtualStateAwareFFN","icon":"VSF","category":"Core Blocks","description":"Virtual state-aware FFN","accent":"pink","api":[]},
+        {"type":"linear","name":"Linear","icon":"LIN","category":"Core Blocks","description":"Linear projection layer for mapping features between dimensions.","accent":"blue","api":[]},
+        {"type":"layernorm","name":"LayerNorm","icon":"LN","category":"Core Blocks","description":"Layer Normalization for stabilizing activations across features.","accent":"orange","api":[]},
+        {"type":"rescontroller","name":"ResController","icon":"RSC","category":"Core Blocks","description":"Residual Controller for regulating residual update strength.","accent":"cyan","api":[]},
+        {"type":"micro_ffn","name":"MicroVirtualFFN","icon":"MVF","category":"Core Blocks","description":"Micro Feed-Forward Network for lightweight virtual refinement.","accent":"pink","api":[]},
+        {"type":"virtual_saffn","name":"VirtualStateAwareFFN","icon":"VSF","category":"Core Blocks","description":"Virtual State-Aware Feed-Forward Network for recurrent refinement.","accent":"pink","api":[]},
 
-        {"type":"elasticbit_runtime","name":"ElasticBit 4–32","icon":"EB","category":"Advanced","description":"Adaptive 4–32-bit CUDA matrix runtime","accent":"blue","api":[]},
-        {"type":"rope","name":"RoPE","icon":"RP","category":"Position","description":"Rotary position transform","accent":"purple","api":[]},
-        {"type":"learned_position","name":"Learned Position","icon":"LP","category":"Position","description":"Learned positional embedding","accent":"purple","api":[]},
-        {"type":"sinusoidal_position","name":"Sinusoidal Position","icon":"SP","category":"Position","description":"Sinusoidal positional encoding","accent":"purple","api":[]},
+        {"type":"elasticbit_runtime","name":"ElasticBit","icon":"EB","category":"Advanced","description":"Adaptive precision runtime for selecting efficient 4–32-bit storage.","accent":"blue","api":[]},
+        {"type":"rope","name":"RoPE","icon":"RP","category":"Position","description":"Rotary Positional Embedding for encoding token position through rotation.","accent":"purple","api":[]},
+        {"type":"learned_position","name":"Learned Position","icon":"LP","category":"Position","description":"Learned positional embedding for trainable sequence position information.","accent":"purple","api":[]},
+        {"type":"sinusoidal_position","name":"Sinusoidal Position","icon":"SP","category":"Position","description":"Sinusoidal positional encoding for deterministic sequence positions.","accent":"purple","api":[]},
         {
             "type": "lm_head",
             "name": "LM Head",
             "icon": "LM",
             "category": "Heads",
-            "description": "Language modeling output head.",
+            "description": "Language Modeling Head that projects hidden features into vocabulary logits.",
             "accent": "purple",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -472,7 +472,7 @@ def primitive_catalog():
             "name": "Classifier Head",
             "icon": "CLS",
             "category": "Heads",
-            "description": "Classification output head.",
+            "description": "Classification Head that maps model features to class scores.",
             "accent": "orange",
             "api": [
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
@@ -485,7 +485,7 @@ def primitive_catalog():
             "name": "Text Output",
             "icon": "OUT",
             "category": "Outputs",
-            "description": "Decode text from model outputs.",
+            "description": "Text output block for decoding generated tokens into readable text.",
             "accent": "green",
             "api": [
                 {"key": "max_new_tokens", "label": "Max New Tokens", "type": "number", "value": 64},
@@ -499,7 +499,7 @@ def primitive_catalog():
             "name": "Logits Output",
             "icon": "LOG",
             "category": "Outputs",
-            "description": "View logits or output scores.",
+            "description": "Output block for exposing model logits and prediction scores.",
             "accent": "blue",
             "api": [],
         },
