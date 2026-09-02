@@ -92,6 +92,11 @@ function __MLB_STUDIO_FACTORY__(){
     let bridgePollTimer=null;
     let bridgeAwaitTimer=null;
     let bridgeLastReady=false;
+    let bridgeLastProbeAt=0;
+    let bridgeDocumentsCache=null;
+    let bridgeDocumentsCacheAt=0;
+    const bridgeHostCache=new Map();
+    const bridgeControlCache=new Map();
     let runtimeStatusRedrawTimer=null;
     let modelBuildTimer=null;
     const workspaceScroll={model:{left:0,top:0},data:{left:0,top:0}};
@@ -1032,15 +1037,20 @@ function __MLB_STUDIO_FACTORY__(){
       return start;
     }
 
-    function bridgeDocuments(){
+    function bridgeDocuments(force=false){
+      const now=Date.now();
+      if(!force && bridgeDocumentsCache && (now-bridgeDocumentsCacheAt)<2500){
+        return bridgeDocumentsCache;
+      }
       const docs=[];
       const add=doc=>{if(doc && !docs.includes(doc))docs.push(doc);};
       add(document);
       try{add(window.parent && window.parent.document);}catch(_){}
       try{add(window.top && window.top.document);}catch(_){}
 
-      // Kaggle/Jupyter may render output and standard widgets in neighboring
-      // same-origin frames. Search accessible frame documents as a fallback.
+      // Kaggle/Jupyter may render output and widgets in neighboring same-origin
+      // frames. Enumerate those frames only on a cache refresh, never on every
+      // 250 ms progress poll.
       const parents=[...docs];
       parents.forEach(doc=>{
         try{
@@ -1049,6 +1059,8 @@ function __MLB_STUDIO_FACTORY__(){
           });
         }catch(_){}
       });
+      bridgeDocumentsCache=docs;
+      bridgeDocumentsCacheAt=now;
       return docs;
     }
 
@@ -1057,6 +1069,9 @@ function __MLB_STUDIO_FACTORY__(){
       try{
         const direct=rootNode.querySelector(selector);
         if(direct)return direct;
+        // Shadow-DOM traversal is expensive on large notebook pages. It is only
+        // used as a fallback after direct selectors fail, and bridge results are
+        // cached afterwards.
         const all=rootNode.querySelectorAll("*");
         for(const el of all){
           if(el.shadowRoot){
@@ -1068,25 +1083,46 @@ function __MLB_STUDIO_FACTORY__(){
       return null;
     }
 
-    function bridgeRoot(cls){
+    function bridgeRoot(cls,force=false){
       if(!cls)return null;
+      const cached=bridgeHostCache.get(cls);
+      if(!force && cached && cached.isConnected!==false)return cached;
+      bridgeHostCache.delete(cls);
       const selector="."+cls;
-      for(const doc of bridgeDocuments()){
+      const docs=bridgeDocuments(force);
+      // Cheap path first: widget host classes are normally in light DOM.
+      for(const doc of docs){
+        try{
+          const found=doc.querySelector(selector);
+          if(found){bridgeHostCache.set(cls,found);return found;}
+        }catch(_){}
+      }
+      // Rare fallback for notebook frontends that wrap widgets in shadow roots.
+      for(const doc of docs){
         const found=deepQuery(doc,selector);
-        if(found)return found;
+        if(found){bridgeHostCache.set(cls,found);return found;}
       }
       return null;
     }
 
-    function bridgeControl(cls,selector){
+    function bridgeControl(cls,selector,force=false){
       if(isPopout){
         if(selector==="button")return {__mlbBroadcastKind:cls===bridge?.stop?"stop":"run",click(){return true;}};
         if(selector==="textarea")return {value:lastProgressRaw||""};
       }
-      const host=bridgeRoot(cls);
+      const key=String(cls||"")+"|"+String(selector||"");
+      const cached=bridgeControlCache.get(key);
+      if(!force && cached && cached.isConnected!==false)return cached;
+      bridgeControlCache.delete(key);
+      const host=bridgeRoot(cls,force);
       if(!host)return null;
-      if(host.matches && host.matches(selector))return host;
-      return deepQuery(host,selector);
+      let control=null;
+      try{
+        if(host.matches && host.matches(selector))control=host;
+      }catch(_){}
+      if(!control)control=deepQuery(host,selector);
+      if(control)bridgeControlCache.set(key,control);
+      return control;
     }
 
     function setNativeValue(input,value){
@@ -1204,22 +1240,22 @@ function __MLB_STUDIO_FACTORY__(){
       }
     }
 
-    function bridgeReady(){
+    function bridgeReady(force=false){
       if(!bridge)return false;
       if(isPopout)return !!popoutHostConnected;
       return !!(
-        bridgeControl(bridge.state,"textarea") &&
-        (!bridge.command||bridgeControl(bridge.command,"textarea")) &&
-        bridgeControl(bridge.run,"button") &&
-        bridgeControl(bridge.stop,"button") &&
-        bridgeControl(bridge.progress,"textarea")
+        bridgeControl(bridge.state,"textarea",force) &&
+        (!bridge.command||bridgeControl(bridge.command,"textarea",force)) &&
+        bridgeControl(bridge.run,"button",force) &&
+        bridgeControl(bridge.stop,"button",force) &&
+        bridgeControl(bridge.progress,"textarea",force)
       );
     }
 
-    function updateKernelBadge(){
+    function updateKernelBadge(force=false){
       const badge=root.querySelector(".mlb-kernel-badge");
       if(!badge)return;
-      const ready=bridgeReady();
+      const ready=bridgeReady(force);
       bridgeLastReady=ready;
       badge.className="mlb-kernel-badge "+(ready?"connected":"offline");
       badge.innerHTML=ready
@@ -1829,10 +1865,9 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function pollBridgeProgress(){
-      updateKernelBadge();
-      if(!bridge)return;
+      if(!bridge || !bridgeLastReady)return;
       const input=bridgeControl(bridge.progress,"textarea");
-      if(!input)return;
+      if(!input){bridgeLastReady=false;return;}
       const raw=input.value||"";
       if(!raw || raw===lastProgressRaw)return;
       lastProgressRaw=raw;
@@ -1845,11 +1880,24 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function startBridgePolling(){
-      updateKernelBadge();
+      if(!bridge)return;
+      bridgeLastProbeAt=Date.now();
+      updateKernelBadge(true);
       if(bridgePollTimer)return;
       bridgePollTimer=setInterval(()=>{
-        pollBridgeProgress();
-        updateKernelBadge();
+        const now=Date.now();
+        if(bridgeLastReady){
+          pollBridgeProgress();
+          // Validate cached bridge nodes occasionally rather than scanning the
+          // notebook DOM on every progress tick.
+          if((now-bridgeLastProbeAt)>=5000){
+            bridgeLastProbeAt=now;
+            updateKernelBadge(false);
+          }
+        }else if((now-bridgeLastProbeAt)>=1200){
+          bridgeLastProbeAt=now;
+          updateKernelBadge(true);
+        }
       },250);
     }
 
@@ -7814,9 +7862,17 @@ function __MLB_STUDIO_FACTORY__(){
       if(isPopout)schedulePopoutStateSync();
     }
 
-    setupPopoutBridge();
-    draw();
-    startBridgePolling();
+    // Paint a lightweight shell before constructing the full Studio DOM. This
+    // keeps hosted notebook pages responsive while the first graph render is
+    // prepared.
+    root.innerHTML='<div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Loading workspace…</div></div>';
+    requestAnimationFrame(()=>{
+      setTimeout(()=>{
+        setupPopoutBridge();
+        draw();
+        startBridgePolling();
+      },0);
+    });
   }
 
   window.MLBricksBuilder={mount};

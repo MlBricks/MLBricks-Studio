@@ -40,3 +40,28 @@ def test_builder_html_no_longer_duplicates_popout_asset_payload(tmp_path, monkey
     # Original V1.0 output was ~1.5 MB because JS/CSS were embedded twice.
     assert len(html.encode("utf-8")) < 1_100_000
     assert "window.__MLB_STUDIO_JS_SOURCE__" in html
+
+
+def test_studio_import_does_not_eagerly_import_torch(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    project_root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(project_root / "src")
+    code = (
+        "import sys; import mlb_studio; "
+        "assert 'torch' not in sys.modules; "
+        "b=mlb_studio.Builder(); "
+        "assert 'torch' not in sys.modules"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr

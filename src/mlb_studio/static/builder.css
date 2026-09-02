@@ -3007,3 +3007,18 @@
 }
 .mlb-workspace-option:hover{background:#21364c;color:#fff}
 .mlb-workspace-option.active{background:#2878d4;color:#fff}
+
+/* Fast first-paint shell shown for one frame before the full Studio DOM mounts. */
+.mlb-startup-shell{
+  flex:1;min-height:0;display:flex;align-items:center;justify-content:center;gap:12px;
+  background:#0b1118;color:#8997a8;font-size:12px;letter-spacing:.02em
+}
+.mlb-startup-mark{
+  font-weight:900;letter-spacing:.08em;color:#d7dee7
+}
+.mlb-startup-text::after{
+  content:"";display:inline-block;width:14px;height:14px;margin-left:8px;vertical-align:-3px;
+  border:2px solid #334252;border-top-color:#d6a33d;border-radius:50%;
+  animation:mlb-startup-spin .75s linear infinite
+}
+@keyframes mlb-startup-spin{to{transform:rotate(360deg)}}

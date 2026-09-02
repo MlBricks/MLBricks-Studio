@@ -2,6 +2,7 @@ from __future__ import annotations
 import html
 import ast
 import importlib.util
+import importlib.metadata
 import json
 from pathlib import Path
 import uuid
@@ -12,6 +13,7 @@ import os
 import re
 import copy
 import shutil
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -28,10 +30,6 @@ from .version import __version__, FORMAT_VERSION
 from .api_registry import discover_mlbricks_api, refresh_component_api
 from .import_pool import IMPORT_POOL
 from .runner import execute_data_pipeline, validate_data_pipeline, PipelineValidationError, PipelineStopped
-from .model_runtime import (
-    train_builder_model, load_trained_for_generation, generate_text,
-    TrainingStopped, ModelCompileError,
-)
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -128,7 +126,12 @@ class Builder:
                     params["path"] = data_default
 
     def _detect_runtime_capabilities(self):
-        """Detect devices/runtime choices available in this Python session."""
+        """Detect runtime choices without importing PyTorch during Studio startup.
+
+        Importing torch can initialize CUDA and take many seconds on hosted notebook
+        runtimes.  Studio only needs lightweight device hints for the initial UI;
+        the real runtime validates the selected device when training/generation starts.
+        """
         devices = [
             {
                 "id": "auto",
@@ -143,55 +146,73 @@ class Builder:
                 "available": True,
             },
         ]
-        torch_version = None
-        cuda_version = None
-        try:
-            import torch
-            torch_version = getattr(torch, "__version__", None)
-            cuda_version = getattr(getattr(torch, "version", None), "cuda", None)
-            if torch.cuda.is_available():
-                for index in range(torch.cuda.device_count()):
-                    props = torch.cuda.get_device_properties(index)
-                    total_gb = round(float(props.total_memory) / (1024 ** 3), 1)
-                    devices.append({
-                        "id": f"cuda:{index}",
-                        "label": f"GPU {index} — {props.name} ({total_gb} GB)",
-                        "kind": "cuda",
-                        "index": index,
-                        "name": props.name,
-                        "memory_gb": total_gb,
-                        "compute_capability": f"{props.major}.{props.minor}",
-                        "available": True,
-                    })
-            try:
-                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                    devices.append({
-                        "id": "mps", "label": "Apple MPS GPU", "kind": "mps", "available": True
-                    })
-            except Exception:
-                pass
-            try:
-                xpu = getattr(torch, "xpu", None)
-                if xpu is not None and xpu.is_available():
-                    count = xpu.device_count()
-                    for index in range(count):
-                        name = xpu.get_device_name(index) if hasattr(xpu, "get_device_name") else f"XPU {index}"
-                        devices.append({
-                            "id": f"xpu:{index}", "label": f"XPU {index} — {name}",
-                            "kind": "xpu", "index": index, "name": name, "available": True
-                        })
-            except Exception:
-                pass
-        except Exception:
-            pass
 
-        hf_info = {"package_available": False, "token_found": False}
+        # Read installed package metadata without importing torch.
         try:
-            from huggingface_hub import get_token
-            hf_info["package_available"] = True
-            hf_info["token_found"] = bool(os.environ.get("HF_TOKEN") or get_token())
+            torch_version = importlib.metadata.version("torch")
         except Exception:
-            pass
+            torch_version = None
+
+        # nvidia-smi is much cheaper than importing torch/CUDA and gives enough
+        # information for the device selector.  Failure is harmless: Auto/CPU
+        # remain available and the runtime performs authoritative detection later.
+        cuda_version = None
+        nvidia_smi = shutil.which("nvidia-smi")
+        if nvidia_smi:
+            try:
+                proc = subprocess.run(
+                    [
+                        nvidia_smi,
+                        "--query-gpu=index,name,memory.total,compute_cap",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.25,
+                    check=False,
+                )
+                if proc.returncode == 0:
+                    for line in proc.stdout.splitlines():
+                        parts = [part.strip() for part in line.split(",")]
+                        if len(parts) < 2:
+                            continue
+                        try:
+                            index = int(parts[0])
+                        except Exception:
+                            index = len([d for d in devices if d.get("kind") == "cuda"])
+                        name = parts[1] or f"CUDA GPU {index}"
+                        memory_gb = None
+                        if len(parts) > 2:
+                            try:
+                                # nvidia-smi reports MiB.
+                                memory_gb = round(float(parts[2]) / 1024.0, 1)
+                            except Exception:
+                                pass
+                        compute = parts[3] if len(parts) > 3 and parts[3] else None
+                        suffix = f" ({memory_gb} GB)" if memory_gb is not None else ""
+                        device = {
+                            "id": f"cuda:{index}",
+                            "label": f"GPU {index} — {name}{suffix}",
+                            "kind": "cuda",
+                            "index": index,
+                            "name": name,
+                            "available": True,
+                        }
+                        if memory_gb is not None:
+                            device["memory_gb"] = memory_gb
+                        if compute:
+                            device["compute_capability"] = compute
+                        devices.append(device)
+            except Exception:
+                pass
+
+        hf_info = {
+            "package_available": importlib.util.find_spec("huggingface_hub") is not None,
+            "token_found": bool(
+                os.environ.get("HF_TOKEN")
+                or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+            ),
+        }
 
         return {
             "devices": devices,
@@ -705,6 +726,7 @@ class Builder:
 
     def train_model(self, model_id, *, progress_callback=None):
         """Compile and really train a supported Builder language model."""
+        from .model_runtime import train_builder_model
         entry = self._model_output(model_id)
         dataset_id = entry.get("selected_dataset_id")
         if not dataset_id:
@@ -740,6 +762,7 @@ class Builder:
 
     def generate_model(self, model_id, *, progress_callback=None):
         """Generate tokens from a trained Builder language model."""
+        from .model_runtime import load_trained_for_generation, generate_text
         entry = self._model_output(model_id)
         if not entry.get("weights_ready"):
             raise RuntimeError("This model has no trained/loaded weights yet.")
@@ -2383,12 +2406,21 @@ class Builder:
                     self.last_data_result = self.run_data_pipeline(
                         progress_callback=self._publish_bridge_progress,
                     )
-            except (PipelineStopped, TrainingStopped):
+            except PipelineStopped:
                 self._publish_bridge_progress({
                     "status":"stopped","runtime_kind":action,"overall":0,
                     "message":f"{action.title()} stopped."
                 })
             except Exception as exc:
+                # Keep model_runtime lazy at Studio startup. TrainingStopped is
+                # recognized by type name here rather than importing torch-backed
+                # runtime classes before the user starts a model operation.
+                if type(exc).__name__ == "TrainingStopped":
+                    self._publish_bridge_progress({
+                        "status":"stopped","runtime_kind":action,"overall":0,
+                        "message":f"{action.title()} stopped."
+                    })
+                    return
                 self.last_run_error = exc
                 self._publish_bridge_progress({
                     "status":"error","runtime_kind":action,"overall":0,

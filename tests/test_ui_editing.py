@@ -210,3 +210,25 @@ def test_connection_ports_are_excluded_from_generic_button_animation():
     css = _builder_css()
     assert 'b.classList.contains("mlb-port")' in js
     assert ':not(.mlb-port)' in css
+
+
+def test_kaggle_bridge_lookup_is_cached_and_not_full_dom_scanned_each_tick():
+    text = _builder_js()
+    assert "const bridgeHostCache=new Map();" in text
+    assert "const bridgeControlCache=new Map();" in text
+    assert "bridgeDocumentsCache" in text
+    assert "(now-bridgeLastProbeAt)>=5000" in text
+    assert "(now-bridgeLastProbeAt)>=1200" in text
+    # Progress polling should use cached controls and must not run the expensive
+    # readiness scan every 250 ms.
+    start = text.index("function pollBridgeProgress()")
+    end = text.index("function startBridgePolling()", start)
+    poll_block = text[start:end]
+    assert "updateKernelBadge()" not in poll_block
+
+
+def test_initial_studio_render_yields_for_first_paint():
+    text = _builder_js()
+    assert 'class="mlb-startup-shell"' in text
+    assert "requestAnimationFrame(()=>" in text
+    assert "setupPopoutBridge();\n        draw();\n        startBridgePolling();" in text
