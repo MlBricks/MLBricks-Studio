@@ -284,3 +284,19 @@ def test_library_subtext_is_clamped_to_two_lines():
     css = _builder_css()
     assert "-webkit-line-clamp:2;" in css
     assert "line-clamp:2;" in css
+
+
+def test_elasticbit_old_saved_label_is_normalized_at_display_time():
+    js = _builder_js()
+    assert 'node.type==="elasticbit_runtime"' in js
+    assert '/^ElasticBit(?:\\s+4[-–—]32)?$/i.test(saved)' in js
+    assert 'return "ElasticBit";' in js
+
+
+def test_logo_is_centered_over_left_sidebar():
+    css = _builder_css()
+    assert '.mlb-top-left>.mlb-logo{' in css
+    assert 'width:182px!important;' in css
+    assert 'justify-content:center!important;' in css
+    assert '.mlb-top-left>.mlb-logo .mlb-logo-brand{' in css
+    assert 'object-position:center center!important;' in css

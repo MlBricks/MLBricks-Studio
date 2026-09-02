@@ -3022,3 +3022,18 @@
   animation:mlb-startup-spin .75s linear infinite
 }
 @keyframes mlb-startup-spin{to{transform:rotate(360deg)}}
+
+
+/* V1.0 brand alignment: center the MLBricks Studio mark over the 210px sidebar. */
+.mlb-top-left>.mlb-logo{
+  width:182px!important;
+  min-width:182px!important;
+  max-width:182px!important;
+  flex:0 0 182px!important;
+  justify-content:center!important;
+  margin:0!important;
+}
+.mlb-top-left>.mlb-logo .mlb-logo-brand{
+  margin:0 auto!important;
+  object-position:center center!important;
+}

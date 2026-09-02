@@ -563,6 +563,10 @@ function __MLB_STUDIO_FACTORY__(){
 
     function nodeDisplayName(node){
       if(!node)return "Component";
+      if(node.type==="elasticbit_runtime"){
+        const saved=String(node.display_name||node.name||"").trim();
+        if(!saved || /^ElasticBit(?:\s+4[-–—]32)?$/i.test(saved))return "ElasticBit";
+      }
       if(node.display_name)return String(node.display_name);
       let base="";
       if(node.definition_id&&state.custom_components?.[node.definition_id]){

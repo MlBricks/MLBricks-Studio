@@ -71,6 +71,22 @@ class Builder:
                 item["api"] = real.get("parameters", item.get("api", []))
                 if real.get("description"):
                     item["description"] = real["description"]
+
+        # UI naming policy: keep the adaptive precision component branded simply
+        # as "ElasticBit". Older saved projects may still contain the historical
+        # "ElasticBit 4-32" / "ElasticBit 4–32" display label, so normalize
+        # those labels on load as well as the live catalog.
+        for item in self.catalog:
+            if item.get("type") == "elasticbit_runtime":
+                item["name"] = "ElasticBit"
+        for component in (self.state.get("components") or {}).values():
+            for node in component.get("nodes") or []:
+                if node.get("type") != "elasticbit_runtime":
+                    continue
+                for key in ("name", "display_name"):
+                    value = str(node.get(key) or "").strip()
+                    if value in {"ElasticBit 4-32", "ElasticBit 4–32", "ElasticBit 4—32"}:
+                        node[key] = "ElasticBit"
         self._instance_id = f"mlb_{uuid.uuid4().hex}"
         self._run_thread = None
         self._stop_event = threading.Event()
