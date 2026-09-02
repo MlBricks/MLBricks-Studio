@@ -163,3 +163,31 @@ def test_port_layout_labels_are_simple_and_clear():
     assert 'editorRow("Visual Port Mode"' not in js
     assert 'label:"Main / Skip / Extra"' not in js
     assert 'label:"Custom Named Ports"' not in js
+
+
+def test_blueprints_and_loaded_designs_start_with_workspace_collapsed():
+    text = _builder_js()
+    assert 'function collapseArtifactWorkspace()' in text
+    assert 'bottomView="outputs";' in text
+    assert 'bottomExpanded=false;' in text
+    assert 'collapseArtifactWorkspace();setStatus(entry.name+" loaded from Gallery.")' in text
+    assert 'collapseArtifactWorkspace();setStatus("TinyStories starter loaded.")' in text
+    assert 'collapseArtifactWorkspace();setStatus(spec.name+" loaded.")' in text
+    assert 'selected=null;pendingPort=null;collapseArtifactWorkspace();switchingWorkspace=true;' in text
+
+
+def test_successful_data_and_model_results_expand_output_workspace():
+    text = _builder_js()
+    assert 'function revealArtifactWorkspace(kind,artifactId=null)' in text
+    assert 'bottomExpanded=true;' in text
+    assert 'revealArtifactWorkspace("data",next.prepared_dataset.id);' in text
+    assert 'bottomExpanded=true;\n        outputDirectorySelection=entry.id;' in text
+
+
+def test_imported_or_searched_artifacts_stay_visible_after_completion():
+    text = _builder_js()
+    assert 'revealArtifactWorkspace(type==="data"?"data":"model",imported.length?imported[imported.length-1].id:null);' in text
+    assert 'if(loadedDataset)revealArtifactWorkspace("data",loadedDataset.id||null);' in text
+    assert 'else if(loadedModel)revealArtifactWorkspace("model",loadedModel.id||null);' in text
+    assert 'if(contentType==="dataset")revealArtifactWorkspace("data",restored.dataset?.id||null);' in text
+    assert 'else if(contentType==="model")revealArtifactWorkspace("model",restored.model?.id||null);' in text

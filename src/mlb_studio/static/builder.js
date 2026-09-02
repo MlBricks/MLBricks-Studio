@@ -380,6 +380,25 @@ function __MLB_STUDIO_FACTORY__(){
       return true;
     }
 
+    function collapseArtifactWorkspace(){
+      bottomView="outputs";
+      bottomExpanded=false;
+      outputDirectorySelection=null;
+    }
+
+    function revealArtifactWorkspace(kind,artifactId=null){
+      const workspace=kind==="data"?"data":"model";
+      state.active_workspace=workspace;
+      const ws=state.workspaces?.[workspace];
+      if(ws){
+        state.view_component_id=ws.view_component_id||ws.root_component_id;
+        state.breadcrumbs=cp(ws.breadcrumbs||[{id:ws.root_component_id,name:ws.name||workspaceName()}]);
+      }
+      bottomView="outputs";
+      bottomExpanded=true;
+      outputDirectorySelection=artifactId||null;
+    }
+
     function switchWorkspace(next){
       if(next===state.active_workspace)return;
       const oldKey=state.active_workspace||"model";
@@ -778,7 +797,7 @@ function __MLB_STUDIO_FACTORY__(){
       state.project={...(entry.project||{}),name:entry.name};
       state.breadcrumbs=[{id:rootId,name:entry.name}];
       state.workspaces.model.view_component_id=rootId;state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
-      selected=null;pendingPort=null;setStatus(entry.name+" loaded from Gallery.");draw();
+      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(entry.name+" loaded from Gallery.");draw();
     }
 
     function loadGalleryData(entry){
@@ -796,6 +815,7 @@ function __MLB_STUDIO_FACTORY__(){
       ws.view_component_id=rootId;ws.breadcrumbs=cp(state.breadcrumbs);
       selected=null;pendingPort=null;
       execution={status:"idle",overall:0,message:"Ready",nodes:{}};
+      collapseArtifactWorkspace();
       switchingWorkspace=true;
       setStatus(entry.name+" loaded from Gallery.");draw();
     }
@@ -1566,6 +1586,11 @@ function __MLB_STUDIO_FACTORY__(){
           delete state._runtime_command;
           ensureWorkspaces();
           selected=null;pendingPort=null;outputDirectorySelection=null;
+          const loadedDataset=next.hub_result?.dataset||null;
+          const loadedModel=next.hub_result?.model||null;
+          if(loadedDataset)revealArtifactWorkspace("data",loadedDataset.id||null);
+          else if(loadedModel)revealArtifactWorkspace("model",loadedModel.id||null);
+          else if(String(next.phase||"").includes("load_project"))collapseArtifactWorkspace();
         }
         if(next.message)setStatus(next.message);
         if(next.status==="done"||next.status==="error")setTimeout(draw,80);
@@ -1576,6 +1601,11 @@ function __MLB_STUDIO_FACTORY__(){
         if(next.state_replace){
           state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
           selected=null;pendingPort=null;outputDirectorySelection=null;
+          const restored=next.cloud_result?.restored||null;
+          const contentType=String(restored?.content_type||"");
+          if(contentType==="dataset")revealArtifactWorkspace("data",restored.dataset?.id||null);
+          else if(contentType==="model")revealArtifactWorkspace("model",restored.model?.id||null);
+          else if(next.phase==="cloud_load")collapseArtifactWorkspace();
         }
         if(next.message)setStatus(next.message);
         if(next.status==="done"||next.status==="error")setTimeout(draw,80);
@@ -1592,11 +1622,8 @@ function __MLB_STUDIO_FACTORY__(){
           selected=null;pendingPort=null;
           if(next.local_import){
             const type=next.local_import_type||"model";
-            state.active_workspace=type==="data"?"data":"model";
-            bottomView="outputs";
-            bottomExpanded=false;
             const imported=next.local_import.imported||[];
-            outputDirectorySelection=imported.length?imported[imported.length-1].id:null;
+            revealArtifactWorkspace(type==="data"?"data":"model",imported.length?imported[imported.length-1].id:null);
           }else{
             outputDirectorySelection=null;
           }
@@ -1632,12 +1659,13 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(next.prepared_dataset){
         const changed=upsertPreparedDataset(next.prepared_dataset);
-        if(changed){
-          if(next.prepared_dataset.output_node_id)selected=next.prepared_dataset.output_node_id;
+        revealArtifactWorkspace("data",next.prepared_dataset.id);
+        if(next.prepared_dataset.output_node_id)selected=next.prepared_dataset.output_node_id;
+        if(changed||next.status==="done"){
           setStatus("Data ready: "+next.prepared_dataset.name+" · "+compactDatasetSummary(next.prepared_dataset));
-          draw();
-          return;
         }
+        draw();
+        return;
       }
 
       root.querySelectorAll(".mlb-node").forEach(card=>{
@@ -6550,6 +6578,7 @@ function __MLB_STUDIO_FACTORY__(){
       };
       selected=null;pendingPort=null;
       execution={status:"idle",overall:0,message:"Ready",nodes:{}};
+      collapseArtifactWorkspace();
       setStatus("Default pipeline restored: Hugging Face → Clean → Train/Val/Test → Tokenize → Prepared Dataset.");
       switchingWorkspace=true;
       draw();
@@ -6606,7 +6635,7 @@ function __MLB_STUDIO_FACTORY__(){
       const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
       state.components[rootId]={id:rootId,name:"TinyStories 30M",kind:"model",revision:1,nodes,edges};
       syncModelSettingsToGraph(state.project.model_settings,state.project.model_settings);
-      selected=null;pendingPort=null;setStatus("TinyStories starter loaded.");draw();
+      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus("TinyStories starter loaded.");draw();
     }
 
     function loadSequentialPrebuiltModel(spec){
@@ -6623,7 +6652,7 @@ function __MLB_STUDIO_FACTORY__(){
       const head=makeNode(cat(catalog,"lm_head"));head.name="LM Head";head.params={...(head.params||{}),hidden_size:spec.dim,dim:spec.dim,vocab_size:spec.vocab,bias:false,tie_embeddings:true};
       const out=makeNode(cat(catalog,"text_output"));const nodes=[input,emb,core,norm,head,out];const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
       state.components[rootId]={id:rootId,name:spec.name,kind:"model",revision:1,nodes,edges};syncModelSettingsToGraph(state.project.model_settings,state.project.model_settings);
-      selected=null;pendingPort=null;setStatus(spec.name+" loaded.");draw();
+      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(spec.name+" loaded.");draw();
     }
 
     function loadStateAwareESA200M(){loadSequentialPrebuiltModel({name:"StateAware ESA 200M",parameters:"199,982,344",description:"Notebook-matched 8-layer StateAware ESA model",dataset:null,
@@ -6791,7 +6820,7 @@ function __MLB_STUDIO_FACTORY__(){
             ensureWorkspaces();
             if(!state.view_component_id||!state.components[state.view_component_id])state.view_component_id=state.root_component_id;
             if(!Array.isArray(state.breadcrumbs)||!state.breadcrumbs.length)state.breadcrumbs=[{id:state.root_component_id,name:state.project?.name||"Model"}];
-            selected=null;pendingPort=null;switchingWorkspace=true;
+            selected=null;pendingPort=null;collapseArtifactWorkspace();switchingWorkspace=true;
             setStatus((isBin?"Binary":"JSON")+" design loaded: "+file.name);
             draw();
           }catch(err){
