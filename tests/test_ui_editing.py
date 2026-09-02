@@ -355,3 +355,14 @@ def test_saffn_catalog_exposes_original_api_named_runtime_ports():
     ports = catalog["saffn"]["runtime_ports"]
     assert [p["id"] for p in ports["inputs"]] == ["x", "esa_update", "previous_esa", "previous_state"]
     assert [p["id"] for p in ports["outputs"]] == ["main", "state"]
+
+
+def test_model_build_validation_counts_named_and_skip_edges_as_real_connectivity():
+    js = _builder_js()
+    start = js.index("function validateModelBuild()")
+    end = js.index("function buildModel", start) if "function buildModel" in js[start:] else start + 7000
+    block = js[start:end]
+    assert 'const executionEdges=(model.edges||[]).filter(e=>byId.has(e.source)&&byId.has(e.target));' in block
+    assert 'executionEdges.forEach(e=>' in block
+    assert 'const mainEdges=(model.edges||[]).filter(e=>(e.kind||"main")==="main");' not in block
+    assert 'Model execution graph contains a cycle.' in block

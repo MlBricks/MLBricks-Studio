@@ -2714,7 +2714,10 @@ function __MLB_STUDIO_FACTORY__(){
         });
       }
       const byId=new Map(nodes.map(n=>[n.id,n]));
-      const mainEdges=(model.edges||[]).filter(e=>(e.kind||"main")==="main");
+      // Every graph edge represents a real tensor/API dependency. Named API
+      // ports and Skip/Extra lanes must count as connectivity just like Main.
+      // Restrict only to edges whose endpoints still exist in this model.
+      const executionEdges=(model.edges||[]).filter(e=>byId.has(e.source)&&byId.has(e.target));
       const inputTypes=new Set(["text_input","image_input","audio_input"]);
       const outputTypes=new Set(["text_output","logits_output","classifier","lm_head"]);
 
@@ -2724,11 +2727,9 @@ function __MLB_STUDIO_FACTORY__(){
       if(!outputs.length)errors.push({node_ids:[],message:"Add a model output/head before Build."});
 
       const degree=new Map(nodes.map(n=>[n.id,0]));
-      mainEdges.forEach(e=>{
-        if(byId.has(e.source)&&byId.has(e.target)){
-          degree.set(e.source,(degree.get(e.source)||0)+1);
-          degree.set(e.target,(degree.get(e.target)||0)+1);
-        }
+      executionEdges.forEach(e=>{
+        degree.set(e.source,(degree.get(e.source)||0)+1);
+        degree.set(e.target,(degree.get(e.target)||0)+1);
       });
       const disconnected=nodes.filter(n=>nodes.length>1 && (degree.get(n.id)||0)===0);
       if(disconnected.length){
@@ -2738,14 +2739,14 @@ function __MLB_STUDIO_FACTORY__(){
         });
       }
 
-      // Detect cycles on the Main lane, while allowing branches/parallel graphs.
+      // Detect cycles across the complete execution graph. A cycle through a
+      // named API/state port is still a compile-time cycle and must not be
+      // hidden merely because it is not on the legacy Main lane.
       const incoming=new Map(nodes.map(n=>[n.id,0]));
       const outgoing=new Map(nodes.map(n=>[n.id,[]]));
-      mainEdges.forEach(e=>{
-        if(byId.has(e.source)&&byId.has(e.target)){
-          incoming.set(e.target,(incoming.get(e.target)||0)+1);
-          outgoing.get(e.source).push(e.target);
-        }
+      executionEdges.forEach(e=>{
+        incoming.set(e.target,(incoming.get(e.target)||0)+1);
+        outgoing.get(e.source).push(e.target);
       });
       const queue=nodes.filter(n=>(incoming.get(n.id)||0)===0).map(n=>n.id);
       let visited=0;
@@ -2757,7 +2758,7 @@ function __MLB_STUDIO_FACTORY__(){
         });
       }
       if(visited!==nodes.length){
-        errors.push({node_ids:[],message:"Main model flow contains a cycle. Remove the cycle before Build."});
+        errors.push({node_ids:[],message:"Model execution graph contains a cycle. Remove the cycle before Build."});
       }
 
       return errors;

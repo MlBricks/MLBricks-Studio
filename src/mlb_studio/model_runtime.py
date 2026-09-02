@@ -915,7 +915,21 @@ class TensorGraph(nn.Module):
         )
 
     def _nearest_upstream_embedding(self, node_id, expected_shape):
-        queue=list(self.in_main.get(node_id,[]))+list(self.in_skip.get(node_id,[]))
+        def upstream_ids(nid):
+            ids=[]
+            ids.extend(self.in_main.get(nid,[]))
+            ids.extend(self.in_skip.get(nid,[]))
+            ids.extend(self.in_extra.get(nid,[]))
+            ids.extend(
+                edge.get("source")
+                for edge in self.in_named.get(nid,[])
+                if edge.get("source") in self.by_id
+            )
+            # Preserve graph order while avoiding duplicate traversal caused by
+            # one source feeding multiple named API arguments.
+            return list(dict.fromkeys(ids))
+
+        queue=upstream_ids(node_id)
         seen=set()
         while queue:
             current=queue.pop(0)
@@ -927,8 +941,7 @@ class TensorGraph(nn.Module):
                 weight=getattr(self.mods[current],"weight",None)
                 if weight is not None and tuple(weight.shape)==tuple(expected_shape):
                     return self.mods[current]
-            queue.extend(self.in_main.get(current,[]))
-            queue.extend(self.in_skip.get(current,[]))
+            queue.extend(upstream_ids(current))
         return None
 
     def _apply_weight_tying(self):

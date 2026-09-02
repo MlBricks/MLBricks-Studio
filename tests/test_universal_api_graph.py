@@ -285,3 +285,75 @@ def test_saffn_routes_four_named_inputs_and_state_output_without_tensorgraph_bra
     assert x.grad is not None
     assert graph.mods["s1"].scale.grad is not None
     assert graph.mods["s2"].scale.grad is not None
+
+
+class _FakeEmbedding(nn.Module):
+    def __init__(self, vocab_size, hidden_size):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(vocab_size, hidden_size))
+
+    def forward(self, input_ids):
+        return torch.nn.functional.embedding(input_ids, self.weight)
+
+
+class _FakeLMHead(nn.Module):
+    def __init__(self, hidden_size, vocab_size, bias=False):
+        super().__init__()
+        self.hidden_size = int(hidden_size)
+        self.vocab_size = int(vocab_size)
+        self.in_features = self.hidden_size
+        self.out_features = self.vocab_size
+        self.weight = nn.Parameter(torch.randn(vocab_size, hidden_size))
+        self.bias = None
+        self.tied_to = None
+
+    def tie_weights(self, embedding):
+        self.weight = embedding.weight
+        self.tied_to = embedding
+
+    def forward(self, x):
+        return torch.nn.functional.linear(x, self.weight, self.bias)
+
+
+def test_weight_tying_traverses_named_api_edges(monkeypatch):
+    """LM-head tying must see embeddings upstream through named SAFFN ports."""
+    from mlb_studio import api_graph_runtime, model_runtime
+
+    original = model_runtime.IMPORT_POOL.resolve_component
+
+    def resolve(key):
+        if key == "embedding":
+            return _FakeEmbedding
+        if key == "lm_head":
+            return _FakeLMHead
+        if key == "saffn":
+            return _FakeSAFFN
+        return original(key)
+
+    monkeypatch.setattr(model_runtime.IMPORT_POOL, "resolve_component", resolve)
+    # Both modules reference the same import pool singleton, but keep the intent
+    # explicit in case that implementation detail changes later.
+    monkeypatch.setattr(api_graph_runtime.IMPORT_POOL, "resolve_component", resolve)
+
+    nodes = [
+        {"id": "emb", "type": "embedding", "name": "Embedding", "params": {"vocab_size": 11, "embedding_dim": 3}},
+        {"id": "s", "type": "saffn", "name": "SAFFN", "params": {"d_model": 3, "state_dim": 3, "layer_index": 0, "total_layers": 1, "backend": "pytorch"}},
+        {"id": "head", "type": "lm_head", "name": "Head", "params": {"hidden_size": 3, "vocab_size": 11, "tie_embeddings": True}},
+    ]
+    edges = [
+        {"id": "x", "source": "emb", "target": "s", "kind": "named", "source_port": "main_out", "target_port": "named_in:x"},
+        {"id": "eu", "source": "emb", "target": "s", "kind": "named", "source_port": "main_out", "target_port": "named_in:esa_update"},
+        {"id": "pe", "source": "emb", "target": "s", "kind": "named", "source_port": "main_out", "target_port": "named_in:previous_esa"},
+        {"id": "ps", "source": "emb", "target": "s", "kind": "named", "source_port": "main_out", "target_port": "named_in:previous_state"},
+        {"id": "out", "source": "s", "target": "head", "kind": "main", "source_port": "named_out:main", "target_port": "main_in"},
+    ]
+
+    graph = TensorGraph(
+        nodes=nodes,
+        edges=edges,
+        custom_components={},
+        runtime={**_runtime(), "model_dim": 3},
+    )
+
+    assert graph.mods["head"].tied_to is graph.mods["emb"]
+    assert graph.mods["head"].weight is graph.mods["emb"].weight
