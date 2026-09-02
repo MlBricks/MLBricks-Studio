@@ -158,3 +158,16 @@ API_COMPONENTS.register(APIComponentContract(
         "backend": "backend",
     },
 ))
+
+# Multi-input proof: the existing Studio Main/Skip lanes map directly to the
+# original ResController API.  Main carries the update tensor; Skip carries
+# the residual stream.  TensorGraph does not need a ResController branch.
+API_COMPONENTS.register(APIComponentContract(
+    component_type="rescontroller",
+    import_key="rescontroller",
+    input_ports={"main": "update", "skip": "residual"},
+    output_ports={"main": None},
+    runtime_sources={
+        "backend": "backend",
+    },
+))

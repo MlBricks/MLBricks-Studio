@@ -4199,6 +4199,17 @@ function __MLB_STUDIO_FACTORY__(){
         samples.appendChild(sampleGrid);
         body.appendChild(samples);
 
+        const tests=makeSection("COMPILER TEST MODELS","3 ready","featured full-width compiler-tests");
+        const testGrid=document.createElement("div");testGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
+        const loadBoltTest=btn("Open Test","mlb-gallery-action sample");loadBoltTest.addEventListener("click",openAndClose(loadCompilerTestBOLT));
+        testGrid.appendChild(card("BOLT Direct API","Tiny · Dim 64 · Heads 4 · validates universal one-input API execution","TEST",[loadBoltTest]));
+        const loadEsaBoltTest=btn("Open Test","mlb-gallery-action sample");loadEsaBoltTest.addEventListener("click",openAndClose(loadCompilerTestESABOLT));
+        testGrid.appendChild(card("ESA → BOLT Pipeline","Tiny · Dim 64 · sequential original-API pipeline validation","TEST",[loadEsaBoltTest]));
+        const loadResTest=btn("Open Test","mlb-gallery-action sample");loadResTest.addEventListener("click",openAndClose(loadCompilerTestResController));
+        testGrid.appendChild(card("ResController Multi-Input","Tiny · Main + Skip · validates update/residual API argument routing","TEST",[loadResTest]));
+        tests.appendChild(testGrid);
+        body.appendChild(tests);
+
         const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
         if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Gallery will appear here."));}
         else{
@@ -6706,6 +6717,96 @@ function __MLB_STUDIO_FACTORY__(){
       setStatus("Default pipeline restored: Hugging Face → Clean → Train/Val/Test → Tokenize → Prepared Dataset.");
       switchingWorkspace=true;
       draw();
+    }
+
+    function compilerTestContext(spec){
+      checkpoint("Load "+spec.name);
+      rememberWorkspaceView();
+      state.active_workspace="model";
+      const rootId=state.workspaces.model.root_component_id;
+      state.root_component_id=rootId;
+      state.view_component_id=rootId;
+      state.project={
+        ...(state.project||{}),
+        name:spec.name,
+        context_length:spec.block||64,
+        batch_size:spec.batch||2,
+        model_settings:{
+          embedding_size:spec.dim||64,
+          heads:spec.heads||4,
+          block:spec.block||64,
+          default_batch:spec.batch||2,
+          vocab_size:spec.vocab||2048,
+          precision:spec.precision||"fp32"
+        },
+        dataset:"Compiler Test",
+        estimated_parameters:"Tiny test model",
+        description:spec.description||"Compiler/runtime validation model"
+      };
+      state.breadcrumbs=[{id:rootId,name:spec.name}];
+      state.workspaces.model.view_component_id=rootId;
+      state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
+      const input=makeNode(cat(catalog,"text_input"));configureTextInputForLatest(input);input.name="Test Text Input";
+      const emb=makeNode(cat(catalog,"embedding"));emb.name="Test Embedding";emb.params={...(emb.params||{}),vocab_size:spec.vocab||2048,embedding_dim:spec.dim||64,hidden_size:spec.dim||64,dim:spec.dim||64,dtype:"float32"};
+      const norm=makeNode(cat(catalog,"rmsnorm"));norm.name="Test RMSNorm";norm.params={...(norm.params||{}),normalized_shape:spec.dim||64,hidden_size:spec.dim||64,dim:spec.dim||64,eps:1e-6,elementwise_affine:true};
+      const head=makeNode(cat(catalog,"lm_head"));head.name="Test LM Head";head.params={...(head.params||{}),hidden_size:spec.dim||64,dim:spec.dim||64,vocab_size:spec.vocab||2048,bias:false,tie_embeddings:true};
+      const out=makeNode(cat(catalog,"text_output"));out.name="Test Output";
+      return {spec,rootId,input,emb,norm,head,out};
+    }
+
+    function commitCompilerTestModel(ctx,nodes,edges){
+      state.components[ctx.rootId]={id:ctx.rootId,name:ctx.spec.name,kind:"model",revision:1,nodes,edges};
+      syncModelSettingsToGraph(state.project.model_settings,state.project.model_settings);
+      selected=null;pendingPort=null;collapseArtifactWorkspace();
+      setStatus(ctx.spec.name+" loaded — ready for compiler/runtime testing.");
+      draw();
+    }
+
+    function loadCompilerTestBOLT(){
+      const ctx=compilerTestContext({
+        name:"TEST · BOLT Direct API",
+        description:"Tiny one-input/one-output model that validates the universal API executor → original BOLT API path.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const bolt=makeNode(cat(catalog,"bolt"));bolt.name="BOLT API Test";bolt.params={...(bolt.params||{}),dim:64,d_model:64,num_heads:4,latent_dim:16,kernel:"pytorch",backend:"pytorch"};
+      const nodes=[ctx.input,ctx.emb,bolt,ctx.norm,ctx.head,ctx.out];
+      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestESABOLT(){
+      const ctx=compilerTestContext({
+        name:"TEST · ESA → BOLT Pipeline",
+        description:"Tiny sequential API pipeline that validates ESA output flowing directly into BOLT, FFN, and the LM head.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const esa=makeNode(cat(catalog,"esa"));esa.name="ESA Test";esa.params={...(esa.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const bolt=makeNode(cat(catalog,"bolt"));bolt.name="BOLT Test";bolt.params={...(bolt.params||{}),dim:64,d_model:64,num_heads:4,latent_dim:16,kernel:"pytorch",backend:"pytorch"};
+      const ffn=makeNode(cat(catalog,"ffn"));ffn.name="FFN Test";ffn.params={...(ffn.params||{}),hidden_size:64,intermediate_size:128,activation:"gelu",dropout:0.0,bias:true,gated:false};
+      const nodes=[ctx.input,ctx.emb,esa,bolt,ffn,ctx.norm,ctx.head,ctx.out];
+      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestResController(){
+      const ctx=compilerTestContext({
+        name:"TEST · ResController Multi-Input",
+        description:"Tiny branched graph that validates Main → update and Skip → residual routing into the original ResController API.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const update=makeNode(cat(catalog,"bolt"));update.name="Update · BOLT";update.params={...(update.params||{}),dim:64,d_model:64,num_heads:4,latent_dim:16,kernel:"pytorch",backend:"pytorch"};
+      const rc=makeNode(cat(catalog,"rescontroller"));rc.name="ResController API Test";rc.params={...(rc.params||{}),update_ratio:0.20,stream_ratio:1.08,update_softness:8.0,stream_softness:8.0,eps:1e-12,backend:"pytorch"};
+      const nodes=[ctx.input,ctx.emb,update,rc,ctx.norm,ctx.head,ctx.out];
+      const edges=[
+        edge(ctx.input.id,ctx.emb.id),
+        edge(ctx.emb.id,update.id),
+        Object.assign(edge(update.id,rc.id,"main"),{source_port:"main_out",target_port:"main_in"}),
+        Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"}),
+        edge(rc.id,ctx.norm.id),
+        edge(ctx.norm.id,ctx.head.id),
+        edge(ctx.head.id,ctx.out.id)
+      ];
+      commitCompilerTestModel(ctx,nodes,edges);
     }
 
     function loadTinyStories(){

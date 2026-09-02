@@ -897,8 +897,9 @@ class TensorGraph(nn.Module):
         # Not silently faking execution for unsupported advanced blocks.
         raise ModelCompileError(
             f"Training compiler does not yet support component {node.get('name')!r} ({t}). "
-            "Supported today: API Function, Text Input/Output, Embedding, Learned/Sinusoidal Position, ESA, StateAware ESA Stack, SOUP, "
-            "RMSNorm, LayerNorm, Linear, FFN, Residual, Dropout, LM Head, nested custom components, and API-bound custom components. "
+            "Supported today: declarative MLBricks API components (including BOLT and ResController), API Function, Text Input/Output, "
+            "Embedding, Learned/Sinusoidal Position, ESA, StateAware ESA Stack, SOUP, RMSNorm, LayerNorm, Linear, FFN, Residual, "
+            "Dropout, LM Head, nested custom components, and API-bound custom components. "
             "ElasticBit is a post-training/inference runtime component, not a differentiable training layer."
         )
 
@@ -981,13 +982,69 @@ class TensorGraph(nn.Module):
             else: x=graph_input
             contract = API_COMPONENTS.get(t)
             if contract is not None:
-                if skip_sources or extra_sources or named_inputs:
-                    raise ModelCompileError(f"{node.get('name')} received ports that are not declared by its MLBricks API contract.")
-                result = contract.execute(mod, {"main": x})
+                declared=set(contract.input_ports)
+                contract_inputs={}
+
+                if "main" in declared:
+                    contract_inputs["main"] = x
+                elif main_sources:
+                    raise ModelCompileError(
+                        f"{node.get('name')} received a Main input, but its MLBricks API contract does not declare a Main port."
+                    )
+
+                if "skip" in declared:
+                    if len(skip_sources)>1:
+                        raise ModelCompileError(f"{node.get('name')} has {len(skip_sources)} Skip inputs; exactly one is allowed.")
+                    skip_value=edge_value(self.in_skip_edges[nid][0], "skip") if skip_sources else graph_skip
+                    if skip_value is None:
+                        api_arg=contract.input_ports.get("skip", "skip")
+                        raise ModelCompileError(
+                            f"{node.get('name')} requires the Skip input for MLBricks argument {api_arg!r}."
+                        )
+                    contract_inputs["skip"] = skip_value
+                elif skip_sources:
+                    raise ModelCompileError(
+                        f"{node.get('name')} received a Skip input, but its MLBricks API contract does not declare a Skip port."
+                    )
+
+                if "extra" in declared:
+                    if len(extra_sources)>1:
+                        raise ModelCompileError(f"{node.get('name')} has {len(extra_sources)} Extra inputs; exactly one is allowed.")
+                    extra_value=edge_value(self.in_extra_edges[nid][0], "extra") if extra_sources else graph_extra
+                    if extra_value is None:
+                        api_arg=contract.input_ports.get("extra", "extra")
+                        raise ModelCompileError(
+                            f"{node.get('name')} requires the Extra input for MLBricks argument {api_arg!r}."
+                        )
+                    contract_inputs["extra"] = extra_value
+                elif extra_sources:
+                    raise ModelCompileError(
+                        f"{node.get('name')} received an Extra input, but its MLBricks API contract does not declare an Extra port."
+                    )
+
+                undeclared_named=sorted(set(named_inputs)-declared)
+                if undeclared_named:
+                    raise ModelCompileError(
+                        f"{node.get('name')} received undeclared named input port(s): {', '.join(undeclared_named)}."
+                    )
+                for port in declared - {"main", "skip", "extra"}:
+                    if port not in named_inputs:
+                        api_arg=contract.input_ports.get(port, port)
+                        raise ModelCompileError(
+                            f"{node.get('name')} requires named input {port!r} for MLBricks argument {api_arg!r}."
+                        )
+                    contract_inputs[port]=named_inputs[port]
+
+                result = contract.execute(mod, contract_inputs)
                 y = result.get("main")
                 repeat=max(1,int(node.get("repeat") or 1))
                 for _ in range(1,repeat):
-                    result = contract.execute(mod, {"main": y})
+                    if "main" not in contract_inputs or "main" not in result:
+                        raise ModelCompileError(
+                            f"{node.get('name')} cannot Repeat because its MLBricks API contract has no Main input/output feedback path."
+                        )
+                    contract_inputs["main"] = y
+                    result = contract.execute(mod, contract_inputs)
                     y = result.get("main")
             elif t=="residual":
                 if len(skip_sources)!=1: raise ModelCompileError(f"Residual {node.get('name')} needs exactly one Skip input.")

@@ -98,3 +98,107 @@ def test_new_direct_component_can_join_executor_without_tensorgraph_branch(monke
     )
     x = torch.zeros(1, 2, 3)
     assert torch.equal(graph(x), torch.ones_like(x))
+
+
+class _FakeResController(nn.Module):
+    def __init__(self, update_ratio, stream_ratio=1.08, backend="auto", **kwargs):
+        super().__init__()
+        self.update_ratio = float(update_ratio)
+        self.stream_ratio = float(stream_ratio)
+        self.backend = backend
+
+    def forward(self, residual, update):
+        return residual + self.update_ratio * update
+
+
+def test_rescontroller_routes_main_and_skip_into_original_api_without_tensorgraph_branch(monkeypatch):
+    """Main -> update and Skip -> residual are routed by the declarative contract."""
+    from mlb_studio import api_graph_runtime
+
+    component_type = "__test_echo_rescontroller__"
+    API_COMPONENTS.register(APIComponentContract(
+        component_type=component_type,
+        import_key=component_type,
+        input_ports={"main": "x"},
+        output_ports={"main": None},
+    ))
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    def resolve(key):
+        if key == "rescontroller":
+            return _FakeResController
+        if key == component_type:
+            return _Echo
+        return original(key)
+    monkeypatch.setattr(api_graph_runtime.IMPORT_POOL, "resolve_component", resolve)
+
+    graph = TensorGraph(
+        nodes=[
+            {"id": "echo-rc", "type": component_type, "name": "Update", "params": {}},
+            {
+                "id": "res",
+                "type": "rescontroller",
+                "name": "ResController",
+                "params": {"update_ratio": 0.25, "stream_ratio": 1.08, "backend": "pytorch"},
+            },
+        ],
+        edges=[
+            {
+                "id": "main-edge",
+                "source": "echo-rc",
+                "target": "res",
+                "kind": "main",
+                "source_port": "main_out",
+                "target_port": "main_in",
+            },
+            {
+                "id": "skip-edge",
+                "source": "echo-rc",
+                "target": "res",
+                "kind": "residual",
+                "source_port": "skip_out",
+                "target_port": "skip_in",
+            },
+        ],
+        custom_components={},
+        runtime=_runtime(),
+    )
+
+    x = torch.zeros(1, 2, 3, requires_grad=True)
+    y = graph(x)
+    assert torch.allclose(y, torch.full_like(y, 1.25))
+    y.sum().backward()
+    assert x.grad is not None
+
+
+def test_rescontroller_requires_skip_residual_input(monkeypatch):
+    from mlb_studio import api_graph_runtime
+    from mlb_studio.model_runtime import ModelCompileError
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    monkeypatch.setattr(
+        api_graph_runtime.IMPORT_POOL,
+        "resolve_component",
+        lambda key: _FakeResController if key == "rescontroller" else original(key),
+    )
+
+    graph = TensorGraph(
+        nodes=[{
+            "id": "res",
+            "type": "rescontroller",
+            "name": "ResController",
+            "params": {"update_ratio": 0.25, "backend": "pytorch"},
+        }],
+        edges=[],
+        custom_components={},
+        runtime=_runtime(),
+    )
+
+    x = torch.randn(1, 2, 3)
+    try:
+        graph(x)
+    except ModelCompileError as exc:
+        assert "requires the Skip input" in str(exc)
+        assert "residual" in str(exc)
+    else:
+        raise AssertionError("ResController should require the residual Skip input")

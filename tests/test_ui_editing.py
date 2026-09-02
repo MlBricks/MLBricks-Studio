@@ -300,3 +300,16 @@ def test_logo_is_centered_over_left_sidebar():
     assert 'justify-content:center!important;' in css
     assert '.mlb-top-left>.mlb-logo .mlb-logo-brand{' in css
     assert 'object-position:center center!important;' in css
+
+
+def test_gallery_contains_tiny_compiler_test_models():
+    js = _builder_js()
+    assert 'COMPILER TEST MODELS' in js
+    assert 'TEST · BOLT Direct API' in js
+    assert 'TEST · ESA → BOLT Pipeline' in js
+    assert 'TEST · ResController Multi-Input' in js
+    assert 'loadCompilerTestBOLT' in js
+    assert 'loadCompilerTestESABOLT' in js
+    assert 'loadCompilerTestResController' in js
+    assert 'dim:64,heads:4,block:64,batch:2,vocab:2048' in js
+    assert 'Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"})' in js
