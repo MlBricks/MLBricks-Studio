@@ -191,3 +191,22 @@ def test_imported_or_searched_artifacts_stay_visible_after_completion():
     assert 'else if(loadedModel)revealArtifactWorkspace("model",loadedModel.id||null);' in text
     assert 'if(contentType==="dataset")revealArtifactWorkspace("data",restored.dataset?.id||null);' in text
     assert 'else if(contentType==="model")revealArtifactWorkspace("model",restored.model?.id||null);' in text
+
+
+def test_all_buttons_have_global_press_and_acknowledgement_feedback():
+    js = _builder_js()
+    css = _builder_css()
+    assert 'function actionButton(target)' in js
+    assert 'button.classList.add("mlb-button-pressed")' in js
+    assert 'queueMicrotask(()=>showActionAck(button))' in js
+    assert 'ack.textContent="✓ "+actionLabel(button);' in js
+    assert '.mlb-root button:not(:disabled):not(.mlb-port):active' in css
+    assert '.mlb-root button.mlb-button-pressed:not(:disabled):not(.mlb-port)' in css
+    assert '.mlb-action-ack.show' in css
+
+
+def test_connection_ports_are_excluded_from_generic_button_animation():
+    js = _builder_js()
+    css = _builder_css()
+    assert 'b.classList.contains("mlb-port")' in js
+    assert ':not(.mlb-port)' in css
