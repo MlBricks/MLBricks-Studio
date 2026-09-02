@@ -153,58 +153,30 @@ class Builder:
         except Exception:
             torch_version = None
 
-        # nvidia-smi is much cheaper than importing torch/CUDA and gives enough
-        # information for the device selector.  Failure is harmless: Auto/CPU
-        # remain available and the runtime performs authoritative detection later.
+        # Do not run nvidia-smi during Builder construction. Even a bounded
+        # subprocess can stall hosted notebooks while drivers wake up. Use only
+        # cheap environment/device-file hints for the initial selector; the real
+        # runtime performs authoritative CUDA discovery when execution starts.
         cuda_version = None
-        nvidia_smi = shutil.which("nvidia-smi")
-        if nvidia_smi:
-            try:
-                proc = subprocess.run(
-                    [
-                        nvidia_smi,
-                        "--query-gpu=index,name,memory.total,compute_cap",
-                        "--format=csv,noheader,nounits",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=1.25,
-                    check=False,
-                )
-                if proc.returncode == 0:
-                    for line in proc.stdout.splitlines():
-                        parts = [part.strip() for part in line.split(",")]
-                        if len(parts) < 2:
-                            continue
-                        try:
-                            index = int(parts[0])
-                        except Exception:
-                            index = len([d for d in devices if d.get("kind") == "cuda"])
-                        name = parts[1] or f"CUDA GPU {index}"
-                        memory_gb = None
-                        if len(parts) > 2:
-                            try:
-                                # nvidia-smi reports MiB.
-                                memory_gb = round(float(parts[2]) / 1024.0, 1)
-                            except Exception:
-                                pass
-                        compute = parts[3] if len(parts) > 3 and parts[3] else None
-                        suffix = f" ({memory_gb} GB)" if memory_gb is not None else ""
-                        device = {
-                            "id": f"cuda:{index}",
-                            "label": f"GPU {index} — {name}{suffix}",
-                            "kind": "cuda",
-                            "index": index,
-                            "name": name,
-                            "available": True,
-                        }
-                        if memory_gb is not None:
-                            device["memory_gb"] = memory_gb
-                        if compute:
-                            device["compute_capability"] = compute
-                        devices.append(device)
-            except Exception:
-                pass
+        cuda_hint = False
+        visible = str(os.environ.get("CUDA_VISIBLE_DEVICES", "")).strip()
+        nvidia_visible = str(os.environ.get("NVIDIA_VISIBLE_DEVICES", "")).strip()
+        if visible and visible not in {"-1", "none", "None"}:
+            cuda_hint = True
+        elif nvidia_visible and nvidia_visible.lower() not in {"none", "void"}:
+            cuda_hint = True
+        elif Path("/dev/nvidia0").exists():
+            cuda_hint = True
+        if cuda_hint:
+            devices.append({
+                "id": "cuda:0",
+                "label": "GPU — CUDA device",
+                "kind": "cuda",
+                "index": 0,
+                "name": "CUDA device",
+                "available": True,
+                "provisional": True,
+            })
 
         hf_info = {
             "package_available": importlib.util.find_spec("huggingface_hub") is not None,
@@ -2532,7 +2504,7 @@ class Builder:
 {warning}
 <div id="{html.escape(self._instance_id)}" class="mlb-root" data-mlb-studio-version="{html.escape(__version__)}"></div>
 <script>
-window.__MLB_STUDIO_CSS__ = document.getElementById({json.dumps(style_id)}).textContent;
+window.__MLB_STUDIO_CSS_ELEMENT__ = document.getElementById({json.dumps(style_id)});
 try {{ delete window.MLBricksBuilder; }} catch (e) {{ window.MLBricksBuilder = undefined; }}
 {js}
 window.MLBricksBuilder.mount(

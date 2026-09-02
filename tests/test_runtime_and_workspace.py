@@ -65,3 +65,13 @@ def test_studio_import_does_not_eagerly_import_torch(tmp_path):
         timeout=15,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_builder_startup_does_not_call_nvidia_smi():
+    source = (Path(__file__).resolve().parents[1] / "src/mlb_studio/builder.py").read_text(encoding="utf-8")
+    start = source.index("def _detect_runtime_capabilities")
+    end = source.index("    def to_dict", start)
+    block = source[start:end]
+    assert "nvidia-smi" in block
+    assert "subprocess.run(" not in block
+    assert 'Path("/dev/nvidia0").exists()' in block

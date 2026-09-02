@@ -212,23 +212,42 @@ def test_connection_ports_are_excluded_from_generic_button_animation():
     assert ':not(.mlb-port)' in css
 
 
-def test_kaggle_bridge_lookup_is_cached_and_not_full_dom_scanned_each_tick():
+def test_kaggle_bridge_lookup_never_deep_scans_during_startup_polling():
     text = _builder_js()
     assert "const bridgeHostCache=new Map();" in text
     assert "const bridgeControlCache=new Map();" in text
-    assert "bridgeDocumentsCache" in text
-    assert "(now-bridgeLastProbeAt)>=5000" in text
-    assert "(now-bridgeLastProbeAt)>=1200" in text
-    # Progress polling should use cached controls and must not run the expensive
-    # readiness scan every 250 ms.
-    start = text.index("function pollBridgeProgress()")
-    end = text.index("function startBridgePolling()", start)
-    poll_block = text[start:end]
-    assert "updateKernelBadge()" not in poll_block
+    assert "function ensureBridgeForAction()" in text
+    assert "bridgeDocuments(force,false)" in text
+    assert "if(!allowDeep)return null;" in text
+    assert "bridgeDocuments(true,true)" in text
+    start = text.index("function startBridgePolling()")
+    end = text.index("function handlePopoutMessage", start)
+    block = text[start:end]
+    assert "updateKernelBadge(false,false)" in block
+    assert "updateKernelBadge(true,true)" not in block
+    assert "deepQuery(" not in block
 
 
-def test_initial_studio_render_yields_for_first_paint():
+def test_initial_studio_render_yields_for_first_paint_and_defers_bridge_work():
     text = _builder_js()
     assert 'class="mlb-startup-shell"' in text
     assert "requestAnimationFrame(()=>" in text
-    assert "setupPopoutBridge();\n        draw();\n        startBridgePolling();" in text
+    assert "draw();\n      const beginBackgroundBridge=()=>{" in text
+    assert 'if(typeof requestIdleCallback==="function")requestIdleCallback(beginBackgroundBridge,{timeout:1500});' in text
+
+
+def test_full_window_source_serialization_is_lazy():
+    text = _builder_js()
+    assert "window.__MLB_STUDIO_GET_JS_SOURCE__=function()" in text
+    tail = text[text.index("window.__MLB_STUDIO_FACTORY__=__MLB_STUDIO_FACTORY__;"):]
+    assert 'window.__MLB_STUDIO_JS_SOURCE__="("+__MLB_STUDIO_FACTORY__.toString()+")();";' in tail
+    assert tail.index("window.__MLB_STUDIO_GET_JS_SOURCE__=function()") < tail.index("__MLB_STUDIO_FACTORY__();")
+
+
+def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
+    text = _builder_js()
+    assert "Never observe `wrap`" in text
+    assert "[flow,canvas].forEach" in text
+    assert "[flow,wrap,canvas,root].forEach" not in text
+    assert "if(wrap.style.width!==nextW)wrap.style.width=nextW;" in text
+    assert "setTimeout(renderConnections,180);" in text
