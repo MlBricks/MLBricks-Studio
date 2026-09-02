@@ -1771,8 +1771,13 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(next.prepared_dataset){
         const changed=upsertPreparedDataset(next.prepared_dataset);
-        revealArtifactWorkspace("data",next.prepared_dataset.id);
-        if(next.prepared_dataset.output_node_id)selected=next.prepared_dataset.output_node_id;
+        // Finishing a data job must never steal navigation from Model Builder.
+        // Reveal the prepared dataset only when the user is already in the Data
+        // workspace; otherwise update the artifact registry silently in place.
+        if(state.active_workspace==="data"){
+          revealArtifactWorkspace("data",next.prepared_dataset.id);
+          if(next.prepared_dataset.output_node_id)selected=next.prepared_dataset.output_node_id;
+        }
         if(changed||next.status==="done"){
           setStatus("Data ready: "+next.prepared_dataset.name+" · "+compactDatasetSummary(next.prepared_dataset));
         }
@@ -2029,7 +2034,13 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function fullWindowPage(){
-      const assets=payload.popout_assets||{css:(window.__MLB_STUDIO_CSS_ELEMENT__?.textContent||window.__MLB_STUDIO_CSS__||""),js:(window.__MLB_STUDIO_JS_SOURCE__||(window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__():""))};
+      const assets=payload.popout_assets||{
+        css:(window.__MLB_STUDIO_CSS_ELEMENT__?.textContent||window.__MLB_STUDIO_CSS__||""),
+        // Always ask the current factory for its source. A notebook may render a
+        // newer Builder after an older one, and a cached source string must not
+        // make Full Window boot the older Gallery/runtime implementation.
+        js:(window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__():(window.__MLB_STUDIO_JS_SOURCE__||""))
+      };
       if(!assets.css||!assets.js)return null;
       const popPayload=cp(payload);
       delete popPayload.popout_assets;
@@ -2817,6 +2828,18 @@ function __MLB_STUDIO_FACTORY__(){
 
       let index=0;
       const finish=()=>{
+        // A model build is anchored to Model Builder. Background data progress,
+        // Full Window state sync, or another transient UI update must not leave
+        // the completed model displayed under Data Processing.
+        state.active_workspace="model";
+        const modelWs=state.workspaces?.model;
+        if(modelWs){
+          state.view_component_id=modelWs.view_component_id||modelWs.root_component_id;
+          state.breadcrumbs=cp(modelWs.breadcrumbs||[{id:modelWs.root_component_id,name:modelWs.name||"Model Builder"}]);
+        }
+        galleryWorkspace.open=false;
+        cloudWorkspace.open=false;
+        runtimePanel=null;
         const entry=registerBuiltModel();
         execution={
           status:"done",overall:100,message:"Model built: "+entry.name,
@@ -7999,6 +8022,9 @@ function __MLB_STUDIO_FACTORY__(){
   window.MLBricksBuilder={mount};
 }
 window.__MLB_STUDIO_FACTORY__=__MLB_STUDIO_FACTORY__;
+// Invalidate any source snapshot left by an older Builder rendered in the same
+// notebook page. Full Window must serialize this exact factory version.
+window.__MLB_STUDIO_JS_SOURCE__=null;
 window.__MLB_STUDIO_GET_JS_SOURCE__=function(){
   if(!window.__MLB_STUDIO_JS_SOURCE__){
     window.__MLB_STUDIO_JS_SOURCE__="("+__MLB_STUDIO_FACTORY__.toString()+")();";

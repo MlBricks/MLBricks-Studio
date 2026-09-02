@@ -176,12 +176,27 @@ def test_blueprints_and_loaded_designs_start_with_workspace_collapsed():
     assert 'selected=null;pendingPort=null;collapseArtifactWorkspace();switchingWorkspace=true;' in text
 
 
-def test_successful_data_and_model_results_expand_output_workspace():
+def test_successful_data_and_model_results_expand_output_workspace_without_stealing_navigation():
     text = _builder_js()
     assert 'function revealArtifactWorkspace(kind,artifactId=null)' in text
     assert 'bottomExpanded=true;' in text
-    assert 'revealArtifactWorkspace("data",next.prepared_dataset.id);' in text
+    prepared = text[text.index('if(next.prepared_dataset){'):text.index('root.querySelectorAll(".mlb-node")', text.index('if(next.prepared_dataset){'))]
+    assert 'if(state.active_workspace==="data"){' in prepared
+    assert 'revealArtifactWorkspace("data",next.prepared_dataset.id);' in prepared
+    assert 'Finishing a data job must never steal navigation from Model Builder.' in prepared
     assert 'bottomExpanded=true;\n        outputDirectorySelection=entry.id;' in text
+
+
+def test_model_build_completion_is_anchored_to_model_workspace():
+    text = _builder_js()
+    start = text.index('function requestModelBuild()')
+    end = text.index('function datasetModality', start)
+    block = text[start:end]
+    assert 'state.active_workspace="model";' in block
+    assert 'const modelWs=state.workspaces?.model;' in block
+    assert 'galleryWorkspace.open=false;' in block
+    assert 'cloudWorkspace.open=false;' in block
+    assert 'runtimePanel=null;' in block
 
 
 def test_imported_or_searched_artifacts_stay_visible_after_completion():
@@ -242,6 +257,20 @@ def test_full_window_source_serialization_is_lazy():
     tail = text[text.index("window.__MLB_STUDIO_FACTORY__=__MLB_STUDIO_FACTORY__;"):]
     assert 'window.__MLB_STUDIO_JS_SOURCE__="("+__MLB_STUDIO_FACTORY__.toString()+")();";' in tail
     assert tail.index("window.__MLB_STUDIO_GET_JS_SOURCE__=function()") < tail.index("__MLB_STUDIO_FACTORY__();")
+
+
+
+
+def test_full_window_invalidates_stale_frontend_source_snapshot():
+    text = _builder_js()
+    assert 'window.__MLB_STUDIO_JS_SOURCE__=null;' in text
+    assert 'Full Window must serialize this exact factory version.' in text
+    start = text.index('function fullWindowPage()')
+    end = text.index('function openFullWindow()', start)
+    block = text[start:end]
+    assert 'window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__()' in block
+    assert 'window.__MLB_STUDIO_JS_SOURCE__||(window.__MLB_STUDIO_GET_JS_SOURCE__' not in block
+    assert 'COMPILER TEST MODELS' in text
 
 
 def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
