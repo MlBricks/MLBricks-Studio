@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .import_pool import IMPORT_POOL
+from .api_graph_runtime import API_COMPONENTS
 from .security import safe_torch_load
 from .version import __version__
 
@@ -739,6 +740,12 @@ class TensorGraph(nn.Module):
         backend=str(self.runtime.get("backend") or "pytorch")
         precision=str(self.runtime.get("precision") or "fp16")
         if precision=="auto": precision="fp16" if resolve_device(device).type=="cuda" else "fp32"
+        contract = API_COMPONENTS.get(t)
+        if contract is not None:
+            try:
+                return contract.instantiate(node, {**self.runtime, "device": device, "backend": backend, "precision": precision})
+            except (TypeError, ValueError) as exc:
+                raise ModelCompileError(f"Could not construct {node.get('name') or t} from its MLBricks API contract: {exc}") from exc
         if t=="api_step":
             binding=deepcopy(node.get("api_binding") or {})
             step_params=deepcopy(node.get("params") or {})
@@ -972,7 +979,17 @@ class TensorGraph(nn.Module):
                 if len(main_sources)!=1: raise ModelCompileError(f"{node.get('name')} has {len(main_sources)} Main inputs; merge execution is not implemented.")
                 x=edge_value(self.in_main_edges[nid][0], "main")
             else: x=graph_input
-            if t=="residual":
+            contract = API_COMPONENTS.get(t)
+            if contract is not None:
+                if skip_sources or extra_sources or named_inputs:
+                    raise ModelCompileError(f"{node.get('name')} received ports that are not declared by its MLBricks API contract.")
+                result = contract.execute(mod, {"main": x})
+                y = result.get("main")
+                repeat=max(1,int(node.get("repeat") or 1))
+                for _ in range(1,repeat):
+                    result = contract.execute(mod, {"main": y})
+                    y = result.get("main")
+            elif t=="residual":
                 if len(skip_sources)!=1: raise ModelCompileError(f"Residual {node.get('name')} needs exactly one Skip input.")
                 if extra_sources: raise ModelCompileError(f"Residual {node.get('name')} does not accept an Extra input.")
                 y=mod(edge_value(self.in_skip_edges[nid][0], "skip"),x)
