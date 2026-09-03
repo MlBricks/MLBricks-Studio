@@ -276,7 +276,8 @@ def test_full_window_invalidates_stale_frontend_source_snapshot():
 def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
     text = _builder_js()
     assert "Never observe `wrap`" in text
-    assert "[flow,canvas].forEach" in text
+    assert "try{edgeObserver.observe(flow);}catch(_){}" in text
+    assert "[flow,canvas].forEach" not in text
     assert "[flow,wrap,canvas,root].forEach" not in text
     assert "if(wrap.style.width!==nextW)wrap.style.width=nextW;" in text
     assert "setTimeout(renderConnections,180);" in text
@@ -456,3 +457,12 @@ def test_complex_named_api_nodes_have_readable_graph_ui():
     assert '.mlb-edge-dim{opacity:.13!important}' in css
     assert '.mlb-edge-focus{' in css
     assert '.mlb-zoom-fit{' in css
+
+
+def test_universal_graph_renderer_uses_cached_geometry_and_no_canvas_resize_loop():
+    from pathlib import Path
+    js = (Path(__file__).parents[1] / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
+    assert 'const nodeById=new Map(nodeEls.map(el=>[el.dataset.nodeId,el]))' in js
+    assert 'const nodeRects=new Map(nodeEls.map(el=>[el,el.getBoundingClientRect()]))' in js
+    assert 'try{edgeObserver.observe(flow);}catch(_){}' in js
+    assert '[flow,canvas].forEach' not in js

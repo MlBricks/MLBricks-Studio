@@ -6798,9 +6798,9 @@ function __MLB_STUDIO_FACTORY__(){
 
     function drawEdges(wrap,flow){
       if(!wrap||!flow||!wrap.isConnected||!flow.isConnected)return;
-      // A draw() rebuild can be followed by font/layout/scrollbar changes in
-      // notebook hosts. Always replace the previous edge layer so connections
-      // reflect the final measured port positions instead of a stale first frame.
+      // Universal graphs have more named/state edges than the old 3-lane UI.
+      // Measure each node and port once per paint. Re-reading layout inside every
+      // edge/obstacle loop causes forced synchronous layout in notebook browsers.
       wrap.querySelectorAll(":scope > .mlb-edge-layer").forEach(el=>el.remove());
       const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
       svg.setAttribute("class","mlb-edge-layer");
@@ -6809,30 +6809,43 @@ function __MLB_STUDIO_FACTORY__(){
       svg.setAttribute("height",Math.max(wrap.clientHeight,scaledRect.height,650));
       wrap.appendChild(svg);
       const wr=wrap.getBoundingClientRect();
-      let skipRoute=0, extraRoute=0, namedRoute=0;
+      let skipRoute=0,extraRoute=0,namedRoute=0;
+
+      const nodeEls=[...flow.querySelectorAll(".mlb-node")];
+      const nodeById=new Map(nodeEls.map(el=>[el.dataset.nodeId,el]));
+      const nodeRects=new Map(nodeEls.map(el=>[el,el.getBoundingClientRect()]));
+      const portElCache=new Map();
+      const portRectCache=new Map();
 
       function namedSocketElement(nodeEl,side,key="",socket=""){
-        if(socket){
-          const exact=nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-socket="'+socket+'"]');
-          if(exact)return exact;
-        }
-        if(key){
+        const cacheKey=(nodeEl.dataset.nodeId||"")+"|"+side+"|"+key+"|"+socket;
+        if(portElCache.has(cacheKey))return portElCache.get(cacheKey);
+        let found=null;
+        if(socket)found=nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-socket="'+socket+'"]');
+        if(!found&&key){
           const candidates=[...nodeEl.querySelectorAll('.mlb-port[data-side="'+side+'"][data-port-mode="named"]')];
-          const match=candidates.find(el=>String(el.dataset.portKeys||"").split("|").filter(Boolean).includes(key));
-          if(match)return match;
+          found=candidates.find(el=>String(el.dataset.portKeys||"").split("|").filter(Boolean).includes(key))||null;
         }
-        return null;
+        portElCache.set(cacheKey,found);
+        return found;
+      }
+
+      function portElement(nodeEl,side,index,key="",socket=""){
+        const named=(key||socket)?namedSocketElement(nodeEl,side,key,socket):null;
+        return named||nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
       }
 
       function portRect(nodeEl,side,index,key="",socket=""){
-        const named=key||socket?namedSocketElement(nodeEl,side,key,socket):null;
-        const el=named||nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
-        return el ? el.getBoundingClientRect() : nodeEl.getBoundingClientRect();
+        const cacheKey=(nodeEl.dataset.nodeId||"")+"|"+side+"|"+index+"|"+key+"|"+socket;
+        if(portRectCache.has(cacheKey))return portRectCache.get(cacheKey);
+        const el=portElement(nodeEl,side,index,key,socket);
+        const rect=el?el.getBoundingClientRect():(nodeRects.get(nodeEl)||nodeEl.getBoundingClientRect());
+        portRectCache.set(cacheKey,rect);
+        return rect;
       }
 
       function portVisualSide(nodeEl,side,index,key="",socket=""){
-        const named=key||socket?namedSocketElement(nodeEl,side,key,socket):null;
-        const el=named||nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
+        const el=portElement(nodeEl,side,index,key,socket);
         return el?.dataset?.visualSide||(side==="in"?"left":"right");
       }
 
@@ -6847,34 +6860,37 @@ function __MLB_STUDIO_FACTORY__(){
         const [dx1,dy1]=sideVector(s1),[dx2,dy2]=sideVector(s2);
         const distance=Math.hypot(x2-x1,y2-y1);
         const handle=Math.max(24,Math.min(82,distance*.34));
-        const c1x=x1+dx1*handle,c1y=y1+dy1*handle;
-        const c2x=x2+dx2*handle,c2y=y2+dy2*handle;
-        return `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
+        return `M ${x1} ${y1} C ${x1+dx1*handle} ${y1+dy1*handle}, ${x2+dx2*handle} ${y2+dy2*handle}, ${x2} ${y2}`;
       }
 
-      function namedNodeAvoidingPath(a,b,x1,y1,s1,x2,y2,s2){
+      function obstacleBounds(a,b,x1,x2){
+        const ar=nodeRects.get(a),br=nodeRects.get(b);
         const left=Math.min(x1,x2),right=Math.max(x1,x2);
-        let top=Math.min(a.getBoundingClientRect().top-wr.top,b.getBoundingClientRect().top-wr.top);
-        let bottom=Math.max(a.getBoundingClientRect().bottom-wr.top,b.getBoundingClientRect().bottom-wr.top);
+        let top=Math.min(ar.top-wr.top,br.top-wr.top);
+        let bottom=Math.max(ar.bottom-wr.top,br.bottom-wr.top);
         let blocked=false;
-        flow.querySelectorAll(".mlb-node").forEach(nodeEl=>{
-          if(nodeEl===a||nodeEl===b)return;
-          const nr=nodeEl.getBoundingClientRect();
+        for(const nodeEl of nodeEls){
+          if(nodeEl===a||nodeEl===b)continue;
+          const nr=nodeRects.get(nodeEl);
           const nl=nr.left-wr.left,nrgt=nr.right-wr.left;
           if(nrgt>left+4&&nl<right-4){
             blocked=true;
             top=Math.min(top,nr.top-wr.top);
             bottom=Math.max(bottom,nr.bottom-wr.top);
           }
-        });
+        }
+        return {top,bottom,blocked};
+      }
+
+      function namedNodeAvoidingPath(a,b,x1,y1,s1,x2,y2,s2){
+        const bounds=obstacleBounds(a,b,x1,x2);
         const vertical=s1==="top"||s1==="bottom"||s2==="top"||s2==="bottom";
         const forward=x2>x1;
-        if(forward&&!blocked&&!vertical)return namedBezier(x1,y1,s1,x2,y2,s2);
-
+        if(forward&&!bounds.blocked&&!vertical)return namedBezier(x1,y1,s1,x2,y2,s2);
         const route=namedRoute++;
         let useBottom=s1==="bottom"||s2==="bottom";
         if((s1==="top"||s2==="top")&&!(s1==="bottom"||s2==="bottom"))useBottom=false;
-        const railY=useBottom?bottom+34+(route%6)*14:top-34-(route%6)*14;
+        const railY=useBottom?bounds.bottom+34+(route%6)*14:bounds.top-34-(route%6)*14;
         const [sdx,sdy]=sideVector(s1),[tdx,tdy]=sideVector(s2);
         const sx=x1+sdx*18,sy=y1+sdy*18;
         const tx=x2+tdx*18,ty=y2+tdy*18;
@@ -6882,102 +6898,57 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       function laneOf(e){
-        if(e.kind==="named"||String(e.target_port||"").startsWith("named_in:")) return "named";
-        if(e.kind==="residual") return 0;
-        if(e.kind==="aux") return 2;
+        if(e.kind==="named"||String(e.target_port||"").startsWith("named_in:"))return "named";
+        if(e.kind==="residual")return 0;
+        if(e.kind==="aux")return 2;
         const sp=String(e.source_port||"");
-        if(sp.includes("skip")||sp.includes("res_")) return 0;
-        if(sp.includes("extra")) return 2;
+        if(sp.includes("skip")||sp.includes("res_"))return 0;
+        if(sp.includes("extra"))return 2;
         return 1;
       }
 
-      (current(state).edges||[]).forEach(e=>{
-        const a=flow.querySelector('[data-node-id="'+e.source+'"]');
-        const b=flow.querySelector('[data-node-id="'+e.target+'"]');
-        if(!a||!b)return;
+      for(const e of (current(state).edges||[])){
+        const a=nodeById.get(e.source),b=nodeById.get(e.target);
+        if(!a||!b)continue;
         const lane=laneOf(e);
-        const sourcePortText=String(e.source_port||"");const targetPortText=String(e.target_port||"");
+        const sourcePortText=String(e.source_port||""),targetPortText=String(e.target_port||"");
         const sourceKey=sourcePortText.startsWith("named_out:")?sourcePortText.replace(/^named_out:/,""):"";
         const targetKey=targetPortText.startsWith("named_in:")?targetPortText.replace(/^named_in:/,""):"";
         const routeIndex=lane==="named"?1:lane;
         const sourceIndex=sourceKey?routeIndex:(sourcePortText.includes("skip")?0:(sourcePortText.includes("extra")?2:routeIndex));
         const targetIndex=targetKey?routeIndex:(targetPortText.includes("skip")?0:(targetPortText.includes("extra")?2:routeIndex));
-        const ar=portRect(a,"out",sourceIndex,sourceKey,e.source_socket||""), br=portRect(b,"in",targetIndex,targetKey,e.target_socket||"");
-        const x1=ar.left-wr.left+ar.width/2, y1=ar.top-wr.top+ar.height/2;
-        const x2=br.left-wr.left+br.width/2, y2=br.top-wr.top+br.height/2;
+        const ar=portRect(a,"out",sourceIndex,sourceKey,e.source_socket||""),br=portRect(b,"in",targetIndex,targetKey,e.target_socket||"");
+        const x1=ar.left-wr.left+ar.width/2,y1=ar.top-wr.top+ar.height/2;
+        const x2=br.left-wr.left+br.width/2,y2=br.top-wr.top+br.height/2;
         const p=document.createElementNS("http://www.w3.org/2000/svg","path");
         p.setAttribute("data-edge-id",e.id);
 
         if(lane==="named"){
           const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"");
           const targetVisual=portVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"");
-          // Named API connections respect the selected physical socket.
-          // Any connection that would cross an intervening card, travel
-          // backwards, or leave a top/bottom socket is pushed onto an outside
-          // rail. Wires therefore never need to jump across node bodies.
           p.setAttribute("d",namedNodeAvoidingPath(a,b,x1,y1,sourceVisual,x2,y2,targetVisual));
           p.setAttribute("class","mlb-edge-main mlb-edge-named mlb-edge-side-aware");
           p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);
         }else if(lane===0){
-          const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
-          const route=skipRoute++;
+          const ab=nodeRects.get(a),bb=nodeRects.get(b),route=skipRoute++;
           const topY=Math.min(ab.top-wr.top,bb.top-wr.top)-34-(route%4)*16;
           p.setAttribute("d",`M ${x1} ${y1} C ${x1+16} ${y1}, ${x1+16} ${topY}, ${x1+34} ${topY} L ${x2-34} ${topY} C ${x2-16} ${topY}, ${x2-16} ${y2}, ${x2} ${y2}`);
           p.setAttribute("class","mlb-edge-skip");
         }else if(lane===2){
-          const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
-          const route=extraRoute++;
+          const ab=nodeRects.get(a),bb=nodeRects.get(b),route=extraRoute++;
           const bottomY=Math.max(ab.bottom-wr.top,bb.bottom-wr.top)+34+(route%4)*16;
           p.setAttribute("d",`M ${x1} ${y1} C ${x1+16} ${y1}, ${x1+16} ${bottomY}, ${x1+34} ${bottomY} L ${x2-34} ${bottomY} C ${x2-16} ${bottomY}, ${x2-16} ${y2}, ${x2} ${y2}`);
           p.setAttribute("class","mlb-edge-extra");
         }else{
-          // Main lane routing:
-          // 1) Neighboring blocks connect directly through the empty gap between
-          //    their side ports.
-          // 2) Only links that jump across another block (or travel backwards)
-          //    are moved onto an outside rail.
-          const ab=a.getBoundingClientRect(), bb=b.getBoundingClientRect();
-          const left=Math.min(x1,x2), right=Math.max(x1,x2);
-          let lowest=Math.max(ab.bottom-wr.top,bb.bottom-wr.top);
-          let blocked=false;
-          flow.querySelectorAll(".mlb-node").forEach(nodeEl=>{
-            if(nodeEl===a||nodeEl===b)return;
-            const nr=nodeEl.getBoundingClientRect();
-            const nl=nr.left-wr.left, nrgt=nr.right-wr.left;
-            if(nrgt>left+4&&nl<right-4){
-              blocked=true;
-              lowest=Math.max(lowest,nr.bottom-wr.top);
-            }
-          });
-
+          const bounds=obstacleBounds(a,b,x1,x2);
           const forward=x2>x1;
-          if(forward&&!blocked){
-            // Clean side-to-side connector for adjacent blocks. The control
-            // points stay inside the inter-card gap, so the wire never dives
-            // under the cards just to connect immediate neighbors.
-            const gap=Math.max(1,x2-x1);
-            const handle=Math.max(12,Math.min(44,gap*0.42));
+          if(forward&&!bounds.blocked){
+            const gap=Math.max(1,x2-x1),handle=Math.max(12,Math.min(44,gap*.42));
             p.setAttribute("d",`M ${x1} ${y1} C ${x1+handle} ${y1}, ${x2-handle} ${y2}, ${x2} ${y2}`);
           }else{
-            // Long/return connections use a lower rail so they cannot cut
-            // through any component between source and target.
-            const routeY=lowest+24;
-            const dir=x2>=x1?1:-1;
-            const exitX=x1+dir*18;
-            const entryX=x2-dir*18;
-            const corner=10;
-            const down1=Math.max(y1+corner,routeY-corner);
-            const down2=Math.max(y2+corner,routeY-corner);
-            p.setAttribute("d",
-              `M ${x1} ${y1} `+
-              `C ${x1+dir*8} ${y1}, ${exitX} ${y1}, ${exitX} ${y1+corner} `+
-              `L ${exitX} ${down1} `+
-              `Q ${exitX} ${routeY} ${exitX+dir*corner} ${routeY} `+
-              `L ${entryX-dir*corner} ${routeY} `+
-              `Q ${entryX} ${routeY} ${entryX} ${down2} `+
-              `L ${entryX} ${y2+corner} `+
-              `C ${entryX} ${y2}, ${x2-dir*8} ${y2}, ${x2} ${y2}`
-            );
+            const routeY=bounds.bottom+24,dir=x2>=x1?1:-1,exitX=x1+dir*18,entryX=x2-dir*18,corner=10;
+            const down1=Math.max(y1+corner,routeY-corner),down2=Math.max(y2+corner,routeY-corner);
+            p.setAttribute("d",`M ${x1} ${y1} C ${x1+dir*8} ${y1}, ${exitX} ${y1}, ${exitX} ${y1+corner} L ${exitX} ${down1} Q ${exitX} ${routeY} ${exitX+dir*corner} ${routeY} L ${entryX-dir*corner} ${routeY} Q ${entryX} ${routeY} ${entryX} ${down2} L ${entryX} ${y2+corner} C ${entryX} ${y2}, ${x2-dir*8} ${y2}, ${x2} ${y2}`);
           }
           p.setAttribute("class","mlb-edge-main");
         }
@@ -6986,7 +6957,7 @@ function __MLB_STUDIO_FACTORY__(){
           else p.classList.add("mlb-edge-dim");
         }
         svg.appendChild(p);
-      });
+      }
     }
 
     function loadTextDataStarter(){
@@ -8133,19 +8104,20 @@ function __MLB_STUDIO_FACTORY__(){
         // Never observe `wrap`: renderConnections changes wrap dimensions itself,
         // which can create a ResizeObserver feedback loop in Kaggle/Jupyter.
         if(typeof ResizeObserver!=="undefined" && flow){
-          let edgeResizeScheduled=false;
-          const edgeObserver=new ResizeObserver(()=>{
+          let edgeResizeScheduled=false,lastEdgeWidth=-1,lastEdgeHeight=-1;
+          const edgeObserver=new ResizeObserver(entries=>{
             if(!flow||!flow.isConnected){edgeObserver.disconnect();return;}
+            const rect=entries?.[0]?.contentRect;
+            const w=Math.round(rect?.width||flow.offsetWidth),h=Math.round(rect?.height||flow.offsetHeight);
+            if(w===lastEdgeWidth&&h===lastEdgeHeight)return;
+            lastEdgeWidth=w;lastEdgeHeight=h;
             if(edgeResizeScheduled)return;
             edgeResizeScheduled=true;
-            requestAnimationFrame(()=>{
-              edgeResizeScheduled=false;
-              renderConnections();
-            });
+            requestAnimationFrame(()=>{edgeResizeScheduled=false;renderConnections();});
           });
-          [flow,canvas].forEach(target=>{
-            try{if(target)edgeObserver.observe(target);}catch(_){}
-          });
+          // Observe only the content flow. Observing the scroll canvas can feed
+          // scrollbar changes back into edge layout in Kaggle/Jupyter.
+          try{edgeObserver.observe(flow);}catch(_){}
         }
       }
 
