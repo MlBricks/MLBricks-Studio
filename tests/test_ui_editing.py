@@ -493,3 +493,21 @@ def test_custom_terminal_normalization_preserves_live_object_identity():
     assert "binding.input_ports=binding.input_ports.map((port,i)=>({" not in block
     assert "binding.output_ports=binding.output_ports.map((port,i)=>({" not in block
     assert "function resolveCustomTerminal(binding,port)" in js
+
+
+def test_custom_terminals_are_capped_at_four_per_side():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
+    assert 'const CUSTOM_TERMINAL_LIMIT_PER_SIDE=4;' in js
+    assert 'const CUSTOM_TERMINAL_SIDES=["top","right","bottom","left"];' in js
+    assert 'function customTerminalSideCount(binding,side,excludePort=null)' in js
+    assert 'function customTerminalSideHasRoom(binding,side,excludePort=null)' in js
+    assert 'function firstCustomTerminalSideWithRoom(binding,preferred="top",excludePort=null)' in js
+    assert 'function enforceCustomTerminalSideCapacity(binding)' in js
+    assert 'enforceCustomTerminalSideCapacity(binding);' in js
+    assert 'if(!customTerminalSideHasRoom(binding,next,live)){' in js
+    assert 'Maximum "+CUSTOM_TERMINAL_LIMIT_PER_SIDE+" extra terminals allowed on ' in js
+    assert 'addIn.disabled=!firstCustomTerminalSideWithRoom(binding,"top");' in js
+    assert 'addOut.disabled=!firstCustomTerminalSideWithRoom(binding,"top");' in js
+    assert 'Maximum reached: 4 custom terminals on each side.' in js
+    assert 'Add up to 4 extra terminals on each side' in js

@@ -5196,6 +5196,7 @@ function __MLB_STUDIO_FACTORY__(){
         if(Array.isArray(port.sockets))port.sockets=[...port.sockets];
         return port;
       });
+      enforceCustomTerminalSideCapacity(binding);
       binding.multi_output=!!binding.multi_output;
       if(!binding.output_map||typeof binding.output_map!=="object")binding.output_map={main:"0",skip:"1",extra:"2"};
       binding.output_map.main=String(binding.output_map.main??"0");
@@ -5227,9 +5228,12 @@ function __MLB_STUDIO_FACTORY__(){
       const n=index+1;return {id:uid("outport"),name:"output_"+n,selector:index===0?"auto":String(index),side,order};
     }
 
+    const CUSTOM_TERMINAL_LIMIT_PER_SIDE=4;
+    const CUSTOM_TERMINAL_SIDES=["top","right","bottom","left"];
+
     function normalizedTerminalSide(value){
       const side=String(value||"top").toLowerCase();
-      return ["top","right","bottom","left"].includes(side)?side:"top";
+      return CUSTOM_TERMINAL_SIDES.includes(side)?side:"top";
     }
     function customTerminalEntries(binding,side=null){
       const all=[
@@ -5243,9 +5247,39 @@ function __MLB_STUDIO_FACTORY__(){
     function resequenceCustomTerminals(binding,side){
       customTerminalEntries(binding,side).forEach((item,index)=>item.port.order=index);
     }
-    function nextCustomTerminalOrder(binding,side,excludePort=null){
+    function customTerminalSideCount(binding,side,excludePort=null){
       const sideKey=normalizedTerminalSide(side);
-      return customTerminalEntries(binding,sideKey).filter(item=>!(excludePort&&(item.port===excludePort||item.port.id===excludePort.id))).length;
+      return customTerminalEntries(binding,sideKey).filter(item=>!(excludePort&&(item.port===excludePort||String(item.port.id)===String(excludePort.id)))).length;
+    }
+    function customTerminalSideHasRoom(binding,side,excludePort=null){
+      return customTerminalSideCount(binding,side,excludePort)<CUSTOM_TERMINAL_LIMIT_PER_SIDE;
+    }
+    function firstCustomTerminalSideWithRoom(binding,preferred="top",excludePort=null){
+      const start=Math.max(0,CUSTOM_TERMINAL_SIDES.indexOf(normalizedTerminalSide(preferred)));
+      for(let offset=0;offset<CUSTOM_TERMINAL_SIDES.length;offset+=1){
+        const side=CUSTOM_TERMINAL_SIDES[(start+offset)%CUSTOM_TERMINAL_SIDES.length];
+        if(customTerminalSideHasRoom(binding,side,excludePort))return side;
+      }
+      return null;
+    }
+    function nextCustomTerminalOrder(binding,side,excludePort=null){
+      return customTerminalSideCount(binding,side,excludePort);
+    }
+    function enforceCustomTerminalSideCapacity(binding){
+      // Migrate older designs that placed more than four custom terminals on one
+      // surface. Stable terminal ids/objects are preserved, so graph edges remain
+      // attached. Overflow terminals spill clockwise into the next side that has
+      // room. New edits are prevented from exceeding the same limit.
+      CUSTOM_TERMINAL_SIDES.forEach(side=>{
+        const group=customTerminalEntries(binding,side);
+        group.slice(CUSTOM_TERMINAL_LIMIT_PER_SIDE).forEach(item=>{
+          const target=firstCustomTerminalSideWithRoom(binding,CUSTOM_TERMINAL_SIDES[(CUSTOM_TERMINAL_SIDES.indexOf(side)+1)%CUSTOM_TERMINAL_SIDES.length],item.port);
+          if(!target||target===side)return;
+          item.port.side=target;
+          item.port.order=nextCustomTerminalOrder(binding,target,item.port);
+        });
+      });
+      CUSTOM_TERMINAL_SIDES.forEach(side=>resequenceCustomTerminals(binding,side));
     }
     function resolveCustomTerminal(binding,port){
       const id=String(port?.id||"");
@@ -5274,6 +5308,10 @@ function __MLB_STUDIO_FACTORY__(){
       const prev=normalizedTerminalSide(live.side);
       const next=normalizedTerminalSide(nextSide);
       if(prev===next){live.side=next;resequenceCustomTerminals(binding,next);return false;}
+      if(!customTerminalSideHasRoom(binding,next,live)){
+        setStatus("Maximum "+CUSTOM_TERMINAL_LIMIT_PER_SIDE+" extra terminals allowed on "+next[0].toUpperCase()+next.slice(1)+".");
+        return false;
+      }
       const nextOrder=nextCustomTerminalOrder(binding,next,live);
       live.side=next;
       live.order=nextOrder;
@@ -5687,7 +5725,7 @@ function __MLB_STUDIO_FACTORY__(){
 
         if(binding.port_mode==="extended"){
           const terminalTitle=document.createElement("div");terminalTitle.className="mlb-section-title";terminalTitle.textContent="CUSTOM TERMINALS";body.appendChild(terminalTitle);
-          const terminalHelp=document.createElement("div");terminalHelp.className="mlb-api-path";terminalHelp.textContent="The six universal terminals stay fixed. Add extra inputs or outputs, choose Top / Right / Bottom / Left, then map each terminal to a function parameter or return value. Top/Bottom extras sit between the fixed pair; Left/Right extras sit below the fixed side terminal.";body.appendChild(terminalHelp);
+          const terminalHelp=document.createElement("div");terminalHelp.className="mlb-api-path";terminalHelp.textContent="The six universal terminals stay fixed. Add up to 4 extra terminals on each side, choose Top / Right / Bottom / Left, then map each terminal to a function parameter or return value. Top/Bottom extras sit between the fixed pair; Left/Right extras sit below the fixed side terminal.";body.appendChild(terminalHelp);
 
           const terminalSideOptions=[
             {value:"top",label:"Top"},{value:"right",label:"Right"},{value:"bottom",label:"Bottom"},{value:"left",label:"Left"}
@@ -5717,7 +5755,16 @@ function __MLB_STUDIO_FACTORY__(){
             box.appendChild(editorRow("Required",port.required===false?"false":"true",v=>port.required=v==="true",{select:true,options:["true","false"]}));
             appendMoveControls(box,port);body.appendChild(box);
           });
-          const addIn=btn("+ Add Input Terminal","mlb-create mlb-custom-add-arg");addIn.addEventListener("click",()=>{checkpoint("Add custom input terminal");const side="top";binding.input_ports.push(defaultUserInputPort(binding.input_ports.length,side,nextCustomTerminalOrder(binding,side)));draw();});body.appendChild(addIn);
+          const addIn=btn("+ Add Input Terminal","mlb-create mlb-custom-add-arg");
+          addIn.disabled=!firstCustomTerminalSideWithRoom(binding,"top");
+          addIn.addEventListener("click",()=>{
+            const side=firstCustomTerminalSideWithRoom(binding,"top");
+            if(!side){setStatus("Maximum reached: 4 custom terminals on each side.");draw();return;}
+            checkpoint("Add custom input terminal");
+            binding.input_ports.push(defaultUserInputPort(binding.input_ports.length,side,nextCustomTerminalOrder(binding,side)));
+            setStatus("Input terminal added on "+side[0].toUpperCase()+side.slice(1)+".");
+            draw();
+          });body.appendChild(addIn);
 
           const outTitle=document.createElement("div");outTitle.className="mlb-subsection-title";outTitle.textContent="EXTRA OUTPUT TERMINALS";body.appendChild(outTitle);
           (binding.output_ports||[]).forEach((port,index)=>{
@@ -5729,7 +5776,16 @@ function __MLB_STUDIO_FACTORY__(){
             box.appendChild(editorRow("Return Index / Key",port.selector??"auto",v=>port.selector=v));
             appendMoveControls(box,port);body.appendChild(box);
           });
-          const addOut=btn("+ Add Output Terminal","mlb-create mlb-custom-add-arg");addOut.addEventListener("click",()=>{checkpoint("Add custom output terminal");const side="top";binding.output_ports.push(defaultUserOutputPort(binding.output_ports.length,side,nextCustomTerminalOrder(binding,side)));draw();});body.appendChild(addOut);
+          const addOut=btn("+ Add Output Terminal","mlb-create mlb-custom-add-arg");
+          addOut.disabled=!firstCustomTerminalSideWithRoom(binding,"top");
+          addOut.addEventListener("click",()=>{
+            const side=firstCustomTerminalSideWithRoom(binding,"top");
+            if(!side){setStatus("Maximum reached: 4 custom terminals on each side.");draw();return;}
+            checkpoint("Add custom output terminal");
+            binding.output_ports.push(defaultUserOutputPort(binding.output_ports.length,side,nextCustomTerminalOrder(binding,side)));
+            setStatus("Output terminal added on "+side[0].toUpperCase()+side.slice(1)+".");
+            draw();
+          });body.appendChild(addOut);
         }else if(binding.port_mode==="named"){
           const legacy=document.createElement("div");legacy.className="mlb-api-path";legacy.textContent="Legacy custom-port layout detected. Switch Port Layout to Universal + Custom Terminals to keep these mappings while restoring the six fixed universal terminals.";body.appendChild(legacy);
         }
