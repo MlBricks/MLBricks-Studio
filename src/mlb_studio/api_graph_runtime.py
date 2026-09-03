@@ -63,6 +63,7 @@ class APIComponentContract:
     output_ports: Mapping[str, Any]
     parameter_aliases: Mapping[str, tuple[str, ...]] = None
     runtime_sources: Mapping[str, str] = None
+    input_initializers: Mapping[str, Mapping[str, Any]] = None
 
     def _parameter_value(self, key: str, spec: dict[str, Any], params: dict[str, Any], runtime: dict[str, Any]):
         aliases = (self.parameter_aliases or {}).get(key, ())
@@ -100,6 +101,50 @@ class APIComponentContract:
     def instantiate(self, node: dict[str, Any], runtime: dict[str, Any]):
         cls = IMPORT_POOL.resolve_component(self.import_key)
         return cls(**self.constructor_kwargs(node, runtime))
+
+
+    def initialize_input(self, port: str, inputs: Mapping[str, Any], node: Mapping[str, Any], module):
+        """Create a declarative default for an unconnected logical input.
+
+        This keeps first-depth initialization in the component contract instead
+        of adding component-specific branches to the graph executor. Supported
+        initializers are intentionally small and tensor-shape driven.
+        """
+        spec = dict((self.input_initializers or {}).get(port) or {})
+        if not spec:
+            return None, False
+
+        source_name = str(spec.get("source") or "")
+        source = inputs.get(source_name)
+        if source is None:
+            return None, False
+
+        kind = str(spec.get("kind") or "").lower()
+        if kind == "zeros_like":
+            return source.new_zeros(source.shape), True
+
+        if kind == "module_method":
+            method_name = str(spec.get("method") or "")
+            method = getattr(module, method_name, None)
+            if not callable(method):
+                return None, False
+            return method(source), True
+
+        if kind == "zeros_feature":
+            width = None
+            width_attr = str(spec.get("width_attr") or "")
+            if width_attr and hasattr(module, width_attr):
+                width = getattr(module, width_attr)
+            if width in (None, ""):
+                width_param = str(spec.get("width_param") or "")
+                if width_param:
+                    width = (node.get("params") or {}).get(width_param)
+            if width in (None, ""):
+                return None, False
+            shape = (*source.shape[:-1], int(width))
+            return source.new_zeros(shape), True
+
+        raise ValueError(f"Unsupported input initializer kind {kind!r} for {self.component_type}.{port}.")
 
     def execute(self, module, inputs: Mapping[str, Any]):
         kwargs = {
@@ -191,6 +236,18 @@ API_COMPONENTS.register(APIComponentContract(
     runtime_sources={
         "d_model": "model_dim",
         "backend": "backend",
+    },
+    input_initializers={
+        # At physical depth 0 there is no earlier signal/state. Studio supplies
+        # correctly shaped zeros only when these sockets are left unconnected.
+        "previous_esa": {"kind": "zeros_like", "source": "esa_update"},
+        "previous_state": {
+            # Use the original MLBricks helper so Studio does not duplicate
+            # StateAwareFFN's state-shape policy.
+            "kind": "module_method",
+            "source": "x",
+            "method": "initial_state",
+        },
     },
 ))
 

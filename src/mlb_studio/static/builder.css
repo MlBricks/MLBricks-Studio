@@ -3099,20 +3099,24 @@
 
 /* MLB Studio v12 — universal six-socket cards + hover signal names */
 .mlb-node.mlb-universal-six-socket{
+  /* Every node owns the same six physical sockets. Keep ordinary component
+     sizing; only named multi-signal API cards need the wider inspector body. */
+  overflow:visible!important;
+}
+.mlb-node.mlb-universal-six-socket.mlb-user-function-named{
   width:210px!important;
   min-width:210px!important;
   max-width:210px!important;
-  overflow:visible!important;
 }
-.mlb-node.mlb-universal-six-socket.mlb-top-ports-2,
-.mlb-node.mlb-universal-six-socket.mlb-bottom-ports-2{
+.mlb-node.mlb-universal-six-socket.mlb-user-function-named.mlb-top-ports-2,
+.mlb-node.mlb-universal-six-socket.mlb-user-function-named.mlb-bottom-ports-2{
   width:210px!important;
   min-width:210px!important;
   max-width:210px!important;
 }
 .mlb-port.unused-socket{
-  opacity:.22!important;
-  filter:saturate(.25);
+  opacity:.58!important;
+  filter:saturate(.45);
   cursor:default!important;
   box-shadow:0 0 0 1px rgba(255,255,255,.08)!important;
 }

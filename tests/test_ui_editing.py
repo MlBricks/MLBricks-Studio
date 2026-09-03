@@ -342,9 +342,9 @@ def test_gallery_contains_tiny_compiler_test_models():
     assert 'loadCompilerTestESABOLT' in js
     assert 'loadCompilerTestResController' in js
     assert 'loadCompilerTestSAFFN' in js
-    assert 'Previous Signal · Zero Init' in js
-    assert 'Previous State · Zero Init' in js
-    assert 'cat(catalog,"value_buffer")' in js
+    assert 'Previous Signal · Zero Init' not in js
+    assert 'Previous State · Zero Init' not in js
+    assert 'Layer 1 auto-initializes unconnected previous signal/state' in js
     assert 'const esa1=makeNode(cat(catalog,"esa"))' in js
     assert 'const esa2=makeNode(cat(catalog,"esa"))' in js
     assert 'const prevEsa=makeNode(cat(catalog,"esa"))' not in js
@@ -410,6 +410,9 @@ def test_complex_named_api_nodes_have_readable_graph_ui():
     assert 'openNamedPortHubPicker(portEl,items,item=>' in js
     assert 'data-port-keys="' in js
     assert 'data-tooltip="' in js
+    assert 'card.classList.add("mlb-universal-six-socket");' in js
+    assert 'const inputNames=["Top Input","Input Signal","Bottom Input"]' in js
+    assert 'const outputNames=["Top Output","Main Output","Bottom Output"]' in js
     assert '.mlb-node.mlb-universal-six-socket{' in css
     assert 'width:210px!important;' in css
     assert '.mlb-port-hub-picker{' in css

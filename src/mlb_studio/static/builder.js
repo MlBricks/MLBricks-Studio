@@ -2201,8 +2201,9 @@ function __MLB_STUDIO_FACTORY__(){
       const b=btn('',cls);setActionButtonContent(b,icon,label);return b;
     }
     function portLabel(side,index){
-      const lane=["Skip","Main","Extra"][index] || ("Lane "+(index+1));
-      return lane+" "+(side==="in"?"In":"Out");
+      const inputNames=["Top Input","Input Signal","Bottom Input"];
+      const outputNames=["Top Output","Main Output","Bottom Output"];
+      return (side==="in"?inputNames:outputNames)[index] || ((side==="in"?"Input":"Output")+" "+(index+1));
     }
 
     function selectedNode(){return current(state).nodes.find(n=>n.id===selected)||null;}
@@ -7056,28 +7057,24 @@ function __MLB_STUDIO_FACTORY__(){
     function loadCompilerTestSAFFN(){
       const ctx=compilerTestContext({
         name:"TEST · SAFFN Stateful API",
-        description:"Tiny two-depth SAFFN graph. Layer 1 initializes previous signal/state; Layer 2 receives the real previous signal and state from physical depth 1.",
+        description:"Tiny two-depth SAFFN graph. Layer 1 auto-initializes unconnected previous signal/state; Layer 2 receives the real previous signal and state from physical depth 1.",
         dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
       });
       const esa1=makeNode(cat(catalog,"esa"));esa1.name="ESA Layer 1";esa1.params={...(esa1.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
-      const prevSignal=makeNode(cat(catalog,"value_buffer"));prevSignal.name="Previous Signal · Zero Init";prevSignal.params={...(prevSignal.params||{}),mode:"zero_init",width:0};
-      const prevState=makeNode(cat(catalog,"value_buffer"));prevState.name="Previous State · Zero Init";prevState.params={...(prevState.params||{}),mode:"zero_init",width:16};
       const saffn1=makeNode(cat(catalog,"saffn"));saffn1.name="SAFFN Layer 1";saffn1.params={...(saffn1.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:0,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
       const esa2=makeNode(cat(catalog,"esa"));esa2.name="ESA Layer 2";esa2.params={...(esa2.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
       const saffn2=makeNode(cat(catalog,"saffn"));saffn2.name="SAFFN Layer 2";saffn2.params={...(saffn2.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:1,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
-      const nodes=[ctx.input,ctx.emb,esa1,prevSignal,prevState,saffn1,esa2,saffn2,ctx.norm,ctx.head,ctx.out];
+      const nodes=[ctx.input,ctx.emb,esa1,saffn1,esa2,saffn2,ctx.norm,ctx.head,ctx.out];
       const toNamed=(source,target,key,sourcePort="main_out",sourceSocket="",targetSocket="")=>Object.assign(edge(source.id,target.id,"named"),{source_port:sourcePort,target_port:"named_in:"+key,...(sourceSocket?{source_socket:sourceSocket}:{}),...(targetSocket?{target_socket:targetSocket}:{})});
       const fromNamed=(source,target,key,targetPort="main_in",sourceSocket="")=>Object.assign(edge(source.id,target.id,"named"),{source_port:"named_out:"+key,target_port:targetPort,...(sourceSocket?{source_socket:sourceSocket}:{})});
       const edges=[
         edge(ctx.input.id,ctx.emb.id),
         edge(ctx.emb.id,esa1.id),
-        edge(esa1.id,prevSignal.id),
-        edge(ctx.emb.id,prevState.id),
 
+        // First physical depth: Previous Signal and Previous State are left
+        // unconnected on purpose. The SAFFN contract supplies zero tensors.
         toNamed(ctx.emb,saffn1,"x","main_out","","top"),
         toNamed(esa1,saffn1,"esa_update","main_out","","back"),
-        toNamed(prevSignal,saffn1,"previous_esa","main_out","","bottom"),
-        toNamed(prevState,saffn1,"previous_state","main_out","","bottom"),
 
         fromNamed(saffn1,esa2,"main","main_in","front"),
         toNamed(saffn1,saffn2,"x","named_out:main","front","top"),
@@ -7826,6 +7823,10 @@ function __MLB_STUDIO_FACTORY__(){
           const runState=execution.nodes?.[n.id];
           const card=document.createElement("div");
           card.className="mlb-node"+(n.type==="api_step"?" mlb-api-step-node":"")+(selected===n.id?" selected":"")+(runState?" run-"+runState.status:"");card.dataset.type=n.type||"";
+          // Every Studio component uses the same physical 3-in / 3-out socket
+          // geometry: top, back/front, bottom. Logical API bindings remain
+          // component-specific underneath.
+          card.classList.add("mlb-universal-six-socket");
           card.dataset.nodeId=n.id;card.dataset.accent=info.accent||"purple";
           card.innerHTML='<span class="index">'+(i+1)+'</span>'+portButtons(n,"in")+'<div class="node-head"><div class="node-name"></div><div class="node-icon"></div></div><div class="node-desc"></div><div class="mlb-node-fields"></div><div class="node-meta"></div>'+portButtons(n,"out");
           if(runState){
@@ -7846,7 +7847,7 @@ function __MLB_STUDIO_FACTORY__(){
             const apiSteps=apiStepNodes(def);
             card.querySelector(".mlb-node-fields").innerHTML=isApi
               ?('<div class="mlb-mini-field"><span>Blocks</span><strong>'+((def?.nodes||[]).length||apiSteps.length||1)+'</strong></div>'+ '<div class="mlb-mini-field"><span>API</span><strong>'+apiSteps.length+' functions</strong></div>')
-              :('<div class="mlb-mini-field"><span>Architecture</span><strong>Open</strong></div>'+ '<div class="mlb-mini-field"><span>Ports</span><strong>Skip / Main / Extra</strong></div>');
+              :('<div class="mlb-mini-field"><span>Architecture</span><strong>Open</strong></div>'+ '<div class="mlb-mini-field"><span>Sockets</span><strong>3 In / 3 Out</strong></div>');
           }else card.querySelector(".mlb-node-fields").innerHTML=nodeMiniFields(n,info);
           card.querySelectorAll(".mlb-mini-field").forEach(row=>{
             const label=row.querySelector("span");
@@ -7859,8 +7860,8 @@ function __MLB_STUDIO_FACTORY__(){
             const metaBinding=ensureAPIStepObjectIds(n);
             meta.textContent=apiCallTypeLabel(metaBinding.call_type)+" · explicit graph connections";
           }else if(n.type==="custom"){
-            const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · lazy imports":"Nested Module · 3-lane interface";
-          }else meta.textContent=(apiInfo(n).public_name||n.type)+" · Skip / Main / Extra";
+            const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · universal 3×3 sockets":"Nested Module · universal 3×3 sockets";
+          }else meta.textContent=(apiInfo(n).public_name||n.type)+" · universal 3×3 sockets";
           card.querySelectorAll('.mlb-port').forEach(portEl=>{
             const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",name=portEl.dataset.portName||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
             const keys=String(portEl.dataset.portKeys||key||"").split("|").filter(Boolean);
@@ -7880,7 +7881,7 @@ function __MLB_STUDIO_FACTORY__(){
           });
           const namedIn=namedUserPorts(n,"in"),namedOut=namedUserPorts(n,"out");
           if(namedIn||namedOut){
-            card.classList.add("mlb-user-function-named","mlb-universal-six-socket");
+            card.classList.add("mlb-user-function-named");
             const inGroups=namedSocketGroups(n,"in"),outGroups=namedSocketGroups(n,"out");
             const allNamed=[...(namedIn||[]),...(namedOut||[])];
             const topSockets=(inGroups.top.length?1:0)+(outGroups.top.length?1:0);
@@ -7899,7 +7900,7 @@ function __MLB_STUDIO_FACTORY__(){
       // bars are intentionally disabled across every Studio workspace.
       if(pendingPort){
         const hint=document.createElement("div");hint.className="mlb-hint";
-        hint.textContent="Choose the matching lane: Top ↔ Top, Main ↔ Main, Bottom ↔ Bottom.";
+        hint.textContent="Choose a compatible socket: Top, Back/Front, or Bottom.";
         canvas.appendChild(hint);
       }
 

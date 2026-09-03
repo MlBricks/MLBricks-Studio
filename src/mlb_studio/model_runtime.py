@@ -1082,13 +1082,28 @@ class TensorGraph(nn.Module):
                     raise ModelCompileError(
                         f"{node.get('name')} received undeclared named input port(s): {', '.join(undeclared_named)}."
                     )
-                for port in declared - {"main", "skip", "extra"}:
-                    if port not in named_inputs:
-                        api_arg=contract.input_ports.get(port, port)
-                        raise ModelCompileError(
-                            f"{node.get('name')} requires named input {port!r} for MLBricks argument {api_arg!r}."
-                        )
-                    contract_inputs[port]=named_inputs[port]
+                named_declared = declared - {"main", "skip", "extra"}
+                # Resolve every explicitly connected named input first so a
+                # declarative initializer can reference another logical input
+                # regardless of Python set iteration order.
+                for port in named_declared:
+                    if port in named_inputs:
+                        contract_inputs[port]=named_inputs[port]
+
+                for port in named_declared:
+                    if port in contract_inputs:
+                        continue
+                    default_value, initialized = contract.initialize_input(
+                        port, contract_inputs, node, mod
+                    )
+                    if initialized:
+                        contract_inputs[port]=default_value
+                        continue
+
+                    api_arg=contract.input_ports.get(port, port)
+                    raise ModelCompileError(
+                        f"{node.get('name')} requires named input {port!r} for MLBricks argument {api_arg!r}."
+                    )
 
                 result = contract.execute(mod, contract_inputs)
                 y = result.get("main")

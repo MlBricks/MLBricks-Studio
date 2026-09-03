@@ -213,11 +213,67 @@ class _FakeSAFFN(nn.Module):
         self.backend = backend
         self.scale = nn.Parameter(torch.tensor(1.0))
 
+    def initial_state(self, x):
+        return x.new_zeros(*x.shape[:-1], self.state_dim)
+
     def forward(self, x, esa_update, previous_esa, previous_state):
+        self.last_previous_esa = previous_esa
+        self.last_previous_state = previous_state
         main = self.scale * (x + esa_update - previous_esa)
         state = previous_state + self.scale
         return main, state
 
+
+
+
+def test_saffn_first_depth_auto_initializes_unconnected_previous_inputs(monkeypatch):
+    """First physical depth needs no visible zero-init helper nodes."""
+    from mlb_studio import api_graph_runtime
+
+    source_type = "__test_saffn_auto_source__"
+    API_COMPONENTS.register(APIComponentContract(
+        component_type=source_type,
+        import_key=source_type,
+        input_ports={"main": "x"},
+        output_ports={"main": None},
+    ))
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    def resolve(key):
+        if key == "saffn":
+            return _FakeSAFFN
+        if key == source_type:
+            return _Echo
+        return original(key)
+    monkeypatch.setattr(api_graph_runtime.IMPORT_POOL, "resolve_component", resolve)
+
+    nodes = [
+        {"id": "x", "type": source_type, "name": "Input Signal", "params": {}},
+        {"id": "esa", "type": source_type, "name": "Current Signal", "params": {}},
+        {"id": "s", "type": "saffn", "name": "SAFFN 1", "params": {"d_model": 3, "state_dim": 2, "layer_index": 0, "total_layers": 1, "backend": "pytorch"}},
+    ]
+    edges = [
+        {"id": "x-edge", "source": "x", "target": "s", "kind": "named", "source_port": "main_out", "target_port": "named_in:x"},
+        {"id": "esa-edge", "source": "esa", "target": "s", "kind": "named", "source_port": "main_out", "target_port": "named_in:esa_update"},
+    ]
+
+    graph = TensorGraph(
+        nodes=nodes,
+        edges=edges,
+        custom_components={},
+        runtime={**_runtime(), "model_dim": 3},
+    )
+
+    x = torch.zeros(1, 4, 3, requires_grad=True)
+    y = graph(x)
+    saffn = graph.mods["s"]
+    assert y.shape == (1, 4, 3)
+    assert saffn.last_previous_esa.shape == (1, 4, 3)
+    assert torch.count_nonzero(saffn.last_previous_esa) == 0
+    assert saffn.last_previous_state.shape == (1, 4, 2)
+    assert torch.count_nonzero(saffn.last_previous_state) == 0
+    y.sum().backward()
+    assert x.grad is not None
 
 def test_saffn_routes_four_named_inputs_and_state_output_without_tensorgraph_branch(monkeypatch):
     """SAFFN's original 4-input / 2-output API is described only by its contract."""
