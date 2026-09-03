@@ -270,7 +270,7 @@ def test_full_window_invalidates_stale_frontend_source_snapshot():
     block = text[start:end]
     assert 'window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__()' in block
     assert 'window.__MLB_STUDIO_JS_SOURCE__||(window.__MLB_STUDIO_GET_JS_SOURCE__' not in block
-    assert 'COMPILER TEST MODELS' in text
+    assert 'COMPONENT TEST MODELS' in text
 
 
 def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
@@ -333,15 +333,34 @@ def test_logo_is_centered_over_left_sidebar():
 
 def test_gallery_contains_tiny_compiler_test_models():
     js = _builder_js()
-    assert 'COMPILER TEST MODELS' in js
+    assert 'COMPONENT TEST MODELS' in js
+    assert 'SPECIALIZED API PROBES' in js
+    assert 'TEST · Core Trainable Stack' in js
+    assert 'TEST · ESA Direct' in js
     assert 'TEST · BOLT Direct API' in js
     assert 'TEST · ESA → BOLT Pipeline' in js
+    assert 'TEST · Residual Add Multi-Input' in js
     assert 'TEST · ResController Multi-Input' in js
+    assert 'TEST · MicroVirtualFFN API' in js
     assert 'TEST · SAFFN Stateful API' in js
+    assert 'TEST · VirtualStateAwareFFN Stateful API' in js
+    assert 'TEST · SOUP Direct' in js
+    assert 'TEST · StateAware ESA Stack' in js
+    assert 'TEST · Previous Value Buffer' in js
+    assert 'PROBE · RoPE 4D API' in js
+    assert 'PROBE · ElasticBit Post-Training' in js
+    assert 'loadCompilerTestCoreStack' in js
+    assert 'loadCompilerTestESA' in js
     assert 'loadCompilerTestBOLT' in js
     assert 'loadCompilerTestESABOLT' in js
+    assert 'loadCompilerTestResidual' in js
     assert 'loadCompilerTestResController' in js
+    assert 'loadCompilerTestMicroFFN' in js
     assert 'loadCompilerTestSAFFN' in js
+    assert 'loadCompilerTestVirtualSAFFN' in js
+    assert 'loadCompilerTestSOUP' in js
+    assert 'loadCompilerTestStateAwareESAStack' in js
+    assert 'loadCompilerTestValueBuffer' in js
     assert 'Previous Signal · Zero Init' not in js
     assert 'Previous State · Zero Init' not in js
     assert 'Layer 1 auto-initializes unconnected previous signal/state' in js
@@ -379,6 +398,10 @@ def test_saffn_catalog_exposes_original_api_named_runtime_ports():
     assert [p["socket"] for p in ports["inputs"]] == ["top", "back", "top_aux", "bottom_aux"]
     assert ports["outputs"][0]["socket"] == "front"
     assert ports["outputs"][1]["sockets"] == ["top_aux", "bottom_aux"]
+
+
+    virtual_ports = catalog["virtual_saffn"]["runtime_ports"]
+    assert virtual_ports == ports
 
 
 def test_model_build_validation_counts_named_and_skip_edges_as_real_connectivity():

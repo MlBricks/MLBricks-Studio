@@ -536,3 +536,75 @@ def test_named_output_can_feed_normal_main_input_without_falling_back_to_graph_i
     y = graph(x)
     assert y.shape == (2, 4, 3)
     assert torch.equal(y, torch.full_like(x, 20))
+
+
+def test_virtual_saffn_reuses_declarative_stateful_contract(monkeypatch):
+    from mlb_studio import api_graph_runtime
+
+    source_type = "__test_virtual_saffn_source__"
+    API_COMPONENTS.register(APIComponentContract(
+        component_type=source_type,
+        import_key=source_type,
+        input_ports={"main": "x"},
+        output_ports={"main": None},
+    ))
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    def resolve(key):
+        if key == "virtual_saffn":
+            return _FakeSAFFN
+        if key == source_type:
+            return _Echo
+        return original(key)
+    monkeypatch.setattr(api_graph_runtime.IMPORT_POOL, "resolve_component", resolve)
+
+    nodes = [
+        {"id": "x", "type": source_type, "name": "Input", "params": {}},
+        {"id": "esa", "type": source_type, "name": "Current", "params": {}},
+        {"id": "v", "type": "virtual_saffn", "name": "Virtual SAFFN", "params": {"d_model": 3, "state_dim": 2, "layer_index": 0, "total_layers": 1, "backend": "pytorch"}},
+    ]
+    edges = [
+        {"id":"xv","source":"x","target":"v","kind":"named","source_port":"main_out","target_port":"named_in:x"},
+        {"id":"ev","source":"esa","target":"v","kind":"named","source_port":"main_out","target_port":"named_in:esa_update"},
+    ]
+    graph = TensorGraph(nodes=nodes, edges=edges, custom_components={}, runtime={**_runtime(), "model_dim": 3})
+    x = torch.zeros(1, 4, 3, requires_grad=True)
+    y = graph(x)
+    assert y.shape == x.shape
+    assert graph.mods["v"].last_previous_state.shape == (1, 4, 2)
+    y.sum().backward()
+    assert x.grad is not None
+
+
+def test_micro_virtual_ffn_uses_direct_one_input_contract(monkeypatch):
+    from mlb_studio import api_graph_runtime
+
+    class FakeMicro(nn.Module):
+        def __init__(self, d_model, hidden_dim=4, refinements=1, backend="auto", **kwargs):
+            super().__init__()
+            self.d_model = int(d_model)
+            self.hidden_dim = int(hidden_dim)
+            self.refinements = int(refinements)
+            self.backend = backend
+            self.scale = nn.Parameter(torch.tensor(2.0))
+
+        def forward(self, x, refinement_index=0):
+            return self.scale * x
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    monkeypatch.setattr(
+        api_graph_runtime.IMPORT_POOL,
+        "resolve_component",
+        lambda key: FakeMicro if key == "micro_ffn" else original(key),
+    )
+
+    graph = TensorGraph(
+        nodes=[{"id":"m","type":"micro_ffn","name":"MicroVirtualFFN","params":{"d_model":3,"hidden_dim":5,"refinements":2,"backend":"pytorch"}}],
+        edges=[], custom_components={}, runtime={**_runtime(), "model_dim": 3},
+    )
+    x = torch.ones(1, 2, 3, requires_grad=True)
+    y = graph(x)
+    assert torch.equal(y, torch.full_like(x, 2.0))
+    y.sum().backward()
+    assert x.grad is not None
+    assert graph.mods["m"].scale.grad is not None

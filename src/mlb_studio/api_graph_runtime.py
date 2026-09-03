@@ -251,3 +251,51 @@ API_COMPONENTS.register(APIComponentContract(
     },
 ))
 
+# VirtualStateAwareFFN preserves the exact StateAwareFFN forward contract and
+# adds internal virtual refinements. It therefore reuses the same named graph
+# wiring and first-depth initialization policy without a compiler branch.
+API_COMPONENTS.register(APIComponentContract(
+    component_type="virtual_saffn",
+    import_key="virtual_saffn",
+    input_ports={
+        "x": "x",
+        "esa_update": "esa_update",
+        "previous_esa": "previous_esa",
+        "previous_state": "previous_state",
+    },
+    output_ports={"main": 0, "state": 1},
+    parameter_aliases={
+        "d_model": ("dim", "hidden_size"),
+        "depth_embedding_dim": ("depth_dim",),
+    },
+    runtime_sources={
+        "d_model": "model_dim",
+        "backend": "backend",
+    },
+    input_initializers={
+        "previous_esa": {"kind": "zeros_like", "source": "esa_update"},
+        "previous_state": {
+            "kind": "module_method",
+            "source": "x",
+            "method": "initial_state",
+        },
+    },
+))
+
+# MicroVirtualFFN is a standard one-input/one-output original MLBricks API.
+# The default forward pass validates one configured refinement pass; callers
+# can still use the full ``refine`` API through a custom API Function node.
+API_COMPONENTS.register(APIComponentContract(
+    component_type="micro_ffn",
+    import_key="micro_ffn",
+    input_ports={"main": "x"},
+    output_ports={"main": None},
+    parameter_aliases={
+        "d_model": ("dim", "hidden_size"),
+    },
+    runtime_sources={
+        "d_model": "model_dim",
+        "backend": "backend",
+    },
+))
+

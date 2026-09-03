@@ -4225,18 +4225,33 @@ function __MLB_STUDIO_FACTORY__(){
         samples.appendChild(sampleGrid);
         body.appendChild(samples);
 
-        const tests=makeSection("COMPILER TEST MODELS","4 ready","featured full-width compiler-tests");
+        const tests=makeSection("COMPONENT TEST MODELS","12 ready","featured full-width compiler-tests");
         const testGrid=document.createElement("div");testGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
-        const loadBoltTest=btn("Open Test","mlb-gallery-action sample");loadBoltTest.addEventListener("click",openAndClose(loadCompilerTestBOLT));
-        testGrid.appendChild(card("BOLT Direct API","Tiny · Dim 64 · Heads 4 · validates universal one-input API execution","TEST",[loadBoltTest]));
-        const loadEsaBoltTest=btn("Open Test","mlb-gallery-action sample");loadEsaBoltTest.addEventListener("click",openAndClose(loadCompilerTestESABOLT));
-        testGrid.appendChild(card("ESA → BOLT Pipeline","Tiny · Dim 64 · sequential original-API pipeline validation","TEST",[loadEsaBoltTest]));
-        const loadResTest=btn("Open Test","mlb-gallery-action sample");loadResTest.addEventListener("click",openAndClose(loadCompilerTestResController));
-        testGrid.appendChild(card("ResController Multi-Input","Tiny · Main + Skip · validates update/residual API argument routing","TEST",[loadResTest]));
-        const loadSaffnTest=btn("Open Test","mlb-gallery-action sample");loadSaffnTest.addEventListener("click",openAndClose(loadCompilerTestSAFFN));
-        testGrid.appendChild(card("SAFFN Stateful API","Tiny · 2 physical depths · universal 3×3 sockets · previous signal/state routing","TEST",[loadSaffnTest]));
+        const addTest=(title,meta,loader)=>{const b=btn("Open Test","mlb-gallery-action sample");b.addEventListener("click",openAndClose(loader));testGrid.appendChild(card(title,meta,"TEST",[b]));};
+        addTest("ALL · Core Trainable Stack","Tiny · Embedding + positions + norms + Linear + FFN + Dropout + LM Head",loadCompilerTestCoreStack);
+        addTest("ESA Direct API","Tiny · original ESA forward/backward training path",loadCompilerTestESA);
+        addTest("BOLT Direct API","Tiny · Dim 64 · Heads 4 · universal one-input API execution",loadCompilerTestBOLT);
+        addTest("ESA → BOLT Pipeline","Tiny · sequential original-API mixer pipeline",loadCompilerTestESABOLT);
+        addTest("Residual Add Multi-Input","Tiny · FFN update + skip stream · original Residual API",loadCompilerTestResidual);
+        addTest("ResController Multi-Input","Tiny · Main + Skip · update/residual API argument routing",loadCompilerTestResController);
+        addTest("MicroVirtualFFN API","Tiny · MicroVirtualFFN update + residual merge",loadCompilerTestMicroFFN);
+        addTest("SAFFN Stateful API","Tiny · 2 physical depths · previous signal/state routing",loadCompilerTestSAFFN);
+        addTest("VirtualStateAwareFFN API","Tiny · 2 physical depths · virtual refinement + state routing",loadCompilerTestVirtualSAFFN);
+        addTest("SOUP Direct","Tiny · ESA mixer + FFN + Observer State Memory + Fusion",loadCompilerTestSOUP);
+        addTest("StateAware ESA Stack","Tiny · 2 integrated physical layers",loadCompilerTestStateAwareESAStack);
+        addTest("Previous Value Buffer","Tiny · hold-mode zero-parameter graph utility",loadCompilerTestValueBuffer);
         tests.appendChild(testGrid);
         body.appendChild(tests);
+
+        const probes=makeSection("SPECIALIZED API PROBES","4 adapters","featured full-width compiler-tests");
+        const probeGrid=document.createElement("div");probeGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
+        const addProbe=(title,meta,loader)=>{const b=btn("Open Probe","mlb-gallery-action");b.addEventListener("click",openAndClose(loader));probeGrid.appendChild(card(title,meta,"PROBE",[b]));};
+        addProbe("VESA Vision API","Image model · separate vision task adapter from causal-LM training",()=>loadCompilerProbeVision("vesa","VESA"));
+        addProbe("VisualBOLT Vision API","Image model · separate vision task adapter from causal-LM training",()=>loadCompilerProbeVision("visualbolt","VisualBOLT"));
+        addProbe("RoPE 4D API","Requires [B,H,T,D] Q/K-like tensor adapter",loadCompilerProbeRoPE);
+        addProbe("ElasticBit Runtime","Post-training/inference 4–32-bit runtime · not differentiable training",loadCompilerProbeElasticBit);
+        probes.appendChild(probeGrid);
+        body.appendChild(probes);
 
         const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
         if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Gallery will appear here."));}
@@ -7068,6 +7083,153 @@ function __MLB_STUDIO_FACTORY__(){
       const nodes=[ctx.input,ctx.emb,esa,bolt,ffn,ctx.norm,ctx.head,ctx.out];
       const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
       commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+
+    function loadCompilerTestCoreStack(){
+      const ctx=compilerTestContext({
+        name:"TEST · Core Trainable Stack",
+        description:"One tiny causal-LM stack covering Embedding, Learned/Sinusoidal Position, LayerNorm, Linear, FFN, Dropout, RMSNorm, and LM Head.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const learned=makeNode(cat(catalog,"learned_position"));learned.name="Learned Position Test";learned.params={...(learned.params||{}),dim:64,max_seq_len:128};
+      const sinusoidal=makeNode(cat(catalog,"sinusoidal_position"));sinusoidal.name="Sinusoidal Position Test";sinusoidal.params={...(sinusoidal.params||{}),dim:64,max_seq_len:128,base:10000.0};
+      const layernorm=makeNode(cat(catalog,"layernorm"));layernorm.name="LayerNorm Test";layernorm.params={...(layernorm.params||{}),normalized_shape:64,hidden_size:64,dim:64,eps:1e-5,elementwise_affine:true,bias:true};
+      const linear=makeNode(cat(catalog,"linear"));linear.name="Linear Test";linear.params={...(linear.params||{}),in_features:64,out_features:64,bias:true};
+      const ffn=makeNode(cat(catalog,"ffn"));ffn.name="FFN Test";ffn.params={...(ffn.params||{}),hidden_size:64,intermediate_size:128,activation:"gelu",dropout:0.0,bias:true,gated:false};
+      const dropout=makeNode(cat(catalog,"dropout"));dropout.name="Dropout Test";dropout.params={...(dropout.params||{}),p:0.0,dropout:0.0};
+      const nodes=[ctx.input,ctx.emb,learned,sinusoidal,layernorm,linear,ffn,dropout,ctx.norm,ctx.head,ctx.out];
+      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestESA(){
+      const ctx=compilerTestContext({
+        name:"TEST · ESA Direct",
+        description:"Tiny direct Entangled State Attention training path using the original MLBricks ESA API.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const esa=makeNode(cat(catalog,"esa"));esa.name="ESA Direct Test";esa.params={...(esa.params||{}),embd:64,dim:64,head:4,heads:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const nodes=[ctx.input,ctx.emb,esa,ctx.norm,ctx.head,ctx.out];
+      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestResidual(){
+      const ctx=compilerTestContext({
+        name:"TEST · Residual Add Multi-Input",
+        description:"Tiny branched graph validating the original Residual API with an FFN update and embedding skip stream.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const update=makeNode(cat(catalog,"ffn"));update.name="Residual Update · FFN";update.params={...(update.params||{}),hidden_size:64,intermediate_size:128,activation:"gelu",dropout:0.0,bias:true,gated:false};
+      const residual=makeNode(cat(catalog,"residual"));residual.name="Residual Add API Test";residual.params={...(residual.params||{}),dropout:0.0};
+      const nodes=[ctx.input,ctx.emb,update,residual,ctx.norm,ctx.head,ctx.out];
+      const edges=[
+        edge(ctx.input.id,ctx.emb.id),
+        edge(ctx.emb.id,update.id),
+        Object.assign(edge(update.id,residual.id,"main"),{source_port:"main_out",target_port:"main_in"}),
+        Object.assign(edge(ctx.emb.id,residual.id,"skip"),{source_port:"skip_out",target_port:"skip_in"}),
+        edge(residual.id,ctx.norm.id),edge(ctx.norm.id,ctx.head.id),edge(ctx.head.id,ctx.out.id)
+      ];
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestMicroFFN(){
+      const ctx=compilerTestContext({
+        name:"TEST · MicroVirtualFFN API",
+        description:"Tiny original-API MicroVirtualFFN update inside a residual path so its zero-update initialization remains trainable and shape-safe.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const micro=makeNode(cat(catalog,"micro_ffn"));micro.name="MicroVirtualFFN Test";micro.params={...(micro.params||{}),d_model:64,dim:64,hidden_dim:32,refinements:2,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const residual=makeNode(cat(catalog,"residual"));residual.name="Micro Residual Merge";residual.params={...(residual.params||{}),dropout:0.0};
+      const nodes=[ctx.input,ctx.emb,micro,residual,ctx.norm,ctx.head,ctx.out];
+      const edges=[
+        edge(ctx.input.id,ctx.emb.id),edge(ctx.emb.id,micro.id),
+        Object.assign(edge(micro.id,residual.id,"main"),{source_port:"main_out",target_port:"main_in"}),
+        Object.assign(edge(ctx.emb.id,residual.id,"skip"),{source_port:"skip_out",target_port:"skip_in"}),
+        edge(residual.id,ctx.norm.id),edge(ctx.norm.id,ctx.head.id),edge(ctx.head.id,ctx.out.id)
+      ];
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestVirtualSAFFN(){
+      const ctx=compilerTestContext({
+        name:"TEST · VirtualStateAwareFFN Stateful API",
+        description:"Tiny two-depth VirtualStateAwareFFN graph using the same Previous Signal / Previous State contract as SAFFN plus virtual refinements.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const esa1=makeNode(cat(catalog,"esa"));esa1.name="ESA Layer 1";esa1.params={...(esa1.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const vs1=makeNode(cat(catalog,"virtual_saffn"));vs1.name="Virtual SAFFN Layer 1";vs1.params={...(vs1.params||{}),d_model:64,dim:64,state_dim:16,depth_embedding_dim:8,layer_index:0,total_layers:2,virtual_refinements:2,virtual_hidden_dim:32,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const esa2=makeNode(cat(catalog,"esa"));esa2.name="ESA Layer 2";esa2.params={...(esa2.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const vs2=makeNode(cat(catalog,"virtual_saffn"));vs2.name="Virtual SAFFN Layer 2";vs2.params={...(vs2.params||{}),d_model:64,dim:64,state_dim:16,depth_embedding_dim:8,layer_index:1,total_layers:2,virtual_refinements:2,virtual_hidden_dim:32,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const nodes=[ctx.input,ctx.emb,esa1,vs1,esa2,vs2,ctx.norm,ctx.head,ctx.out];
+      const toNamed=(source,target,key,sourcePort="main_out",sourceSocket="",targetSocket="")=>Object.assign(edge(source.id,target.id,"named"),{source_port:sourcePort,target_port:"named_in:"+key,...(sourceSocket?{source_socket:sourceSocket}:{}),...(targetSocket?{target_socket:targetSocket}:{})});
+      const fromNamed=(source,target,key,targetPort="main_in",sourceSocket="")=>Object.assign(edge(source.id,target.id,"named"),{source_port:"named_out:"+key,target_port:targetPort,...(sourceSocket?{source_socket:sourceSocket}:{})});
+      const edges=[
+        edge(ctx.input.id,ctx.emb.id),edge(ctx.emb.id,esa1.id),
+        toNamed(ctx.emb,vs1,"x","main_out","","top"),toNamed(esa1,vs1,"esa_update","main_out","","back"),
+        fromNamed(vs1,esa2,"main","main_in","front"),
+        toNamed(vs1,vs2,"x","named_out:main","front","top"),toNamed(esa2,vs2,"esa_update","main_out","","back"),
+        toNamed(esa1,vs2,"previous_esa","main_out","","top_aux"),toNamed(vs1,vs2,"previous_state","named_out:state","bottom_aux","bottom_aux"),
+        fromNamed(vs2,ctx.norm,"main","main_in","front"),edge(ctx.norm.id,ctx.head.id),edge(ctx.head.id,ctx.out.id)
+      ];
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestSOUP(){
+      const ctx=compilerTestContext({
+        name:"TEST · SOUP Direct",
+        description:"Tiny one-layer SOUP training path with original ESA mixer, plain FFN, Observer State Memory, and Fusion.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const soup=makeNode(cat(catalog,"soup"));soup.name="SOUP API Test";soup.params={...(soup.params||{}),dim:64,width:64,depth:1,mixer:"esa",ffn:"ffn",mixer_config:{head:4,batch:2,block:64,auto_compile:false},ffn_config:{hidden:128},backend:"pytorch",precision:"fp32",memory_dim:16,fusion_hidden:96};
+      const nodes=[ctx.input,ctx.emb,soup,ctx.norm,ctx.head,ctx.out];
+      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestStateAwareESAStack(){
+      const ctx=compilerTestContext({
+        name:"TEST · StateAware ESA Stack",
+        description:"Tiny two-layer integrated StateAware ESA stack with original ESA, StateAwareFFN, and ResController modules.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const stack=makeNode(cat(catalog,"stateaware_esa_stack"));stack.name="StateAware ESA Stack Test";stack.params={...(stack.params||{}),dim:64,state_dim:16,layers:2,heads:4,block:64,batch:2,depth_dim:8,compass:4,update_ratio_start:0.20,update_ratio_end:0.14,stream_ratio:1.08,backend:"pytorch",precision:"fp32"};
+      const nodes=[ctx.input,ctx.emb,stack,ctx.norm,ctx.head,ctx.out];
+      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerTestValueBuffer(){
+      const ctx=compilerTestContext({
+        name:"TEST · Previous Value Buffer",
+        description:"Tiny graph validating the universal hold-mode Previous Value Buffer utility without trainable parameters.",
+        dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
+      });
+      const buffer=makeNode(cat(catalog,"value_buffer"));buffer.name="Previous Value Buffer Test";buffer.params={...(buffer.params||{}),mode:"hold",width:0};
+      const nodes=[ctx.input,ctx.emb,buffer,ctx.norm,ctx.head,ctx.out];
+      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerProbeRoPE(){
+      const ctx=compilerTestContext({name:"PROBE · RoPE 4D API",description:"RoPE expects [B,H,T,D]. This canvas probe is intentionally separated from causal-LM training until the Q/K tensor adapter is attached.",dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"});
+      const rope=makeNode(cat(catalog,"rope"));rope.name="RoPE API Probe";rope.params={...(rope.params||{}),dim:16,base:10000.0};
+      const nodes=[ctx.input,ctx.emb,rope,ctx.norm,ctx.head,ctx.out];const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerProbeElasticBit(){
+      const ctx=compilerTestContext({name:"PROBE · ElasticBit Post-Training",description:"ElasticBit is a post-training/inference precision runtime. This probe exposes it in Test Gallery without pretending it is a differentiable training layer.",dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"});
+      const eb=makeNode(cat(catalog,"elasticbit_runtime"));eb.name="ElasticBit Runtime Probe";eb.params={...(eb.params||{}),threshold:0.01,min_bits:4,max_bits:32,runtime_mode:"compact"};
+      const nodes=[ctx.input,ctx.emb,eb,ctx.norm,ctx.head,ctx.out];const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));commitCompilerTestModel(ctx,nodes,edges);
+    }
+
+    function loadCompilerProbeVision(type,label){
+      const ctx=compilerTestContext({name:"PROBE · "+label+" Vision API",description:"Tiny image-model API probe. Vision training uses a separate task adapter from the causal-LM trainer.",dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"});
+      const image=makeNode(cat(catalog,"image_input"));image.name="Test Image Input";
+      const vision=makeNode(cat(catalog,type));vision.name=label+" API Probe";vision.params={...(vision.params||{}),image_size:32,patch_size:8,in_channels:3,num_classes:10,dim:64,depth:1,heads:4,backend:"pytorch",engine:"Serpentine",position:"auto",scan:"cross",ffn:"standard",residual:"standard"};
+      const output=makeNode(cat(catalog,"logits_output"));output.name="Test Logits Output";
+      commitCompilerTestModel(ctx,[image,vision,output],[edge(image.id,vision.id),edge(vision.id,output.id)]);
     }
 
     function loadCompilerTestResController(){

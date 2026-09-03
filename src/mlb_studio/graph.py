@@ -489,7 +489,29 @@ def primitive_catalog():
         {"type":"layernorm","name":"LayerNorm","icon":"LN","category":"Core Blocks","description":"Layer Normalization for stabilizing activations across features.","accent":"orange","api":[]},
         {"type":"rescontroller","name":"ResController","icon":"RSC","category":"Core Blocks","description":"Residual Controller for regulating residual update strength.","accent":"cyan","api":[]},
         {"type":"micro_ffn","name":"MicroVirtualFFN","icon":"MVF","category":"Core Blocks","description":"Micro Feed-Forward Network for lightweight virtual refinement.","accent":"pink","api":[]},
-        {"type":"virtual_saffn","name":"VirtualStateAwareFFN","icon":"VSF","category":"Core Blocks","description":"Virtual State-Aware Feed-Forward Network for recurrent refinement.","accent":"pink","api":[]},
+        {
+            "type":"virtual_saffn",
+            "name":"VirtualStateAwareFFN",
+            "icon":"VSF",
+            "category":"Core Blocks",
+            "description":"Virtual State-Aware Feed-Forward Network for recurrent refinement.",
+            "accent":"pink",
+            # VirtualStateAwareFFN has the same original forward signature and
+            # state outputs as SAFFN, so it uses the same physical signal map.
+            "runtime_ports": {
+                "inputs": [
+                    {"id": "x", "name": "Input Signal", "socket": "top"},
+                    {"id": "esa_update", "name": "Current Signal", "socket": "back"},
+                    {"id": "previous_esa", "name": "Previous Signal", "socket": "top_aux"},
+                    {"id": "previous_state", "name": "Previous State", "socket": "bottom_aux"},
+                ],
+                "outputs": [
+                    {"id": "main", "name": "Main Output", "socket": "front"},
+                    {"id": "state", "name": "State Out", "sockets": ["top_aux", "bottom_aux"]},
+                ],
+            },
+            "api":[],
+        },
 
         {"type":"elasticbit_runtime","name":"ElasticBit","icon":"EB","category":"Advanced","description":"Adaptive precision runtime for selecting efficient 4–32-bit storage.","accent":"blue","api":[]},
         {"type":"rope","name":"RoPE","icon":"RP","category":"Position","description":"Rotary Positional Embedding for encoding token position through rotation.","accent":"purple","api":[]},
