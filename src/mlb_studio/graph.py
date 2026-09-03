@@ -392,14 +392,22 @@ def primitive_catalog():
                 # The ids below remain the exact MLBricks forward() keywords;
                 # only the visual names are architecture-neutral.
                 "inputs": [
+                    # Universal top/back sockets carry the ordinary current
+                    # layer inputs.  Previous-depth signals get their own
+                    # dedicated surface sockets between the universal top/
+                    # bottom input/output pair, matching the Studio card
+                    # layout rather than hiding them in a hub.
                     {"id": "x", "name": "Input Signal", "socket": "top"},
                     {"id": "esa_update", "name": "Current Signal", "socket": "back"},
-                    {"id": "previous_esa", "name": "Previous Signal", "socket": "bottom"},
-                    {"id": "previous_state", "name": "Previous State", "socket": "bottom"},
+                    {"id": "previous_esa", "name": "Previous Signal", "socket": "top_aux"},
+                    {"id": "previous_state", "name": "Previous State", "socket": "bottom_aux"},
                 ],
                 "outputs": [
                     {"id": "main", "name": "Main Output", "socket": "front"},
-                    {"id": "state", "name": "State", "sockets": ["top", "bottom"]},
+                    # The same state tensor is exposed from dedicated top and
+                    # bottom surface sockets so downstream nodes can take the
+                    # cleanest route without duplicating computation/state.
+                    {"id": "state", "name": "State Out", "sockets": ["top_aux", "bottom_aux"]},
                 ],
             },
             "api": [

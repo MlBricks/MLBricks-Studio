@@ -6613,8 +6613,12 @@ function __MLB_STUDIO_FACTORY__(){
       const raw=String(socket||"").toLowerCase();
       if(raw==="left")return "back";
       if(raw==="right")return "front";
-      if(side==="in"&&["top","back","bottom"].includes(raw))return raw;
-      if(side==="out"&&["top","front","bottom"].includes(raw))return raw;
+      // top_aux / bottom_aux are dedicated component-specific surface ports
+      // positioned between the universal input/output pair.  They let complex
+      // APIs expose signals such as Previous Signal / Previous State without
+      // sacrificing the six universal sockets every component always owns.
+      if(side==="in"&&["top","back","bottom","top_aux","bottom_aux"].includes(raw))return raw;
+      if(side==="out"&&["top","front","bottom","top_aux","bottom_aux"].includes(raw))return raw;
       return "";
     }
 
@@ -6649,7 +6653,7 @@ function __MLB_STUDIO_FACTORY__(){
 
     function namedSocketGroups(node,side){
       const ports=namedUserPorts(node,side)||[];
-      const groups={top:[],back:[],front:[],bottom:[]};
+      const groups={top:[],back:[],front:[],bottom:[],top_aux:[],bottom_aux:[]};
       ports.forEach((port,index)=>{
         const key=String(port.id||((side==="in"?"in_":"out_")+(index+1)));
         const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
@@ -6671,14 +6675,23 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function namedSocketStyle(side,socket){
-      // Keep input/output sockets visibly separated on the same physical
-      // surface. Inputs occupy the first position, outputs the second.
+      // Universal surface pair follows the sketch: input at the outer-left
+      // position, output at the outer-right position.  Dedicated logical
+      // signals sit between them and remain independently connectable.
       if(socket==="top"){
-        const left=side==="in"?26:74;
+        const left=side==="in"?14:86;
+        return {style:'left:'+left+'%;top:-6px;transform:translateX(-50%)',visual:"top"};
+      }
+      if(socket==="top_aux"){
+        const left=side==="in"?38:62;
         return {style:'left:'+left+'%;top:-6px;transform:translateX(-50%)',visual:"top"};
       }
       if(socket==="bottom"){
-        const left=side==="in"?26:74;
+        const left=side==="in"?14:86;
+        return {style:'left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)',visual:"bottom"};
+      }
+      if(socket==="bottom_aux"){
+        const left=side==="in"?38:62;
         return {style:'left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)',visual:"bottom"};
       }
       if(socket==="back")return {style:'left:-6px;top:50%;transform:translateY(-50%)',visual:"left"};
@@ -6688,6 +6701,8 @@ function __MLB_STUDIO_FACTORY__(){
     function physicalSocketName(side,socket){
       if(socket==="top")return side==="in"?"Top Input":"Top Output";
       if(socket==="bottom")return side==="in"?"Bottom Input":"Bottom Output";
+      if(socket==="top_aux")return side==="in"?"Top Signal Input":"Top Signal Output";
+      if(socket==="bottom_aux")return side==="in"?"Bottom Signal Input":"Bottom Signal Output";
       if(socket==="back")return "Back Input";
       if(socket==="front")return "Front Output";
       return side==="in"?"Input":"Output";
@@ -6695,37 +6710,48 @@ function __MLB_STUDIO_FACTORY__(){
 
     function portButtons(node, side){
       const namedPorts=namedUserPorts(node,side);
+      const baseSockets=side==="in"?["top","back","bottom"]:["top","front","bottom"];
+      const groups=namedPorts?namedSocketGroups(node,side):null;
+      let html="";
+
+      // 1) Always draw the six universal sockets (three inputs + three outputs)
+      // on every component.  Named APIs may bind a logical signal to one of
+      // these physical sockets; otherwise the socket stays visible but quiet.
+      baseSockets.forEach((socket,socketIndex)=>{
+        const items=groups?(groups[socket]||[]):[];
+        const keys=items.map(item=>item.key);
+        const names=items.map(item=>item.name);
+        const fallback=portLabel(side,socketIndex);
+        const signalName=names.length?names.join(" · "):fallback;
+        const displayName=physicalSocketName(side,socket)+(names.length?(" · "+signalName):"");
+        const portColor=items.length===1?namedPortColor(items[0].key,items[0].index):"#647282";
+        const pos=namedSocketStyle(side,socket);
+        const mode=namedPorts?"named":"standard";
+        const key=items.length===1?items[0].key:"";
+        const name=items.length===1?items[0].name:signalName;
+        const disabled=namedPorts&&!items.length?" disabled":"";
+        const extraClass=(namedPorts?" named-port named-socket":"")+(items.length>1?" named-hub":"")+(namedPorts&&!items.length?" unused-socket":"");
+        html+='<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' universal-socket visual-'+pos.visual+extraClass+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+physicalSocketName(side,socket)+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+socketIndex+'" data-port-mode="'+mode+'" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"'+disabled+'></button>';
+      });
+
+      // 2) Complex APIs can add dedicated logical signal sockets between the
+      // universal top/bottom input-output pair.  These do not replace any of
+      // the six universal sockets.  SAFFN uses them for Previous Signal,
+      // Previous State, and the two physical aliases of State Out.
       if(namedPorts){
-        const groups=namedSocketGroups(node,side);
-        let html="";
-        namedSocketOrder(side).forEach((socket,socketIndex)=>{
+        ["top_aux","bottom_aux"].forEach((socket,auxIndex)=>{
           const items=groups[socket]||[];
+          if(!items.length)return;
           const keys=items.map(item=>item.key);
           const names=items.map(item=>item.name);
-          const signalName=names.length?names.join(" · "):("Unused "+(side==="in"?"Input":"Output"));
+          const signalName=names.join(" · ");
           const displayName=physicalSocketName(side,socket)+" · "+signalName;
-          const portColor=items.length===1?namedPortColor(items[0].key,items[0].index):("#647282");
+          const portColor=items.length===1?namedPortColor(items[0].key,items[0].index):"#647282";
           const pos=namedSocketStyle(side,socket);
-          const disabled=items.length?"":" disabled";
           const key=items.length===1?items[0].key:"";
           const name=items.length===1?items[0].name:signalName;
-          html+='<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' named-port named-socket visual-'+pos.visual+(items.length>1?' named-hub':'')+(items.length?'':' unused-socket')+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+physicalSocketName(side,socket)+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+socketIndex+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"'+disabled+'></button>';
+          html+='<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' named-port named-socket dedicated-signal-socket visual-'+pos.visual+(items.length>1?' named-hub':'')+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+physicalSocketName(side,socket)+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+(3+auxIndex)+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"></button>';
         });
-        return html;
-      }
-      let html="";
-      for(let i=0;i<3;i++){
-        let style="";let posClass="";
-        if(i===0){
-          const left = side==="in" ? 26 : 74;
-          style='left:'+left+'%;top:-6px;transform:translateX(-50%)';posClass="top-edge";
-        }else if(i===1){style='top:50%;transform:translateY(-50%)';posClass="middle-side";}
-        else{
-          const left = side==="in" ? 26 : 74;
-          style='left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)';posClass="bottom-edge";
-        }
-        const label=portLabel(side,i);
-        html += '<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' lane-'+i+' '+posClass+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+label+'" data-port-index="'+i+'" data-port-mode="standard" data-tooltip="'+label+'" style="'+style+'" type="button" aria-label="'+label+'" title="'+label+'"></button>';
       }
       return html;
     }
@@ -7082,16 +7108,17 @@ function __MLB_STUDIO_FACTORY__(){
         edge(ctx.input.id,ctx.emb.id),
         edge(ctx.emb.id,esa1.id),
 
-        // First physical depth: Previous Signal and Previous State are left
-        // unconnected on purpose. The SAFFN contract supplies zero tensors.
+        // First physical depth: dedicated Previous Signal (top) and Previous State
+        // (bottom) sockets are left unconnected on purpose. The SAFFN contract
+        // supplies correctly shaped initial tensors.
         toNamed(ctx.emb,saffn1,"x","main_out","","top"),
         toNamed(esa1,saffn1,"esa_update","main_out","","back"),
 
         fromNamed(saffn1,esa2,"main","main_in","front"),
         toNamed(saffn1,saffn2,"x","named_out:main","front","top"),
         toNamed(esa2,saffn2,"esa_update","main_out","","back"),
-        toNamed(esa1,saffn2,"previous_esa","main_out","","bottom"),
-        toNamed(saffn1,saffn2,"previous_state","named_out:state","bottom","bottom"),
+        toNamed(esa1,saffn2,"previous_esa","main_out","","top_aux"),
+        toNamed(saffn1,saffn2,"previous_state","named_out:state","bottom_aux","bottom_aux"),
 
         fromNamed(saffn2,ctx.norm,"main","main_in","front"),
         edge(ctx.norm.id,ctx.head.id),

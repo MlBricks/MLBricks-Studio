@@ -3232,3 +3232,28 @@
 .mlb-port.named-socket.mlb-output-socket.visual-bottom.armed{
   transform:translateX(-50%) scale(1.16)!important;
 }
+
+
+/* MLB Studio v15 — sketch-matched universal surface layout */
+.mlb-port.dedicated-signal-socket{
+  z-index:8!important;
+  width:12px!important;
+  height:12px!important;
+}
+.mlb-port.dedicated-signal-socket.mlb-input-socket{
+  box-shadow:0 0 0 2px rgba(8,13,19,.94),0 0 8px color-mix(in srgb,var(--named-port-color,#8fa0b2) 38%,transparent)!important;
+}
+.mlb-port.dedicated-signal-socket.mlb-output-socket{
+  box-shadow:0 0 0 2px rgba(8,13,19,.94),0 0 0 3px rgba(255,255,255,.18),0 0 9px color-mix(in srgb,var(--named-port-color,#8fa0b2) 42%,transparent)!important;
+}
+.mlb-port.universal-socket.unused-socket{
+  opacity:.46!important;
+}
+/* Dedicated surface sockets sit between the universal input/output pair;
+   keep their hover labels above/below the node without shifting geometry. */
+.mlb-port.dedicated-signal-socket.visual-top:hover,
+.mlb-port.dedicated-signal-socket.visual-top.armed,
+.mlb-port.dedicated-signal-socket.visual-bottom:hover,
+.mlb-port.dedicated-signal-socket.visual-bottom.armed{
+  transform:translateX(-50%) scale(1.18)!important;
+}

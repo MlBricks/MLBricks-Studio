@@ -349,6 +349,8 @@ def test_gallery_contains_tiny_compiler_test_models():
     assert 'const esa2=makeNode(cat(catalog,"esa"))' in js
     assert 'const prevEsa=makeNode(cat(catalog,"esa"))' not in js
     assert 'Layer 2 receives the real previous signal and state from physical depth 1' in js
+    assert 'toNamed(esa1,saffn2,"previous_esa","main_out","","top_aux")' in js
+    assert 'toNamed(saffn1,saffn2,"previous_state","named_out:state","bottom_aux","bottom_aux")' in js
     assert 'dim:64,heads:4,block:64,batch:2,vocab:2048' in js
     assert 'Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"})' in js
 
@@ -373,10 +375,10 @@ def test_saffn_catalog_exposes_original_api_named_runtime_ports():
     assert [p["id"] for p in ports["inputs"]] == ["x", "esa_update", "previous_esa", "previous_state"]
     assert [p["id"] for p in ports["outputs"]] == ["main", "state"]
     assert [p["name"] for p in ports["inputs"]] == ["Input Signal", "Current Signal", "Previous Signal", "Previous State"]
-    assert [p["name"] for p in ports["outputs"]] == ["Main Output", "State"]
-    assert [p["socket"] for p in ports["inputs"]] == ["top", "back", "bottom", "bottom"]
+    assert [p["name"] for p in ports["outputs"]] == ["Main Output", "State Out"]
+    assert [p["socket"] for p in ports["inputs"]] == ["top", "back", "top_aux", "bottom_aux"]
     assert ports["outputs"][0]["socket"] == "front"
-    assert ports["outputs"][1]["sockets"] == ["top", "bottom"]
+    assert ports["outputs"][1]["sockets"] == ["top_aux", "bottom_aux"]
 
 
 def test_model_build_validation_counts_named_and_skip_edges_as_real_connectivity():
@@ -419,6 +421,11 @@ def test_complex_named_api_nodes_have_readable_graph_ui():
     assert 'data-io-role=' in js
     assert 'data-physical-slot=' in js
     assert 'function physicalSocketName(side,socket)' in js
+    assert 'top_aux' in js
+    assert 'bottom_aux' in js
+    assert 'dedicated-signal-socket' in js
+    assert 'const left=side==="in"?14:86;' in js
+    assert 'const left=side==="in"?38:62;' in js
     assert '.mlb-port.mlb-input-socket{' in css
     assert '.mlb-port.mlb-output-socket{' in css
     assert 'width:210px!important;' in css
