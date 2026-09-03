@@ -476,3 +476,63 @@ def test_single_layer_saffn_accepts_zero_initialized_previous_value_buffers(monk
     # esa_update from Embedding/ESA while these buffers initialize prior depth.
     y = graph(x)
     assert y.shape == x.shape
+
+
+def test_named_output_can_feed_normal_main_input_without_falling_back_to_graph_input(monkeypatch):
+    """A named source output routed to main_in must populate the Main lane."""
+    from mlb_studio import api_graph_runtime
+
+    source_type = "__test_multiout_source__"
+    sink_type = "__test_main_sink__"
+
+    class MultiOut(nn.Module):
+        def forward(self, x):
+            return x + 10, x + 20
+
+    class Sink(nn.Module):
+        def forward(self, x):
+            return x * 2
+
+    API_COMPONENTS.register(APIComponentContract(
+        component_type=source_type,
+        import_key=source_type,
+        input_ports={"main": "x"},
+        output_ports={"main": 0, "state": 1},
+    ))
+    API_COMPONENTS.register(APIComponentContract(
+        component_type=sink_type,
+        import_key=sink_type,
+        input_ports={"main": "x"},
+        output_ports={"main": None},
+    ))
+
+    original = api_graph_runtime.IMPORT_POOL.resolve_component
+    def resolve(key):
+        if key == source_type:
+            return MultiOut
+        if key == sink_type:
+            return Sink
+        return original(key)
+    monkeypatch.setattr(api_graph_runtime.IMPORT_POOL, "resolve_component", resolve)
+
+    graph = TensorGraph(
+        nodes=[
+            {"id": "source", "type": source_type, "name": "Stateful Source", "params": {}},
+            {"id": "sink", "type": sink_type, "name": "Main Sink", "params": {}},
+        ],
+        edges=[{
+            "id": "named-main-to-main",
+            "source": "source",
+            "target": "sink",
+            "kind": "named",
+            "source_port": "named_out:main",
+            "target_port": "main_in",
+        }],
+        custom_components={},
+        runtime=_runtime(),
+    )
+
+    x = torch.zeros(2, 4, 3)
+    y = graph(x)
+    assert y.shape == (2, 4, 3)
+    assert torch.equal(y, torch.full_like(x, 20))

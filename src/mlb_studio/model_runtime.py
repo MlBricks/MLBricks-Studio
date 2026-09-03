@@ -750,8 +750,23 @@ class TensorGraph(nn.Module):
             a,b=e.get("source"),e.get("target")
             if a not in self.by_id or b not in self.by_id: continue
             kind=str(e.get("kind") or "main").lower()
-            target_port=str(e.get("target_port") or "")
-            if kind == "named" or target_port.startswith("named_in:"):
+            target_port=str(e.get("target_port") or "").strip().lower()
+
+            # Destination routing is determined by the *target* port, not by
+            # whether the source happens to be a named API output. A stateful
+            # component may expose ``named_out:main`` and feed that tensor into
+            # an ordinary downstream ``main_in`` (for example SAFFN -> ESA).
+            if target_port.startswith("named_in:"):
+                self.in_named[b].append(deepcopy(e))
+            elif target_port in {"main", "main_in"}:
+                self.in_main[b].append(a);self.in_main_edges[b].append(deepcopy(e))
+            elif target_port in {"skip", "skip_in"}:
+                self.in_skip[b].append(a);self.in_skip_edges[b].append(deepcopy(e))
+            elif target_port in {"extra", "extra_in"}:
+                self.in_extra[b].append(a);self.in_extra_edges[b].append(deepcopy(e))
+            elif kind == "named":
+                # Backward compatibility for older serialized named-input
+                # edges that omitted an explicit named_in:* target port.
                 self.in_named[b].append(deepcopy(e))
             elif kind in {"residual","skip"}:
                 self.in_skip[b].append(a);self.in_skip_edges[b].append(deepcopy(e))
