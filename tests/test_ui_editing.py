@@ -478,3 +478,18 @@ def test_universal_graph_renderer_uses_cached_geometry_and_no_canvas_resize_loop
     assert 'const nodeRects=new Map(nodeEls.map(el=>[el,el.getBoundingClientRect()]))' in js
     assert 'try{edgeObserver.observe(flow);}catch(_){}' in js
     assert '[flow,canvas].forEach' not in js
+
+
+def test_custom_terminal_normalization_preserves_live_object_identity():
+    js = (Path(__file__).resolve().parents[1] / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
+    start = js.index("function normalizeAPIBinding")
+    end = js.index("function apiBindingImportPath", start)
+    block = js[start:end]
+    assert "normalize custom terminals in place" in block
+    assert 'const port=(rawPort&&typeof rawPort==="object")?rawPort:{};' in block
+    assert "return port;" in block
+    # Regression: cloning each terminal object here detached Inspector handlers
+    # from the graph state and made Side/Move/Mapping controls snap back.
+    assert "binding.input_ports=binding.input_ports.map((port,i)=>({" not in block
+    assert "binding.output_ports=binding.output_ports.map((port,i)=>({" not in block
+    assert "function resolveCustomTerminal(binding,port)" in js

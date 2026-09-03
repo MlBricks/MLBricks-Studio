@@ -5170,26 +5170,32 @@ function __MLB_STUDIO_FACTORY__(){
       if(!Array.isArray(binding.input_ports))binding.input_ports=[];
       if(!Array.isArray(binding.output_ports))binding.output_ports=[];
       const validTerminalSide=value=>["top","right","bottom","left"].includes(String(value||"").toLowerCase())?String(value).toLowerCase():"top";
-      binding.input_ports=binding.input_ports.map((port,i)=>({
-        id:String(port?.id||("in_"+(i+1))),
-        name:String(port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),
-        parameter:String(port?.parameter||port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),
-        positional:!!port?.positional,
-        required:port?.required!==false,
-        side:validTerminalSide(port?.side),
-        order:Number.isFinite(Number(port?.order))?Number(port.order):i,
-        ...(port?.socket!==undefined?{socket:port.socket}:{}),
-        ...(Array.isArray(port?.sockets)?{sockets:[...port.sockets]}:{})
-      }));
-      binding.output_ports=binding.output_ports.map((port,i)=>({
-        id:String(port?.id||("out_"+(i+1))),
-        name:String(port?.name||("output_"+(i+1))).trim()||("output_"+(i+1)),
-        selector:String(port?.selector??(i===0?"auto":String(i))),
-        side:validTerminalSide(port?.side),
-        order:Number.isFinite(Number(port?.order))?Number(port.order):i,
-        ...(port?.socket!==undefined?{socket:port.socket}:{}),
-        ...(Array.isArray(port?.sockets)?{sockets:[...port.sockets]}:{})
-      }));
+      // IMPORTANT: normalize custom terminals in place. Inspector controls keep
+      // references to these objects. Replacing them with fresh objects during a
+      // later canvas render detaches the Inspector from graph state, making Side,
+      // Name, Mapping and Move controls appear to do nothing / snap back.
+      binding.input_ports=binding.input_ports.map((rawPort,i)=>{
+        const port=(rawPort&&typeof rawPort==="object")?rawPort:{};
+        port.id=String(port.id||("in_"+(i+1)));
+        port.name=String(port.name||("input_"+(i+1))).trim()||("input_"+(i+1));
+        port.parameter=String(port.parameter||port.name||("input_"+(i+1))).trim()||("input_"+(i+1));
+        port.positional=!!port.positional;
+        port.required=port.required!==false;
+        port.side=validTerminalSide(port.side);
+        port.order=Number.isFinite(Number(port.order))?Number(port.order):i;
+        if(Array.isArray(port.sockets))port.sockets=[...port.sockets];
+        return port;
+      });
+      binding.output_ports=binding.output_ports.map((rawPort,i)=>{
+        const port=(rawPort&&typeof rawPort==="object")?rawPort:{};
+        port.id=String(port.id||("out_"+(i+1)));
+        port.name=String(port.name||("output_"+(i+1))).trim()||("output_"+(i+1));
+        port.selector=String(port.selector??(i===0?"auto":String(i)));
+        port.side=validTerminalSide(port.side);
+        port.order=Number.isFinite(Number(port.order))?Number(port.order):i;
+        if(Array.isArray(port.sockets))port.sockets=[...port.sockets];
+        return port;
+      });
       binding.multi_output=!!binding.multi_output;
       if(!binding.output_map||typeof binding.output_map!=="object")binding.output_map={main:"0",skip:"1",extra:"2"};
       binding.output_map.main=String(binding.output_map.main??"0");
@@ -5241,11 +5247,18 @@ function __MLB_STUDIO_FACTORY__(){
       const sideKey=normalizedTerminalSide(side);
       return customTerminalEntries(binding,sideKey).filter(item=>!(excludePort&&(item.port===excludePort||item.port.id===excludePort.id))).length;
     }
+    function resolveCustomTerminal(binding,port){
+      const id=String(port?.id||"");
+      if(!id)return port||null;
+      return [...(binding.input_ports||[]),...(binding.output_ports||[])].find(item=>String(item?.id||"")===id)||port||null;
+    }
     function moveCustomTerminal(binding,port,delta){
-      const side=normalizedTerminalSide(port.side);
-      port.side=side;
+      const live=resolveCustomTerminal(binding,port);
+      if(!live)return false;
+      const side=normalizedTerminalSide(live.side);
+      live.side=side;
       const items=customTerminalEntries(binding,side);
-      const index=items.findIndex(item=>item.port===port||item.port.id===port.id);
+      const index=items.findIndex(item=>item.port===live||String(item.port.id)===String(live.id));
       if(index<0)return false;
       const next=Math.max(0,Math.min(items.length-1,index+Number(delta||0)));
       if(next===index)return false;
@@ -5256,12 +5269,14 @@ function __MLB_STUDIO_FACTORY__(){
       return true;
     }
     function changeCustomTerminalSide(binding,port,nextSide){
-      const prev=normalizedTerminalSide(port.side);
+      const live=resolveCustomTerminal(binding,port);
+      if(!live)return false;
+      const prev=normalizedTerminalSide(live.side);
       const next=normalizedTerminalSide(nextSide);
-      if(prev===next){port.side=next;resequenceCustomTerminals(binding,next);return false;}
-      const nextOrder=nextCustomTerminalOrder(binding,next,port);
-      port.side=next;
-      port.order=nextOrder;
+      if(prev===next){live.side=next;resequenceCustomTerminals(binding,next);return false;}
+      const nextOrder=nextCustomTerminalOrder(binding,next,live);
+      live.side=next;
+      live.order=nextOrder;
       resequenceCustomTerminals(binding,prev);
       resequenceCustomTerminals(binding,next);
       return true;
