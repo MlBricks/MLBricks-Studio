@@ -531,3 +531,19 @@ def test_custom_terminal_surface_spacing_reserves_fixed_center_socket():
     # Old regressions either stacked custom terminals below center or created a
     # second column beside the fixed 50% socket.
     assert 'percent=group.length<=1?64:(62+(26*index/(group.length-1)));' not in js
+
+
+def test_user_function_has_central_visual_to_function_mapping_editor():
+    js = _builder_js()
+    css = _builder_css()
+    assert 'title.textContent="VISUAL ↔ FUNCTION MAPPING"' in js
+    assert 'inputTitle.textContent="VISUAL INPUTS → FUNCTION ARGUMENTS"' in js
+    assert 'outputTitle.textContent="FUNCTION RETURNS → VISUAL OUTPUTS"' in js
+    assert '{lane:"skip",source:"skip",input:"Top Input",output:"Top Output"}' in js
+    assert '{lane:"main",source:"main",input:"Main Input",output:"Main Output"}' in js
+    assert '{lane:"extra",source:"extra",input:"Bottom Input",output:"Bottom Output"}' in js
+    assert 'renderVisualFunctionMapping(body,def,step,binding)' in js
+    assert 'Function argument mapping is configured in Visual ↔ Function Mapping below.' in js
+    assert 'Return mapping is configured in Visual ↔ Function Mapping below.' in js
+    assert '.mlb-visual-map-card' in css
+    assert '.mlb-visual-map-row' in css

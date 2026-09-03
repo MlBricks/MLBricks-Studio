@@ -1818,17 +1818,19 @@ Reusable visual custom graphs are now presented as **Modules**. Low-level items 
 
 API Components can include a **User Defined Function** node. Write the Python function directly in the Inspector, validate its syntax against the notebook kernel, and connect it to normal MLB Studio components.
 
-A user function may return one value or multiple values. For tuple/list returns, enable **Multiple Outputs** and map return indexes to the visual lanes. Example:
+A User Defined Function has one central **Visual ↔ Function Mapping** section. The fixed visual inputs map directly to Python arguments (`Top Input`, `Main Input`, `Bottom Input`), while the fixed outputs map function return indexes/keys back to (`Top Output`, `Main Output`, `Bottom Output`). Custom terminals appear in the same mapping table, so terminal geometry and function binding are no longer configured in separate places.
+
+For example:
 
 ```python
-def split_state(x):
+def split_state(x, residual):
     main = x
-    skip = x + 1
-    extra = x + 2
+    skip = residual
+    extra = x + residual
     return main, skip, extra
 ```
 
-Map `0` to **Main**, `1` to **Skip**, and `2` to **Extra**. Each lane can then be connected to another MLB Studio/API component. Dictionary keys or object attributes are also accepted as selectors. `torch` and `torch.nn` are available automatically; other installed packages can be imported inside the user function source.
+The visual mapper can bind **Main Input → `x`**, **Top Input → `residual`**, **Main Output ← `0`**, **Top Output ← `1`**, and **Bottom Output ← `2`**. Tuple/list indexes, dictionary keys, and object attributes are accepted as output selectors. Non-visual constants/settings remain under **Parameters**. `torch` and `torch.nn` are available automatically; other installed packages can be imported inside the user function source.
 
 ## User-defined source components
 

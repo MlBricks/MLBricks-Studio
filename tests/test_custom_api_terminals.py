@@ -145,3 +145,71 @@ def test_tensor_graph_can_route_custom_output_terminal_into_fixed_main_input():
     )
     x = torch.tensor([[1.0, 2.0]])
     assert torch.equal(graph(x), torch.tensor([[7.0, 9.0]]))
+
+
+def test_fixed_visual_lanes_can_map_directly_to_function_arguments():
+    binding = {
+        "call_type": "user_function",
+        "user_function_name": "mix",
+        "user_code": "def mix(main_tensor, residual, mask):\n    return main_tensor + residual * mask\n",
+        "port_mode": "extended",
+        "auto_main_input": False,
+        "parameters": [
+            {"name": "main_tensor", "stage": "call", "source": "main", "positional": True, "required": True},
+            {"name": "residual", "stage": "call", "source": "skip", "positional": False, "required": True},
+            {"name": "mask", "stage": "call", "source": "extra", "positional": False, "required": True},
+        ],
+        "input_ports": [],
+        "output_ports": [],
+        "output_selector": "auto",
+    }
+    op = _APIOperation(
+        binding=binding,
+        params={},
+        runtime={"allow_user_code": True},
+        label="Visual Mapping",
+    )
+    main = torch.tensor([[1.0, 2.0]])
+    top = torch.tensor([[10.0, 20.0]])
+    bottom = torch.tensor([[0.5, 0.25]])
+    assert torch.equal(op(main, skip=top, extra=bottom), torch.tensor([[6.0, 7.0]]))
+
+
+def test_user_function_validation_returns_signature_for_visual_mapping():
+    from mlb_studio.builder import Builder
+
+    builder = Builder()
+    result = builder.validate_user_function(
+        "def combine(x, skip, scale=1.0, *, state=None):\n    return x\n",
+        "combine",
+    )
+    assert result["ok"] is True
+    assert result["signature"]["name"] == "combine"
+    assert [item["name"] for item in result["signature"]["parameters"]] == ["x", "skip", "scale", "state"]
+    assert [item["required"] for item in result["signature"]["parameters"]] == [True, True, False, False]
+
+
+def test_fixed_visual_outputs_map_main_top_and_bottom_return_values():
+    binding = {
+        "call_type": "user_function",
+        "user_function_name": "split",
+        "user_code": "def split(x):\n    return x, x + 1, x + 2\n",
+        "port_mode": "extended",
+        "auto_main_input": True,
+        "parameters": [],
+        "input_ports": [],
+        "output_ports": [],
+        "multi_output": True,
+        "output_map": {"main": "0", "skip": "1", "extra": "2"},
+    }
+    op = _APIOperation(
+        binding=binding,
+        params={},
+        runtime={"allow_user_code": True},
+        label="Visual Outputs",
+    )
+    x = torch.tensor([[2.0, 4.0]])
+    result = op(x)
+    assert torch.equal(_lane_output(result, "main"), x)
+    assert torch.equal(_lane_output(result, "skip"), x + 1)
+    assert torch.equal(_lane_output(result, "extra"), x + 2)

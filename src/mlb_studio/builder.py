@@ -377,6 +377,37 @@ class Builder:
         if function_name not in functions:
             msg = f"No top-level function named {function_name!r} was found."
             return {"ok": False, "error": msg, "message": msg, "functions": sorted(functions)}
+        function_node = next(
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name
+        )
+        positional_nodes = [*function_node.args.posonlyargs, *function_node.args.args]
+        positional_default_start = len(positional_nodes) - len(function_node.args.defaults)
+        signature_parameters = []
+        for index, arg in enumerate(positional_nodes):
+            signature_parameters.append({
+                "name": arg.arg,
+                "kind": "positional_only" if index < len(function_node.args.posonlyargs) else "positional_or_keyword",
+                "required": index < positional_default_start,
+            })
+        if function_node.args.vararg is not None:
+            signature_parameters.append({
+                "name": function_node.args.vararg.arg,
+                "kind": "var_positional",
+                "required": False,
+            })
+        for arg, default in zip(function_node.args.kwonlyargs, function_node.args.kw_defaults):
+            signature_parameters.append({
+                "name": arg.arg,
+                "kind": "keyword_only",
+                "required": default is None,
+            })
+        if function_node.args.kwarg is not None:
+            signature_parameters.append({
+                "name": function_node.args.kwarg.arg,
+                "kind": "var_keyword",
+                "required": False,
+            })
         dependencies = self._user_source_dependencies(source)
         missing = [item["name"] for item in dependencies if not item["available"]]
         message = f"User Function {function_name} is syntactically valid."
@@ -388,6 +419,10 @@ class Builder:
             "ok": not bool(missing),
             "function_name": function_name,
             "functions": sorted(functions),
+            "signature": {
+                "name": function_name,
+                "parameters": signature_parameters,
+            },
             "dependencies": dependencies,
             "missing_dependencies": missing,
             "message": message,

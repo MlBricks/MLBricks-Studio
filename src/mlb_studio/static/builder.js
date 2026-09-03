@@ -5327,6 +5327,155 @@ function __MLB_STUDIO_FACTORY__(){
       draw(true);
     }
 
+    const VISUAL_FUNCTION_LANES=[
+      {lane:"skip",source:"skip",input:"Top Input",output:"Top Output"},
+      {lane:"main",source:"main",input:"Main Input",output:"Main Output"},
+      {lane:"extra",source:"extra",input:"Bottom Input",output:"Bottom Output"}
+    ];
+
+    function userFunctionSignatureParameters(binding,def=null,step=null){
+      const key=(def&&step)?(def.id+":"+step.id):"";
+      const validated=(key&&customImportStatus[key]?.details?.signature?.parameters)||[];
+      if(validated.length)return validated.map(item=>String(item?.name||"").trim()).filter(Boolean);
+      const fn=String(binding.user_function_name||"custom_function").replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+      const source=String(binding.user_code||"");
+      const match=source.match(new RegExp("(?:async\\s+)?def\\s+"+fn+"\\s*\\(([\\s\\S]*?)\\)\\s*(?:->[^:]*)?:"));
+      if(!match)return [];
+      return match[1].split(",").map(part=>{
+        let text=String(part||"").trim();
+        if(!text||text==="/"||text==="*")return "";
+        text=text.replace(/^\*{1,2}/,"");
+        text=text.split("=")[0].trim();
+        text=text.split(":")[0].trim();
+        return /^[A-Za-z_][A-Za-z0-9_]*$/.test(text)?text:"";
+      }).filter(Boolean);
+    }
+
+    function visualLaneParameterSpec(binding,lane){
+      const aliases=lane==="main"?new Set(["main","input"]):new Set([lane]);
+      return (binding.parameters||[]).find(spec=>String(spec.stage||"call").toLowerCase()==="call"&&aliases.has(String(spec.source||"").toLowerCase()))||null;
+    }
+
+    function ensureExplicitMainVisualMapping(binding,def=null,step=null){
+      if(binding.call_type!=="user_function"||binding.port_mode==="named")return;
+      if(visualLaneParameterSpec(binding,"main")||!binding.auto_main_input)return;
+      const suggested=userFunctionSignatureParameters(binding,def,step)[0]||"x";
+      const spec=customArgDefault((binding.parameters||[]).length);
+      spec.name=suggested;spec.label=suggested;spec.stage="call";spec.source="main";spec.positional=true;spec.required=true;
+      binding.parameters.push(spec);
+      binding.auto_main_input=false;
+    }
+
+    function setVisualLaneParameter(binding,lane,name){
+      const clean=apiSafePortName(String(name||"").trim(),"");
+      const aliases=lane==="main"?new Set(["main","input"]):new Set([lane]);
+      const specs=binding.parameters||[];
+      let spec=visualLaneParameterSpec(binding,lane);
+      if(!String(name||"").trim()){
+        binding.parameters=specs.filter(item=>!(String(item.stage||"call").toLowerCase()==="call"&&aliases.has(String(item.source||"").toLowerCase())));
+        if(lane==="main")binding.auto_main_input=false;
+        return null;
+      }
+      if(!spec){
+        spec=customArgDefault(specs.length);
+        spec.stage="call";spec.source=lane;spec.positional=false;spec.required=lane==="main";
+        specs.push(spec);
+      }
+      spec.name=clean||String(name||"").trim();
+      spec.label=spec.name;
+      spec.source=lane;
+      if(lane==="main")binding.auto_main_input=false;
+      return spec;
+    }
+
+    function fixedVisualOutputSelector(binding,lane){
+      if(binding.multi_output)return String(binding.output_map?.[lane]??"");
+      return lane==="main"?String(binding.output_selector??"auto"):"";
+    }
+
+    function setFixedVisualOutputSelector(binding,lane,value){
+      const text=String(value??"").trim();
+      if(lane==="main"&&!binding.multi_output){
+        binding.output_selector=text||"auto";
+        return;
+      }
+      if(lane!=="main"&&text&&!binding.multi_output){
+        binding.multi_output=true;
+        // Entering multi-output mode from the visual mapper starts with only the
+        // lane the user explicitly mapped. Do not inherit legacy 1/2 defaults
+        // for Top/Bottom and accidentally expose outputs that were never mapped.
+        binding.output_map={main:String(binding.output_selector||"auto"),skip:"",extra:""};
+      }
+      if(binding.multi_output){
+        binding.output_map=binding.output_map||{main:"auto",skip:"",extra:""};
+        binding.output_map[lane]=text;
+        if(!String(binding.output_map.main||"").trim())binding.output_map.main="auto";
+      }
+    }
+
+    function visualMappingField(labelText,value,onInput,opts={}){
+      const row=document.createElement("div");row.className="mlb-visual-map-row";
+      const visual=document.createElement("div");visual.className="mlb-visual-map-port";
+      const dot=document.createElement("span");dot.className="mlb-visual-map-dot "+(opts.output?"out":"in");
+      const name=document.createElement("strong");name.textContent=labelText;visual.append(dot,name);
+      const arrow=document.createElement("div");arrow.className="mlb-visual-map-arrow";arrow.textContent=opts.output?"←":"→";
+      const target=document.createElement("div");target.className="mlb-visual-map-target";
+      const input=document.createElement("input");input.type="text";input.value=value??"";input.placeholder=opts.placeholder||"Unmapped";
+      input.addEventListener("input",()=>onInput(input.value));target.appendChild(input);
+      if(opts.hint){const hint=document.createElement("small");hint.textContent=opts.hint;target.appendChild(hint);}
+      row.append(visual,arrow,target);return row;
+    }
+
+    function renderVisualFunctionMapping(body,def,step,binding){
+      ensureExplicitMainVisualMapping(binding,def,step);
+      const title=document.createElement("div");title.className="mlb-section-title";title.textContent="VISUAL ↔ FUNCTION MAPPING";body.appendChild(title);
+      const signature=userFunctionSignatureParameters(binding,def,step);
+      const help=document.createElement("div");help.className="mlb-api-path";
+      help.textContent="Map each visible component terminal directly to the Python function. Inputs map visual lanes to function arguments; outputs map function return indexes/keys back to visual lanes."+(signature.length?(" Detected arguments: "+signature.join(", ")+"."):"");
+      body.appendChild(help);
+
+      const inputTitle=document.createElement("div");inputTitle.className="mlb-subsection-title";inputTitle.textContent="VISUAL INPUTS → FUNCTION ARGUMENTS";body.appendChild(inputTitle);
+      const inputMap=document.createElement("div");inputMap.className="mlb-visual-map-card";
+      VISUAL_FUNCTION_LANES.forEach(item=>{
+        const spec=visualLaneParameterSpec(binding,item.lane);
+        const row=visualMappingField(item.input,spec?.name||"",v=>{
+          const live=setVisualLaneParameter(binding,item.lane,v);
+          const mode=row.querySelector("select");if(mode&&live)live.positional=mode.value==="positional";
+        },{placeholder:"Unmapped"});
+        const target=row.querySelector(".mlb-visual-map-target");
+        const mode=document.createElement("select");
+        [{value:"keyword",label:"keyword"},{value:"positional",label:"positional"}].forEach(opt=>{const o=document.createElement("option");o.value=opt.value;o.textContent=opt.label;if((spec?.positional?"positional":"keyword")===opt.value)o.selected=true;mode.appendChild(o);});
+        mode.addEventListener("change",()=>{const live=visualLaneParameterSpec(binding,item.lane);if(live)live.positional=mode.value==="positional";});
+        target.appendChild(mode);inputMap.appendChild(row);
+      });
+      if(binding.port_mode==="extended"){
+        (binding.input_ports||[]).forEach(port=>{
+          const side=String(port.side||"top");
+          const row=visualMappingField((port.name||"Custom Input")+" · "+side[0].toUpperCase()+side.slice(1),port.parameter||port.name||"",v=>{port.parameter=apiSafePortName(v,port.name||"input");},{placeholder:"Function argument"});
+          const target=row.querySelector(".mlb-visual-map-target");
+          const mode=document.createElement("select");
+          ["keyword","positional"].forEach(value=>{const o=document.createElement("option");o.value=value;o.textContent=value;if((port.positional?"positional":"keyword")===value)o.selected=true;mode.appendChild(o);});
+          mode.addEventListener("change",()=>port.positional=mode.value==="positional");target.appendChild(mode);
+          const req=document.createElement("label");req.className="mlb-visual-map-required";const cb=document.createElement("input");cb.type="checkbox";cb.checked=port.required!==false;cb.addEventListener("change",()=>port.required=cb.checked);req.append(cb,document.createTextNode(" required"));target.appendChild(req);
+          inputMap.appendChild(row);
+        });
+      }
+      body.appendChild(inputMap);
+
+      const outputTitle=document.createElement("div");outputTitle.className="mlb-subsection-title";outputTitle.textContent="FUNCTION RETURNS → VISUAL OUTPUTS";body.appendChild(outputTitle);
+      const outputMap=document.createElement("div");outputMap.className="mlb-visual-map-card";
+      VISUAL_FUNCTION_LANES.forEach(item=>{
+        outputMap.appendChild(visualMappingField(item.output,fixedVisualOutputSelector(binding,item.lane),v=>setFixedVisualOutputSelector(binding,item.lane,v),{output:true,placeholder:item.lane==="main"?"auto":"Unmapped",hint:"return index / key"}));
+      });
+      if(binding.port_mode==="extended"){
+        (binding.output_ports||[]).forEach(port=>{
+          const side=String(port.side||"top");
+          outputMap.appendChild(visualMappingField((port.name||"Custom Output")+" · "+side[0].toUpperCase()+side.slice(1),String(port.selector??"auto"),v=>port.selector=String(v||"auto"),{output:true,placeholder:"auto",hint:"return index / key"}));
+        });
+      }
+      body.appendChild(outputMap);
+    }
+
     function ensureAPIStepObjectIds(step){
       if(!step)return defaultAPIBinding();
       step.api_binding=normalizeAPIBinding(step.api_binding||defaultAPIBinding());
@@ -5750,9 +5899,7 @@ function __MLB_STUDIO_FACTORY__(){
             const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove input terminal";rm.addEventListener("click",()=>{checkpoint("Remove custom input terminal");current(state).edges=(current(state).edges||[]).filter(e=>!(e.target===step.id&&e.target_port==="named_in:"+port.id));const oldSide=port.side;binding.input_ports.splice(index,1);resequenceCustomTerminals(binding,oldSide);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
             box.appendChild(editorRow("Terminal Name",port.name||"",v=>{port.name=apiSafePortName(v,"input_"+(index+1));draw();}));
             box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move input terminal side");changeCustomTerminalSide(binding,port,v);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
-            box.appendChild(editorRow("Function Parameter",port.parameter||port.name||"",v=>port.parameter=apiSafePortName(v,port.name||("input_"+(index+1)))));
-            box.appendChild(editorRow("Pass As",port.positional?"positional":"keyword",v=>port.positional=v==="positional",{select:true,options:["keyword","positional"]}));
-            box.appendChild(editorRow("Required",port.required===false?"false":"true",v=>port.required=v==="true",{select:true,options:["true","false"]}));
+            const mapHint=document.createElement("div");mapHint.className="mlb-terminal-map-hint";mapHint.textContent="Function argument mapping is configured in Visual ↔ Function Mapping below.";box.appendChild(mapHint);
             appendMoveControls(box,port);body.appendChild(box);
           });
           const addIn=btn("+ Add Input Terminal","mlb-create mlb-custom-add-arg");
@@ -5773,7 +5920,7 @@ function __MLB_STUDIO_FACTORY__(){
             const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove output terminal";rm.addEventListener("click",()=>{checkpoint("Remove custom output terminal");current(state).edges=(current(state).edges||[]).filter(e=>!(e.source===step.id&&e.source_port==="named_out:"+port.id));const oldSide=port.side;binding.output_ports.splice(index,1);resequenceCustomTerminals(binding,oldSide);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
             box.appendChild(editorRow("Terminal Name",port.name||"",v=>{port.name=apiSafePortName(v,"output_"+(index+1));draw();}));
             box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move output terminal side");changeCustomTerminalSide(binding,port,v);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
-            box.appendChild(editorRow("Return Index / Key",port.selector??"auto",v=>port.selector=v));
+            const mapHint=document.createElement("div");mapHint.className="mlb-terminal-map-hint";mapHint.textContent="Return mapping is configured in Visual ↔ Function Mapping below.";box.appendChild(mapHint);
             appendMoveControls(box,port);body.appendChild(box);
           });
           const addOut=btn("+ Add Output Terminal","mlb-create mlb-custom-add-arg");
@@ -5789,6 +5936,7 @@ function __MLB_STUDIO_FACTORY__(){
         }else if(binding.port_mode==="named"){
           const legacy=document.createElement("div");legacy.className="mlb-api-path";legacy.textContent="Legacy custom-port layout detected. Switch Port Layout to Universal + Custom Terminals to keep these mappings while restoring the six fixed universal terminals.";body.appendChild(legacy);
         }
+        if(binding.port_mode!=="named")renderVisualFunctionMapping(body,def,step,binding);
       }
       if(isUserClass){
         const userTitle=document.createElement("div");userTitle.className="mlb-section-title";userTitle.textContent="PYTHON CLASS";body.appendChild(userTitle);
@@ -5846,16 +5994,18 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       if(callType!=="constructor"&&callType!=="user_class"&&!(isUserFunction&&binding.port_mode==="named")){
-        body.appendChild(editorRow("Implicit Main Input",binding.auto_main_input?"true":"false",v=>binding.auto_main_input=v==="true",{select:true,options:[{value:"true",label:"Auto prepend Main"},{value:"false",label:"Do not inject Main"}]}));
-        body.appendChild(editorRow("Multiple Outputs",binding.multi_output?"true":"false",v=>{binding.multi_output=v==="true";draw();},{select:true,options:[{value:"false",label:"Single Output"},{value:"true",label:"Map Multiple Outputs"}]}));
-        if(binding.multi_output){
-          const mapTitle=document.createElement("div");mapTitle.className="mlb-section-title";mapTitle.textContent="OUTPUT MAPPING";body.appendChild(mapTitle);
-          const mapHelp=document.createElement("div");mapHelp.className="mlb-api-path";mapHelp.textContent="For tuple/list returns use indexes such as 0, 1, 2. Dict/object returns may use a key or attribute name. Leave Skip or Extra blank when unused.";body.appendChild(mapHelp);
-          body.appendChild(editorRow("Main Output Index / Key",binding.output_map?.main??"0",v=>binding.output_map.main=v,{type:"text"}));
-          body.appendChild(editorRow("Skip Output Index / Key",binding.output_map?.skip??"1",v=>binding.output_map.skip=v,{type:"text"}));
-          body.appendChild(editorRow("Extra Output Index / Key",binding.output_map?.extra??"2",v=>binding.output_map.extra=v,{type:"text"}));
-        }else{
-          body.appendChild(editorRow("Output Selector",binding.output_selector||"auto",v=>binding.output_selector=v,{type:"text"}));
+        if(!isUserFunction){
+          body.appendChild(editorRow("Implicit Main Input",binding.auto_main_input?"true":"false",v=>binding.auto_main_input=v==="true",{select:true,options:[{value:"true",label:"Auto prepend Main"},{value:"false",label:"Do not inject Main"}]}));
+          body.appendChild(editorRow("Multiple Outputs",binding.multi_output?"true":"false",v=>{binding.multi_output=v==="true";draw();},{select:true,options:[{value:"false",label:"Single Output"},{value:"true",label:"Map Multiple Outputs"}]}));
+          if(binding.multi_output){
+            const mapTitle=document.createElement("div");mapTitle.className="mlb-section-title";mapTitle.textContent="OUTPUT MAPPING";body.appendChild(mapTitle);
+            const mapHelp=document.createElement("div");mapHelp.className="mlb-api-path";mapHelp.textContent="For tuple/list returns use indexes such as 0, 1, 2. Dict/object returns may use a key or attribute name. Leave Skip or Extra blank when unused.";body.appendChild(mapHelp);
+            body.appendChild(editorRow("Main Output Index / Key",binding.output_map?.main??"0",v=>binding.output_map.main=v,{type:"text"}));
+            body.appendChild(editorRow("Skip Output Index / Key",binding.output_map?.skip??"1",v=>binding.output_map.skip=v,{type:"text"}));
+            body.appendChild(editorRow("Extra Output Index / Key",binding.output_map?.extra??"2",v=>binding.output_map.extra=v,{type:"text"}));
+          }else{
+            body.appendChild(editorRow("Output Selector",binding.output_selector||"auto",v=>binding.output_selector=v,{type:"text"}));
+          }
         }
         body.appendChild(editorRow("Register Result as Object",binding.register_result_object?"true":"false",v=>{
           binding.register_result_object=v==="true";
@@ -5882,13 +6032,13 @@ function __MLB_STUDIO_FACTORY__(){
         }
       }
 
-      const argTitle=document.createElement("div");argTitle.className="mlb-section-title";argTitle.textContent="PARAMETERS";body.appendChild(argTitle);
+      const argTitle=document.createElement("div");argTitle.className="mlb-section-title";argTitle.textContent=(isUserFunction&&binding.port_mode!=="named")?"NON-VISUAL PARAMETERS":"PARAMETERS";body.appendChild(argTitle);
       const note=document.createElement("div");note.className="mlb-api-path";
       note.textContent=callType==="user_function"
         ?(binding.port_mode==="named"
           ?"Legacy custom-port layout maps named ports directly to this function."
           :(binding.port_mode==="extended"
-            ?"Universal Main / Skip / Extra routing stays active; custom input terminals add mapped function arguments and custom output terminals expose mapped return values."
+            ?"Visual terminal arguments and return values are mapped in Visual ↔ Function Mapping above. Use Parameters below only for constants, settings, constructor values, or other non-terminal arguments."
             :"Standard layout uses the built-in Studio port routing. Configure the function parameters below."))
         :callType==="user_class"
         ?"Constructor parameters create one reusable instance from your cached class source. The object is registered once and later Instance Method nodes can reuse it."
@@ -5901,7 +6051,11 @@ function __MLB_STUDIO_FACTORY__(){
 
       const args=Array.isArray(binding.parameters)?binding.parameters:(binding.parameters=[]);
       const allowedStages=(callType==="constructor"||callType==="user_class")?["init"]:(callType==="instance_method"&&binding.object_mode==="new"?["init","call"]:["call"]);
-      args.forEach((spec,index)=>{
+      const visibleArgEntries=args.map((spec,index)=>({spec,index})).filter(({spec})=>{
+        if(!(isUserFunction&&binding.port_mode!=="named"))return true;
+        return !["input","main","skip","extra"].includes(String(spec.source||"user").toLowerCase());
+      });
+      visibleArgEntries.forEach(({spec,index})=>{
         if(!allowedStages.includes(String(spec.stage||"")))spec.stage=allowedStages[0];
         const box=document.createElement("div");box.className="mlb-custom-arg-card";
         const head=document.createElement("div");head.className="mlb-custom-arg-head";
@@ -5912,7 +6066,10 @@ function __MLB_STUDIO_FACTORY__(){
         box.appendChild(editorRow("UI Label",spec.label||spec.name||"",v=>spec.label=v));
         box.appendChild(editorRow("Stage",spec.stage||allowedStages[0],v=>spec.stage=v,{select:true,options:allowedStages}));
         box.appendChild(editorRow("Type",spec.type||"str",v=>{spec.type=v;setTimeout(draw,0);},{select:true,options:["int","float","str","bool","select","json","dict","list","tuple"]}));
-        box.appendChild(editorRow("Source",spec.source||"user",v=>{spec.source=v;setTimeout(draw,0);},{select:true,options:["user","main","skip","extra","model_dim","heads","context","batch","device","dtype"]}));
+        const parameterSources=(isUserFunction&&binding.port_mode!=="named")
+          ?["user","model_dim","heads","context","batch","device","dtype"]
+          :["user","main","skip","extra","model_dim","heads","context","batch","device","dtype"];
+        box.appendChild(editorRow("Source",spec.source||"user",v=>{spec.source=v;setTimeout(draw,0);},{select:true,options:parameterSources}));
         if(String(spec.source||"user")==="user"){
           box.appendChild(editorRow("Default",spec.default??"",v=>spec.default=v,{textarea:["json","dict","list","tuple"].includes(String(spec.type)),rows:2}));
           if(String(spec.type)==="select")box.appendChild(editorRow("Options (comma separated)",(spec.options||[]).join(", "),v=>spec.options=v.split(",").map(x=>x.trim()).filter(Boolean)));
