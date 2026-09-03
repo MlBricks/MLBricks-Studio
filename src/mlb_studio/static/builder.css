@@ -3201,3 +3201,34 @@
   background:#182432!important;
   color:#fff!important;
 }
+
+/* MLB Studio v14 — make universal input/output socket pairs unmistakable */
+.mlb-port.mlb-input-socket{
+  /* Input sockets are rings: the empty center means the signal enters here. */
+  background:#0d151d!important;
+  border-width:2px!important;
+}
+.mlb-port.mlb-output-socket{
+  /* Output sockets remain filled and gain a thin outer halo. */
+  box-shadow:0 0 0 2px rgba(9,15,21,.92),0 0 0 3px rgba(255,255,255,.16)!important;
+}
+.mlb-port.named-port.mlb-input-socket{
+  background:#0d151d!important;
+  border-color:var(--named-port-color,#f0a84a)!important;
+}
+.mlb-port.named-port.mlb-output-socket{
+  background:var(--named-port-color,#f0a84a)!important;
+  border-color:#f2f6fa!important;
+}
+.mlb-port.mlb-input-socket:hover,.mlb-port.mlb-input-socket.armed{
+  background:#18232e!important;
+}
+.mlb-port.mlb-output-socket:hover,.mlb-port.mlb-output-socket.armed{
+  transform:scale(1.16);
+}
+.mlb-port.named-socket.mlb-output-socket.visual-top:hover,
+.mlb-port.named-socket.mlb-output-socket.visual-top.armed,
+.mlb-port.named-socket.mlb-output-socket.visual-bottom:hover,
+.mlb-port.named-socket.mlb-output-socket.visual-bottom.armed{
+  transform:translateX(-50%) scale(1.16)!important;
+}

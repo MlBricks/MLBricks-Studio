@@ -414,6 +414,13 @@ def test_complex_named_api_nodes_have_readable_graph_ui():
     assert 'const inputNames=["Top Input","Input Signal","Bottom Input"]' in js
     assert 'const outputNames=["Top Output","Main Output","Bottom Output"]' in js
     assert '.mlb-node.mlb-universal-six-socket{' in css
+    assert 'mlb-input-socket' in js
+    assert 'mlb-output-socket' in js
+    assert 'data-io-role=' in js
+    assert 'data-physical-slot=' in js
+    assert 'function physicalSocketName(side,socket)' in js
+    assert '.mlb-port.mlb-input-socket{' in css
+    assert '.mlb-port.mlb-output-socket{' in css
     assert 'width:210px!important;' in css
     assert '.mlb-port-hub-picker{' in css
     assert '.mlb-edge-dim{opacity:.13!important}' in css

@@ -6671,16 +6671,26 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function namedSocketStyle(side,socket){
+      // Keep input/output sockets visibly separated on the same physical
+      // surface. Inputs occupy the first position, outputs the second.
       if(socket==="top"){
-        const left=side==="in"?28:72;
+        const left=side==="in"?26:74;
         return {style:'left:'+left+'%;top:-6px;transform:translateX(-50%)',visual:"top"};
       }
       if(socket==="bottom"){
-        const left=side==="in"?28:72;
+        const left=side==="in"?26:74;
         return {style:'left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)',visual:"bottom"};
       }
       if(socket==="back")return {style:'left:-6px;top:50%;transform:translateY(-50%)',visual:"left"};
       return {style:'right:-6px;top:50%;transform:translateY(-50%)',visual:"right"};
+    }
+
+    function physicalSocketName(side,socket){
+      if(socket==="top")return side==="in"?"Top Input":"Top Output";
+      if(socket==="bottom")return side==="in"?"Bottom Input":"Bottom Output";
+      if(socket==="back")return "Back Input";
+      if(socket==="front")return "Front Output";
+      return side==="in"?"Input":"Output";
     }
 
     function portButtons(node, side){
@@ -6692,13 +6702,14 @@ function __MLB_STUDIO_FACTORY__(){
           const items=groups[socket]||[];
           const keys=items.map(item=>item.key);
           const names=items.map(item=>item.name);
-          const displayName=names.length?names.join(" · "):("Unused "+(side==="in"?"Input":"Output"));
+          const signalName=names.length?names.join(" · "):("Unused "+(side==="in"?"Input":"Output"));
+          const displayName=physicalSocketName(side,socket)+" · "+signalName;
           const portColor=items.length===1?namedPortColor(items[0].key,items[0].index):("#647282");
           const pos=namedSocketStyle(side,socket);
           const disabled=items.length?"":" disabled";
           const key=items.length===1?items[0].key:"";
-          const name=items.length===1?items[0].name:displayName;
-          html+='<button class="mlb-port '+side+' named-port named-socket visual-'+pos.visual+(items.length>1?' named-hub':'')+(items.length?'':' unused-socket')+'" data-side="'+side+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+socketIndex+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"'+disabled+'></button>';
+          const name=items.length===1?items[0].name:signalName;
+          html+='<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' named-port named-socket visual-'+pos.visual+(items.length>1?' named-hub':'')+(items.length?'':' unused-socket')+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+physicalSocketName(side,socket)+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+socketIndex+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"'+disabled+'></button>';
         });
         return html;
       }
@@ -6706,15 +6717,15 @@ function __MLB_STUDIO_FACTORY__(){
       for(let i=0;i<3;i++){
         let style="";let posClass="";
         if(i===0){
-          const left = side==="in" ? 28 : 72;
+          const left = side==="in" ? 26 : 74;
           style='left:'+left+'%;top:-6px;transform:translateX(-50%)';posClass="top-edge";
         }else if(i===1){style='top:50%;transform:translateY(-50%)';posClass="middle-side";}
         else{
-          const left = side==="in" ? 28 : 72;
+          const left = side==="in" ? 26 : 74;
           style='left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)';posClass="bottom-edge";
         }
         const label=portLabel(side,i);
-        html += '<button class="mlb-port '+side+' lane-'+i+' '+posClass+'" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="standard" data-tooltip="'+label+'" style="'+style+'" type="button" aria-label="'+label+'" title="'+label+'"></button>';
+        html += '<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' lane-'+i+' '+posClass+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+label+'" data-port-index="'+i+'" data-port-mode="standard" data-tooltip="'+label+'" style="'+style+'" type="button" aria-label="'+label+'" title="'+label+'"></button>';
       }
       return html;
     }
