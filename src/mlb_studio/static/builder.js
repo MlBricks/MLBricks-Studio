@@ -5221,39 +5221,57 @@ function __MLB_STUDIO_FACTORY__(){
       const n=index+1;return {id:uid("outport"),name:"output_"+n,selector:index===0?"auto":String(index),side,order};
     }
 
+    function normalizedTerminalSide(value){
+      const side=String(value||"top").toLowerCase();
+      return ["top","right","bottom","left"].includes(side)?side:"top";
+    }
     function customTerminalEntries(binding,side=null){
       const all=[
         ...(binding.input_ports||[]).map((port,index)=>({port,index,io:"in"})),
         ...(binding.output_ports||[]).map((port,index)=>({port,index,io:"out"}))
       ];
-      const filtered=side?all.filter(item=>String(item.port.side||"top")===side):all;
+      const wanted=side===null?null:normalizedTerminalSide(side);
+      const filtered=wanted===null?all:all.filter(item=>normalizedTerminalSide(item.port.side)===wanted);
       return filtered.sort((a,b)=>(Number(a.port.order)||0)-(Number(b.port.order)||0)||String(a.port.id).localeCompare(String(b.port.id)));
     }
     function resequenceCustomTerminals(binding,side){
       customTerminalEntries(binding,side).forEach((item,index)=>item.port.order=index);
     }
-    function nextCustomTerminalOrder(binding,side){
-      const items=customTerminalEntries(binding,side);
-      return items.length;
+    function nextCustomTerminalOrder(binding,side,excludePort=null){
+      const sideKey=normalizedTerminalSide(side);
+      return customTerminalEntries(binding,sideKey).filter(item=>!(excludePort&&(item.port===excludePort||item.port.id===excludePort.id))).length;
     }
     function moveCustomTerminal(binding,port,delta){
-      const side=String(port.side||"top");
+      const side=normalizedTerminalSide(port.side);
+      port.side=side;
       const items=customTerminalEntries(binding,side);
       const index=items.findIndex(item=>item.port===port||item.port.id===port.id);
-      const next=Math.max(0,Math.min(items.length-1,index+delta));
-      if(index<0||next===index)return;
-      const other=items[next].port;
-      const temp=Number(port.order)||index;
-      port.order=Number(other.order)||next;
-      other.order=temp;
-      resequenceCustomTerminals(binding,side);
+      if(index<0)return false;
+      const next=Math.max(0,Math.min(items.length-1,index+Number(delta||0)));
+      if(next===index)return false;
+      const reordered=[...items];
+      const [moving]=reordered.splice(index,1);
+      reordered.splice(next,0,moving);
+      reordered.forEach((item,order)=>{item.port.order=order;});
+      return true;
     }
     function changeCustomTerminalSide(binding,port,nextSide){
-      const prev=String(port.side||"top");
-      port.side=String(nextSide||"top");
-      port.order=nextCustomTerminalOrder(binding,port.side);
+      const prev=normalizedTerminalSide(port.side);
+      const next=normalizedTerminalSide(nextSide);
+      if(prev===next){port.side=next;resequenceCustomTerminals(binding,next);return false;}
+      const nextOrder=nextCustomTerminalOrder(binding,next,port);
+      port.side=next;
+      port.order=nextOrder;
       resequenceCustomTerminals(binding,prev);
-      resequenceCustomTerminals(binding,port.side);
+      resequenceCustomTerminals(binding,next);
+      return true;
+    }
+    function redrawCustomTerminalLayout(){
+      // Side/reorder controls are atomic layout actions. They must not wait for
+      // the text-editor redraw guard, otherwise the socket appears stuck on its
+      // old side until a later click/blur.
+      deferredInteractionDraw=false;
+      draw(true);
     }
 
     function ensureAPIStepObjectIds(step){
@@ -5667,8 +5685,8 @@ function __MLB_STUDIO_FACTORY__(){
             const items=customTerminalEntries(binding,side);
             const index=items.findIndex(item=>item.port===port||item.port.id===port.id);
             first.disabled=index<=0;second.disabled=index<0||index>=items.length-1;
-            first.addEventListener("click",()=>{checkpoint("Move custom terminal");moveCustomTerminal(binding,port,-1);draw();});
-            second.addEventListener("click",()=>{checkpoint("Move custom terminal");moveCustomTerminal(binding,port,1);draw();});
+            first.addEventListener("click",()=>{checkpoint("Move custom terminal");moveCustomTerminal(binding,port,-1);redrawCustomTerminalLayout();});
+            second.addEventListener("click",()=>{checkpoint("Move custom terminal");moveCustomTerminal(binding,port,1);redrawCustomTerminalLayout();});
             row.append(first,second);box.appendChild(row);
           };
 
@@ -5678,7 +5696,7 @@ function __MLB_STUDIO_FACTORY__(){
             const head=document.createElement("div");head.className="mlb-custom-arg-head";const nm=document.createElement("strong");nm.textContent=port.name||("Input "+(index+1));
             const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove input terminal";rm.addEventListener("click",()=>{checkpoint("Remove custom input terminal");current(state).edges=(current(state).edges||[]).filter(e=>!(e.target===step.id&&e.target_port==="named_in:"+port.id));const oldSide=port.side;binding.input_ports.splice(index,1);resequenceCustomTerminals(binding,oldSide);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
             box.appendChild(editorRow("Terminal Name",port.name||"",v=>{port.name=apiSafePortName(v,"input_"+(index+1));draw();}));
-            box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move input terminal side");changeCustomTerminalSide(binding,port,v);draw();},{select:true,options:terminalSideOptions}));
+            box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move input terminal side");changeCustomTerminalSide(binding,port,v);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
             box.appendChild(editorRow("Function Parameter",port.parameter||port.name||"",v=>port.parameter=apiSafePortName(v,port.name||("input_"+(index+1)))));
             box.appendChild(editorRow("Pass As",port.positional?"positional":"keyword",v=>port.positional=v==="positional",{select:true,options:["keyword","positional"]}));
             box.appendChild(editorRow("Required",port.required===false?"false":"true",v=>port.required=v==="true",{select:true,options:["true","false"]}));
@@ -5692,7 +5710,7 @@ function __MLB_STUDIO_FACTORY__(){
             const head=document.createElement("div");head.className="mlb-custom-arg-head";const nm=document.createElement("strong");nm.textContent=port.name||("Output "+(index+1));
             const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove output terminal";rm.addEventListener("click",()=>{checkpoint("Remove custom output terminal");current(state).edges=(current(state).edges||[]).filter(e=>!(e.source===step.id&&e.source_port==="named_out:"+port.id));const oldSide=port.side;binding.output_ports.splice(index,1);resequenceCustomTerminals(binding,oldSide);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
             box.appendChild(editorRow("Terminal Name",port.name||"",v=>{port.name=apiSafePortName(v,"output_"+(index+1));draw();}));
-            box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move output terminal side");changeCustomTerminalSide(binding,port,v);draw();},{select:true,options:terminalSideOptions}));
+            box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move output terminal side");changeCustomTerminalSide(binding,port,v);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
             box.appendChild(editorRow("Return Index / Key",port.selector??"auto",v=>port.selector=v));
             appendMoveControls(box,port);body.appendChild(box);
           });

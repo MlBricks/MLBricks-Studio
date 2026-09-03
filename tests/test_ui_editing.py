@@ -170,6 +170,11 @@ def test_port_layout_exposes_universal_plus_custom_terminals():
     assert '?"← Left":"↑ Up"' in js
     assert '?"Right →":"Down ↓"' in js
     assert 'editorRow("Visual Port Mode"' not in js
+    assert 'function redrawCustomTerminalLayout()' in js
+    assert 'draw(true);' in js[js.index('function redrawCustomTerminalLayout()'):js.index('function ensureAPIStepObjectIds', js.index('function redrawCustomTerminalLayout()'))]
+    assert 'changeCustomTerminalSide(binding,port,v);redrawCustomTerminalLayout();' in js
+    assert 'moveCustomTerminal(binding,port,-1);redrawCustomTerminalLayout();' in js
+    assert 'moveCustomTerminal(binding,port,1);redrawCustomTerminalLayout();' in js
 
 
 def test_blueprints_and_loaded_designs_start_with_workspace_collapsed():
