@@ -2993,8 +2993,6 @@
   border-color:#846cf0;background:#1a2631
 }
 .mlb-workspace-trigger:focus-visible{box-shadow:0 0 0 2px rgba(128,99,238,.24)}
-.mlb-workspace-caret{flex:0 0 auto;color:#d9e0e8;font-size:15px;transform:translateY(-1px)}
-.mlb-workspace-trigger[aria-expanded="true"] .mlb-workspace-caret{transform:rotate(180deg) translateY(1px)}
 .mlb-workspace-menu{
   position:absolute;left:0;right:0;top:calc(100% + 1px);z-index:200;overflow:hidden;
   border:1px solid #455566;border-radius:3px;background:#17222c;box-shadow:0 9px 24px rgba(0,0,0,.44)

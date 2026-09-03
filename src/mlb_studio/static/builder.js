@@ -7676,7 +7676,9 @@ function __MLB_STUDIO_FACTORY__(){
         draw(true);
       });
       sr.appendChild(searchInput);side.appendChild(sr);
-      if(current(state)?.kind!=="custom_edit"){
+      // Gallery owns the center workspace while it is open, so keep the sidebar
+      // focused on the Component/Data Library and hide the Build Workspace switcher.
+      if(current(state)?.kind!=="custom_edit" && !galleryWorkspace.open){
         const workspaceBox=document.createElement("div");workspaceBox.className="mlb-workspace-box";
         const workspaceLabel=document.createElement("label");workspaceLabel.textContent="BUILD WORKSPACE";
         const workspacePicker=document.createElement("div");workspacePicker.className="mlb-workspace-picker";
@@ -7686,7 +7688,9 @@ function __MLB_STUDIO_FACTORY__(){
         workspaceTrigger.setAttribute("aria-haspopup","listbox");
         workspaceTrigger.setAttribute("aria-expanded","false");
         const activeWorkspaceLabel=state.active_workspace==="data"?"Data Processing":"Model Builder";
-        workspaceTrigger.innerHTML="<span>"+activeWorkspaceLabel+"</span><span class='mlb-workspace-caret'>⌄</span>";
+        // Keep the workspace selector visually clean: clicking the label still
+        // opens/closes the menu, but no up/down caret is rendered.
+        workspaceTrigger.textContent=activeWorkspaceLabel;
         const workspaceMenu=document.createElement("div");
         workspaceMenu.className="mlb-workspace-menu";
         workspaceMenu.setAttribute("role","listbox");
