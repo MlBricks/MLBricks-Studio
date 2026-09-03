@@ -511,3 +511,16 @@ def test_custom_terminals_are_capped_at_four_per_side():
     assert 'addOut.disabled=!firstCustomTerminalSideWithRoom(binding,"top");' in js
     assert 'Maximum reached: 4 custom terminals on each side.' in js
     assert 'Add up to 4 extra terminals on each side' in js
+
+
+def test_custom_terminal_surface_spacing_is_centered_and_even():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
+    assert 'const CUSTOM_TERMINAL_REGION_MIN=30;' in js
+    assert 'const CUSTOM_TERMINAL_REGION_MAX=70;' in js
+    assert 'function evenlySpacedCustomTerminalPercent(index,count)' in js
+    assert 'const percent=evenlySpacedCustomTerminalPercent(index,group.length);' in js
+    assert "Math.abs(percent-50)<0.01?'-18px':'-6px'" in js
+    assert 'centered 30–70% vertical region' in js
+    # Old regression placed left/right custom terminals only below center.
+    assert 'percent=group.length<=1?64:(62+(26*index/(group.length-1)));' not in js
