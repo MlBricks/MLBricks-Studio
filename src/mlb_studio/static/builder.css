@@ -3389,3 +3389,59 @@
   font-size:9.5px;
   line-height:1.4;
 }
+
+/* ------------------------------------------------------------------
+   MLB Studio v28 — themed custom terminal controls
+   Keep custom API terminal actions inside the Studio dark/purple/gold palette.
+   ------------------------------------------------------------------ */
+.mlb-terminal-move{
+  background:#121a23!important;
+  border:1px solid #46576a!important;
+  color:#d4deea!important;
+  border-radius:6px!important;
+  box-shadow:none!important;
+}
+.mlb-terminal-move:not(:disabled):hover{
+  background:#18232e!important;
+  border-color:#8067df!important;
+  color:#eee9ff!important;
+}
+.mlb-terminal-move:disabled{
+  background:#101821!important;
+  border-color:#293746!important;
+  color:#64758a!important;
+  opacity:1!important;
+  filter:none!important;
+  box-shadow:none!important;
+}
+.mlb-custom-arg-remove{
+  background:#26161b!important;
+  border:1px solid #6a3b45!important;
+  color:#e58b96!important;
+  border-radius:6px!important;
+  box-shadow:none!important;
+}
+.mlb-custom-arg-remove:not(:disabled):hover{
+  background:#321a20!important;
+  border-color:#a85462!important;
+  color:#ffc0c8!important;
+}
+.mlb-custom-add-arg{
+  background:#121824!important;
+  border:1px dashed #6d58cf!important;
+  color:#c7b9ff!important;
+  border-radius:7px!important;
+  box-shadow:none!important;
+}
+.mlb-custom-add-arg:not(:disabled):hover{
+  background:#181d2b!important;
+  border-color:#9479f1!important;
+  color:#eee8ff!important;
+}
+.mlb-custom-add-arg:disabled{
+  background:#101821!important;
+  border-color:#344052!important;
+  color:#657388!important;
+  opacity:1!important;
+  filter:none!important;
+}
