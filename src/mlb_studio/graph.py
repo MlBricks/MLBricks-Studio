@@ -385,15 +385,21 @@ def primitive_catalog():
             # ports mirror the original MLBricks API exactly and are rendered
             # by Studio instead of the generic Main/Skip/Extra lane buttons.
             "runtime_ports": {
+                # Studio keeps a universal six-socket card: one input/output
+                # socket on the top, back/front, and bottom surfaces.  Logical
+                # API arguments may share a physical socket (a hover/click hub)
+                # and one logical output may be exposed on multiple sockets.
+                # The ids below remain the exact MLBricks forward() keywords;
+                # only the visual names are architecture-neutral.
                 "inputs": [
-                    {"id": "x", "name": "x", "side": "left"},
-                    {"id": "esa_update", "name": "ESA Update", "side": "top"},
-                    {"id": "previous_esa", "name": "Previous ESA", "side": "top"},
-                    {"id": "previous_state", "name": "Previous State", "side": "top"},
+                    {"id": "x", "name": "Input Signal", "socket": "top"},
+                    {"id": "esa_update", "name": "Current Signal", "socket": "back"},
+                    {"id": "previous_esa", "name": "Previous Signal", "socket": "bottom"},
+                    {"id": "previous_state", "name": "Previous State", "socket": "bottom"},
                 ],
                 "outputs": [
-                    {"id": "main", "name": "Main", "side": "right"},
-                    {"id": "state", "name": "State", "side": "bottom"},
+                    {"id": "main", "name": "Main Output", "socket": "front"},
+                    {"id": "state", "name": "State", "sockets": ["top", "bottom"]},
                 ],
             },
             "api": [

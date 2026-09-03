@@ -4233,7 +4233,7 @@ function __MLB_STUDIO_FACTORY__(){
         const loadResTest=btn("Open Test","mlb-gallery-action sample");loadResTest.addEventListener("click",openAndClose(loadCompilerTestResController));
         testGrid.appendChild(card("ResController Multi-Input","Tiny · Main + Skip · validates update/residual API argument routing","TEST",[loadResTest]));
         const loadSaffnTest=btn("Open Test","mlb-gallery-action sample");loadSaffnTest.addEventListener("click",openAndClose(loadCompilerTestSAFFN));
-        testGrid.appendChild(card("SAFFN Stateful API","Tiny · 4 named inputs + main/state outputs · validates stateful multi-output routing","TEST",[loadSaffnTest]));
+        testGrid.appendChild(card("SAFFN Stateful API","Tiny · 2 physical depths · universal 3×3 sockets · previous signal/state routing","TEST",[loadSaffnTest]));
         tests.appendChild(testGrid);
         body.appendChild(tests);
 
@@ -4972,7 +4972,7 @@ function __MLB_STUDIO_FACTORY__(){
       return "from "+importModule+" import "+api.public_name+"\n\n"+varname+" = "+api.public_name+"("+args.join(", ")+")";
     }
 
-    function connect(a,b,kind="main",sourcePort="main_out",targetPort="main_in",record=true){
+    function connect(a,b,kind="main",sourcePort="main_out",targetPort="main_in",record=true,sourceSocket="",targetSocket=""){
       if(record&&!requireEditableLayout("change connections"))return;
       if(a===b){setStatus("A layer cannot connect to itself.");return;}
       const c=current(state);
@@ -4983,6 +4983,8 @@ function __MLB_STUDIO_FACTORY__(){
       const e=edge(a,b,kind);
       e.source_port=sourcePort;
       e.target_port=targetPort;
+      if(sourceSocket)e.source_socket=sourceSocket;
+      if(targetSocket)e.target_socket=targetSocket;
       c.edges.push(e);
       setStatus(kind==="residual"?"Skip connection created.":(kind==="aux"?"Extra connection created.":(kind==="named"?"Named port connection created.":"Main connection created.")));
     }
@@ -6267,13 +6269,55 @@ function __MLB_STUDIO_FACTORY__(){
       draw();
     }
 
-    function portClick(nodeId,side,portIndex,ev,portKey="",portName="",portMode="standard"){
+    function closeNamedPortHubPicker(){
+      document.querySelectorAll(".mlb-port-hub-picker").forEach(el=>el.remove());
+    }
+
+    function openNamedPortHubPicker(portEl,items,onChoose){
+      closeNamedPortHubPicker();
+      if(!items||!items.length)return;
+      if(items.length===1){onChoose(items[0]);return;}
+      const menu=document.createElement("div");
+      menu.className="mlb-port-hub-picker";
+      const title=document.createElement("div");
+      title.className="mlb-port-hub-title";
+      title.textContent="Choose signal";
+      menu.appendChild(title);
+      items.forEach(item=>{
+        const choice=document.createElement("button");
+        choice.type="button";
+        choice.className="mlb-port-hub-choice";
+        choice.textContent=item.name;
+        choice.addEventListener("click",ev=>{
+          ev.stopPropagation();
+          closeNamedPortHubPicker();
+          onChoose(item);
+        });
+        menu.appendChild(choice);
+      });
+      document.body.appendChild(menu);
+      const r=portEl.getBoundingClientRect();
+      const menuRect=menu.getBoundingClientRect();
+      const left=Math.max(8,Math.min(window.innerWidth-menuRect.width-8,r.left+r.width/2-menuRect.width/2));
+      let top=r.bottom+8;
+      if(top+menuRect.height>window.innerHeight-8)top=Math.max(8,r.top-menuRect.height-8);
+      menu.style.left=left+"px";
+      menu.style.top=top+"px";
+      setTimeout(()=>{
+        const dismiss=ev=>{
+          if(!menu.contains(ev.target)){closeNamedPortHubPicker();document.removeEventListener("pointerdown",dismiss,true);}
+        };
+        document.addEventListener("pointerdown",dismiss,true);
+      },0);
+    }
+
+    function portClick(nodeId,side,portIndex,ev,portKey="",portName="",portMode="standard",portSocket=""){
       ev.stopPropagation();
       if(!requireEditableLayout("edit connections"))return;
       const named=portMode==="named"&&portKey;
       if(side==="out"){
-        pendingPort={nodeId,side,portIndex,portKey,portName,portMode:named?"named":"standard"};
-        if(named)setStatus((portName||"Output")+" selected. Click a Custom input port or a Standard input.");
+        pendingPort={nodeId,side,portIndex,portKey,portName,portMode:named?"named":"standard",portSocket};
+        if(named)setStatus((portName||"Output")+" selected. Click an input socket.");
         else{
           const lane=["Skip","Main","Extra"][portIndex]||"Lane";
           setStatus(lane+" output selected. Click the matching "+lane.toLowerCase()+" input.");
@@ -6285,16 +6329,16 @@ function __MLB_STUDIO_FACTORY__(){
         const pendingNamed=pendingPort.portMode==="named"&&pendingPort.portKey;
         if(named||pendingNamed){
           if(named&&pendingNamed){
-            connect(pendingPort.nodeId,nodeId,"named","named_out:"+pendingPort.portKey,"named_in:"+portKey);
+            connect(pendingPort.nodeId,nodeId,"named","named_out:"+pendingPort.portKey,"named_in:"+portKey,true,pendingPort.portSocket||"",portSocket||"");
           }else if(named&&!pendingNamed){
             const srcLane=pendingPort.portIndex;
             const sourcePort=srcLane===0?"skip_out":(srcLane===2?"extra_out":"main_out");
-            connect(pendingPort.nodeId,nodeId,"named",sourcePort,"named_in:"+portKey);
+            connect(pendingPort.nodeId,nodeId,"named",sourcePort,"named_in:"+portKey,true,"",portSocket||"");
           }else{
             const lane=portIndex;
             const kind=lane===0?"residual":(lane===2?"aux":"main");
             const targetPort=lane===0?"skip_in":(lane===2?"extra_in":"main_in");
-            connect(pendingPort.nodeId,nodeId,kind,"named_out:"+pendingPort.portKey,targetPort);
+            connect(pendingPort.nodeId,nodeId,kind,"named_out:"+pendingPort.portKey,targetPort,true,pendingPort.portSocket||"","");
           }
           pendingPort=null;draw();return;
         }
@@ -6311,11 +6355,10 @@ function __MLB_STUDIO_FACTORY__(){
         pendingPort=null;draw();return;
       }
 
-      pendingPort={nodeId,side,portIndex,portKey,portName,portMode:named?"named":"standard"};
-      setStatus(named?(portName||"Input")+"  input selected. Choose a named or standard output port.":"Input selected. Choose an output from the same lane.");
+      pendingPort={nodeId,side,portIndex,portKey,portName,portMode:named?"named":"standard",portSocket};
+      setStatus(named?(portName||"Input")+" input selected. Choose an output socket.":"Input selected. Choose an output from the same lane.");
       draw();
     }
-
 
     function splitPercentages(node){
       return {
@@ -6556,44 +6599,105 @@ function __MLB_STUDIO_FACTORY__(){
       return palette[Math.abs(Number(index)||0)%palette.length];
     }
 
+    // Universal card geometry. Every component exposes three physical inputs
+    // (top/back/bottom) and three physical outputs (top/front/bottom). Named
+    // APIs map their logical arguments onto these sockets. A socket can act as
+    // a hub for multiple logical arguments, while one logical output can have
+    // multiple physical aliases for cleaner routing.
+    function namedSocketOrder(side){
+      return side==="in"?["top","back","bottom"]:["top","front","bottom"];
+    }
+
+    function normalizeNamedSocket(socket,side){
+      const raw=String(socket||"").toLowerCase();
+      if(raw==="left")return "back";
+      if(raw==="right")return "front";
+      if(side==="in"&&["top","back","bottom"].includes(raw))return raw;
+      if(side==="out"&&["top","front","bottom"].includes(raw))return raw;
+      return "";
+    }
+
+    function defaultNamedSocket(side,index,total){
+      // Preserve the ordinary left→right main flow for generic named APIs.
+      // Explicit component metadata (such as SAFFN) can choose any socket.
+      if(side==="in"){
+        if(total<=1)return "back";
+        if(index===0)return "back";
+        if(index===1)return "top";
+        return "bottom";
+      }
+      if(total<=1)return "front";
+      if(index===0)return "front";
+      if(index===1)return "top";
+      return "bottom";
+    }
+
+    function namedPortSockets(port,side,index,total){
+      let requested=[];
+      if(Array.isArray(port?.sockets))requested=port.sockets;
+      else if(port?.socket!==undefined)requested=[port.socket];
+      else if(port?.side!==undefined)requested=[port.side]; // v11 compatibility
+      const sockets=[];
+      requested.forEach(value=>{
+        const socket=normalizeNamedSocket(value,side);
+        if(socket&&!sockets.includes(socket))sockets.push(socket);
+      });
+      if(!sockets.length)sockets.push(defaultNamedSocket(side,index,total));
+      return sockets;
+    }
+
+    function namedSocketGroups(node,side){
+      const ports=namedUserPorts(node,side)||[];
+      const groups={top:[],back:[],front:[],bottom:[]};
+      ports.forEach((port,index)=>{
+        const key=String(port.id||((side==="in"?"in_":"out_")+(index+1)));
+        const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
+        namedPortSockets(port,side,index,ports.length).forEach(socket=>{
+          if(groups[socket])groups[socket].push({port,index,key,name,socket});
+        });
+      });
+      return groups;
+    }
+
     function namedPortVisualSide(node,port,ioSide,key){
-      const requested=String(port?.side||"").toLowerCase();
-      if(["left","right","top","bottom"].includes(requested))return requested;
-      // Runtime contracts use semantic placement by default: keep the primary
-      // tensor flow horizontal and move auxiliary/state traffic to vertical
-      // surfaces. User-defined API functions without side metadata retain the
-      // older left/right layout for backwards compatibility.
-      const isRuntime=!!cat(catalog,node?.type)?.runtime_ports;
-      if(!isRuntime)return ioSide==="in"?"left":"right";
-      const k=String(key||"").toLowerCase();
-      if(ioSide==="in")return (k==="x"||k==="main"||k.includes("main"))?"left":"top";
-      return (k==="main"||k.includes("main"))?"right":"bottom";
+      const ports=namedUserPorts(node,ioSide)||[];
+      let index=ports.indexOf(port);
+      if(index<0)index=Math.max(0,ports.findIndex(p=>String(p.id||"")===String(key||"")));
+      const socket=namedPortSockets(port,ioSide,index<0?0:index,ports.length)[0];
+      if(socket==="back")return "left";
+      if(socket==="front")return "right";
+      return socket|| (ioSide==="in"?"left":"right");
+    }
+
+    function namedSocketStyle(side,socket){
+      if(socket==="top"){
+        const left=side==="in"?28:72;
+        return {style:'left:'+left+'%;top:-6px;transform:translateX(-50%)',visual:"top"};
+      }
+      if(socket==="bottom"){
+        const left=side==="in"?28:72;
+        return {style:'left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)',visual:"bottom"};
+      }
+      if(socket==="back")return {style:'left:-6px;top:50%;transform:translateY(-50%)',visual:"left"};
+      return {style:'right:-6px;top:50%;transform:translateY(-50%)',visual:"right"};
     }
 
     function portButtons(node, side){
       const namedPorts=namedUserPorts(node,side);
       if(namedPorts){
+        const groups=namedSocketGroups(node,side);
         let html="";
-        const groups={left:[],right:[],top:[],bottom:[]};
-        namedPorts.forEach((port,i)=>{
-          const key=String(port.id||((side==="in"?"in_":"out_")+(i+1)));
-          groups[namedPortVisualSide(node,port,side,key)].push({port,i,key});
-        });
-        Object.entries(groups).forEach(([visualSide,items])=>{
-          const count=Math.max(1,items.length);
-          items.forEach((entry,localIndex)=>{
-            const {port,i,key}=entry;
-            const pct=((localIndex+1)/(count+1))*100;
-            const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
-            const portColor=namedPortColor(key,i);
-            let portCss="",labelCss="",transform="";
-            if(visualSide==="left"){portCss='left:-6px;top:'+pct+'%';labelCss='left:12px;top:'+pct+'%';transform='translateY(-50%)';}
-            else if(visualSide==="right"){portCss='right:-6px;top:'+pct+'%';labelCss='right:12px;top:'+pct+'%';transform='translateY(-50%)';}
-            else if(visualSide==="top"){portCss='top:-6px;left:'+pct+'%';labelCss='top:-28px;left:'+pct+'%';transform='translateX(-50%)';}
-            else {portCss='bottom:-6px;left:'+pct+'%';labelCss='bottom:-28px;left:'+pct+'%';transform='translateX(-50%)';}
-            html+='<button class="mlb-port '+side+' named-port visual-'+visualSide+'" data-side="'+side+'" data-visual-side="'+visualSide+'" data-port-index="'+i+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" style="'+portCss+';transform:'+transform+';--named-port-color:'+portColor+'" type="button" aria-label="'+name+'" title="'+name+'"></button>';
-            html+='<span class="mlb-user-port-label '+side+' visual-'+visualSide+'" style="'+labelCss+';transform:'+transform+';--named-port-color:'+portColor+'">'+name+'</span>';
-          });
+        namedSocketOrder(side).forEach((socket,socketIndex)=>{
+          const items=groups[socket]||[];
+          const keys=items.map(item=>item.key);
+          const names=items.map(item=>item.name);
+          const displayName=names.length?names.join(" · "):("Unused "+(side==="in"?"Input":"Output"));
+          const portColor=items.length===1?namedPortColor(items[0].key,items[0].index):("#647282");
+          const pos=namedSocketStyle(side,socket);
+          const disabled=items.length?"":" disabled";
+          const key=items.length===1?items[0].key:"";
+          const name=items.length===1?items[0].name:displayName;
+          html+='<button class="mlb-port '+side+' named-port named-socket visual-'+pos.visual+(items.length>1?' named-hub':'')+(items.length?'':' unused-socket')+'" data-side="'+side+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+socketIndex+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"'+disabled+'></button>';
         });
         return html;
       }
@@ -6608,7 +6712,8 @@ function __MLB_STUDIO_FACTORY__(){
           const left = side==="in" ? 28 : 72;
           style='left:'+left+'%;bottom:-6px;top:auto;transform:translateX(-50%)';posClass="bottom-edge";
         }
-        html += '<button class="mlb-port '+side+' lane-'+i+' '+posClass+'" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="standard" style="'+style+'" type="button" aria-label="'+portLabel(side,i)+'" title="'+portLabel(side,i)+'"></button>';
+        const label=portLabel(side,i);
+        html += '<button class="mlb-port '+side+' lane-'+i+' '+posClass+'" data-side="'+side+'" data-port-index="'+i+'" data-port-mode="standard" data-tooltip="'+label+'" style="'+style+'" type="button" aria-label="'+label+'" title="'+label+'"></button>';
       }
       return html;
     }
@@ -6653,19 +6758,28 @@ function __MLB_STUDIO_FACTORY__(){
       const wr=wrap.getBoundingClientRect();
       let skipRoute=0, extraRoute=0, namedRoute=0;
 
-      function portRect(nodeEl,side,index,key=""){
-        const selector=key
-          ?('.mlb-port[data-side="'+side+'"][data-port-key="'+key+'"]')
-          :('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
-        const el=nodeEl.querySelector(selector);
+      function namedSocketElement(nodeEl,side,key="",socket=""){
+        if(socket){
+          const exact=nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-socket="'+socket+'"]');
+          if(exact)return exact;
+        }
+        if(key){
+          const candidates=[...nodeEl.querySelectorAll('.mlb-port[data-side="'+side+'"][data-port-mode="named"]')];
+          const match=candidates.find(el=>String(el.dataset.portKeys||"").split("|").filter(Boolean).includes(key));
+          if(match)return match;
+        }
+        return null;
+      }
+
+      function portRect(nodeEl,side,index,key="",socket=""){
+        const named=key||socket?namedSocketElement(nodeEl,side,key,socket):null;
+        const el=named||nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
         return el ? el.getBoundingClientRect() : nodeEl.getBoundingClientRect();
       }
 
-      function portVisualSide(nodeEl,side,index,key=""){
-        const selector=key
-          ?('.mlb-port[data-side="'+side+'"][data-port-key="'+key+'"]')
-          :('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
-        const el=nodeEl.querySelector(selector);
+      function portVisualSide(nodeEl,side,index,key="",socket=""){
+        const named=key||socket?namedSocketElement(nodeEl,side,key,socket):null;
+        const el=named||nodeEl.querySelector('.mlb-port[data-side="'+side+'"][data-port-index="'+index+'"]');
         return el?.dataset?.visualSide||(side==="in"?"left":"right");
       }
 
@@ -6683,6 +6797,35 @@ function __MLB_STUDIO_FACTORY__(){
         const c1x=x1+dx1*handle,c1y=y1+dy1*handle;
         const c2x=x2+dx2*handle,c2y=y2+dy2*handle;
         return `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
+      }
+
+      function namedNodeAvoidingPath(a,b,x1,y1,s1,x2,y2,s2){
+        const left=Math.min(x1,x2),right=Math.max(x1,x2);
+        let top=Math.min(a.getBoundingClientRect().top-wr.top,b.getBoundingClientRect().top-wr.top);
+        let bottom=Math.max(a.getBoundingClientRect().bottom-wr.top,b.getBoundingClientRect().bottom-wr.top);
+        let blocked=false;
+        flow.querySelectorAll(".mlb-node").forEach(nodeEl=>{
+          if(nodeEl===a||nodeEl===b)return;
+          const nr=nodeEl.getBoundingClientRect();
+          const nl=nr.left-wr.left,nrgt=nr.right-wr.left;
+          if(nrgt>left+4&&nl<right-4){
+            blocked=true;
+            top=Math.min(top,nr.top-wr.top);
+            bottom=Math.max(bottom,nr.bottom-wr.top);
+          }
+        });
+        const vertical=s1==="top"||s1==="bottom"||s2==="top"||s2==="bottom";
+        const forward=x2>x1;
+        if(forward&&!blocked&&!vertical)return namedBezier(x1,y1,s1,x2,y2,s2);
+
+        const route=namedRoute++;
+        let useBottom=s1==="bottom"||s2==="bottom";
+        if((s1==="top"||s2==="top")&&!(s1==="bottom"||s2==="bottom"))useBottom=false;
+        const railY=useBottom?bottom+34+(route%6)*14:top-34-(route%6)*14;
+        const [sdx,sdy]=sideVector(s1),[tdx,tdy]=sideVector(s2);
+        const sx=x1+sdx*18,sy=y1+sdy*18;
+        const tx=x2+tdx*18,ty=y2+tdy*18;
+        return `M ${x1} ${y1} L ${sx} ${sy} L ${sx} ${railY} L ${tx} ${railY} L ${tx} ${ty} L ${x2} ${y2}`;
       }
 
       function laneOf(e){
@@ -6706,20 +6849,20 @@ function __MLB_STUDIO_FACTORY__(){
         const routeIndex=lane==="named"?1:lane;
         const sourceIndex=sourceKey?routeIndex:(sourcePortText.includes("skip")?0:(sourcePortText.includes("extra")?2:routeIndex));
         const targetIndex=targetKey?routeIndex:(targetPortText.includes("skip")?0:(targetPortText.includes("extra")?2:routeIndex));
-        const ar=portRect(a,"out",sourceIndex,sourceKey), br=portRect(b,"in",targetIndex,targetKey);
+        const ar=portRect(a,"out",sourceIndex,sourceKey,e.source_socket||""), br=portRect(b,"in",targetIndex,targetKey,e.target_socket||"");
         const x1=ar.left-wr.left+ar.width/2, y1=ar.top-wr.top+ar.height/2;
         const x2=br.left-wr.left+br.width/2, y2=br.top-wr.top+br.height/2;
         const p=document.createElementNS("http://www.w3.org/2000/svg","path");
         p.setAttribute("data-edge-id",e.id);
 
         if(lane==="named"){
-          const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey);
-          const targetVisual=portVisualSide(b,"in",targetIndex,targetKey);
-          // Named API connections respect the physical surface of each port.
-          // Top/bottom ports use their vertical tangent; left/right ports keep
-          // the normal horizontal tangent. This lets complex components use all
-          // four card surfaces without forcing wires back through side rails.
-          p.setAttribute("d",namedBezier(x1,y1,sourceVisual,x2,y2,targetVisual));
+          const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"");
+          const targetVisual=portVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"");
+          // Named API connections respect the selected physical socket.
+          // Any connection that would cross an intervening card, travel
+          // backwards, or leave a top/bottom socket is pushed onto an outside
+          // rail. Wires therefore never need to jump across node bodies.
+          p.setAttribute("d",namedNodeAvoidingPath(a,b,x1,y1,sourceVisual,x2,y2,targetVisual));
           p.setAttribute("class","mlb-edge-main mlb-edge-named mlb-edge-side-aware");
           p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);
         }else if(lane===0){
@@ -6913,25 +7056,36 @@ function __MLB_STUDIO_FACTORY__(){
     function loadCompilerTestSAFFN(){
       const ctx=compilerTestContext({
         name:"TEST · SAFFN Stateful API",
-        description:"Tiny one-ESA SAFFN graph. Previous ESA/state are zero-initialized for the first physical depth using reusable Previous Value Buffer nodes.",
+        description:"Tiny two-depth SAFFN graph. Layer 1 initializes previous signal/state; Layer 2 receives the real previous signal and state from physical depth 1.",
         dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"
       });
-      const esa=makeNode(cat(catalog,"esa"));esa.name="ESA Update";esa.params={...(esa.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
-      const prevEsa=makeNode(cat(catalog,"value_buffer"));prevEsa.name="Previous ESA · Zero Init";prevEsa.params={...(prevEsa.params||{}),mode:"zero_init",width:0};
+      const esa1=makeNode(cat(catalog,"esa"));esa1.name="ESA Layer 1";esa1.params={...(esa1.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const prevSignal=makeNode(cat(catalog,"value_buffer"));prevSignal.name="Previous Signal · Zero Init";prevSignal.params={...(prevSignal.params||{}),mode:"zero_init",width:0};
       const prevState=makeNode(cat(catalog,"value_buffer"));prevState.name="Previous State · Zero Init";prevState.params={...(prevState.params||{}),mode:"zero_init",width:16};
-      const saffn=makeNode(cat(catalog,"saffn"));saffn.name="SAFFN Layer 1";saffn.params={...(saffn.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:0,total_layers:1,use_native:false,fused_cuda:false,backend:"pytorch"};
-      const nodes=[ctx.input,ctx.emb,esa,prevEsa,prevState,saffn,ctx.norm,ctx.head,ctx.out];
-      const toNamed=(source,target,key,sourcePort="main_out")=>Object.assign(edge(source.id,target.id,"named"),{source_port:sourcePort,target_port:"named_in:"+key});
+      const saffn1=makeNode(cat(catalog,"saffn"));saffn1.name="SAFFN Layer 1";saffn1.params={...(saffn1.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:0,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const esa2=makeNode(cat(catalog,"esa"));esa2.name="ESA Layer 2";esa2.params={...(esa2.params||{}),embd:64,dim:64,head:4,batch:2,block:64,backend:"pytorch",precision:"fp32",compass:"auto",dropout:0.0};
+      const saffn2=makeNode(cat(catalog,"saffn"));saffn2.name="SAFFN Layer 2";saffn2.params={...(saffn2.params||{}),dim:64,d_model:64,state_dim:16,depth_embedding_dim:8,layer_index:1,total_layers:2,use_native:false,fused_cuda:false,backend:"pytorch"};
+      const nodes=[ctx.input,ctx.emb,esa1,prevSignal,prevState,saffn1,esa2,saffn2,ctx.norm,ctx.head,ctx.out];
+      const toNamed=(source,target,key,sourcePort="main_out",sourceSocket="",targetSocket="")=>Object.assign(edge(source.id,target.id,"named"),{source_port:sourcePort,target_port:"named_in:"+key,...(sourceSocket?{source_socket:sourceSocket}:{}),...(targetSocket?{target_socket:targetSocket}:{})});
+      const fromNamed=(source,target,key,targetPort="main_in",sourceSocket="")=>Object.assign(edge(source.id,target.id,"named"),{source_port:"named_out:"+key,target_port:targetPort,...(sourceSocket?{source_socket:sourceSocket}:{})});
       const edges=[
         edge(ctx.input.id,ctx.emb.id),
-        edge(ctx.emb.id,esa.id),
-        edge(esa.id,prevEsa.id),
+        edge(ctx.emb.id,esa1.id),
+        edge(esa1.id,prevSignal.id),
         edge(ctx.emb.id,prevState.id),
-        toNamed(ctx.emb,saffn,"x"),
-        toNamed(esa,saffn,"esa_update"),
-        toNamed(prevEsa,saffn,"previous_esa"),
-        toNamed(prevState,saffn,"previous_state"),
-        Object.assign(edge(saffn.id,ctx.norm.id,"main"),{source_port:"named_out:main",target_port:"main_in"}),
+
+        toNamed(ctx.emb,saffn1,"x","main_out","","top"),
+        toNamed(esa1,saffn1,"esa_update","main_out","","back"),
+        toNamed(prevSignal,saffn1,"previous_esa","main_out","","bottom"),
+        toNamed(prevState,saffn1,"previous_state","main_out","","bottom"),
+
+        fromNamed(saffn1,esa2,"main","main_in","front"),
+        toNamed(saffn1,saffn2,"x","named_out:main","front","top"),
+        toNamed(esa2,saffn2,"esa_update","main_out","","back"),
+        toNamed(esa1,saffn2,"previous_esa","main_out","","bottom"),
+        toNamed(saffn1,saffn2,"previous_state","named_out:state","bottom","bottom"),
+
+        fromNamed(saffn2,ctx.norm,"main","main_in","front"),
         edge(ctx.norm.id,ctx.head.id),
         edge(ctx.head.id,ctx.out.id)
       ];
@@ -7708,21 +7862,33 @@ function __MLB_STUDIO_FACTORY__(){
             const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · lazy imports":"Nested Module · 3-lane interface";
           }else meta.textContent=(apiInfo(n).public_name||n.type)+" · Skip / Main / Extra";
           card.querySelectorAll('.mlb-port').forEach(portEl=>{
-            const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",name=portEl.dataset.portName||"",mode=portEl.dataset.portMode||"standard";
-            if(pendingPort?.nodeId===n.id&&pendingPort.side===side&&((mode==="named"&&pendingPort.portKey===key)||(mode!=="named"&&pendingPort.portIndex===idx))) portEl.classList.add("armed");
-            portEl.addEventListener("click",ev=>portClick(n.id,side,idx,ev,key,name,mode));
+            const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",name=portEl.dataset.portName||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
+            const keys=String(portEl.dataset.portKeys||key||"").split("|").filter(Boolean);
+            const names=String(portEl.dataset.portNames||name||"").split("|");
+            const pendingNamedMatch=mode==="named"&&pendingPort?.portKey&&keys.includes(pendingPort.portKey)&&(!pendingPort.portSocket||pendingPort.portSocket===socket);
+            if(pendingPort?.nodeId===n.id&&pendingPort.side===side&&(pendingNamedMatch||(mode!=="named"&&pendingPort.portIndex===idx))) portEl.classList.add("armed");
+            if(portEl.disabled)return;
+            portEl.addEventListener("click",ev=>{
+              if(mode!=="named"){portClick(n.id,side,idx,ev,key,name,mode,socket);return;}
+              ev.stopPropagation();
+              const items=keys.map((logicalKey,i)=>({key:logicalKey,name:names[i]||logicalKey}));
+              openNamedPortHubPicker(portEl,items,item=>{
+                const synthetic={stopPropagation(){}};
+                portClick(n.id,side,idx,synthetic,item.key,item.name,"named",socket);
+              });
+            });
           });
           const namedIn=namedUserPorts(n,"in"),namedOut=namedUserPorts(n,"out");
           if(namedIn||namedOut){
-            card.classList.add("mlb-user-function-named");
-            const allNamed=[...(namedIn||[]).map((p,i)=>({p,io:"in",i})),...(namedOut||[]).map((p,i)=>({p,io:"out",i}))];
-            const sideCounts={left:0,right:0,top:0,bottom:0};
-            allNamed.forEach(({p,io,i})=>{const key=String(p.id||((io==="in"?"in_":"out_")+(i+1)));sideCounts[namedPortVisualSide(n,p,io,key)]++;});
-            const maxNamed=Math.max(...Object.values(sideCounts),1);
+            card.classList.add("mlb-user-function-named","mlb-universal-six-socket");
+            const inGroups=namedSocketGroups(n,"in"),outGroups=namedSocketGroups(n,"out");
+            const allNamed=[...(namedIn||[]),...(namedOut||[])];
+            const topSockets=(inGroups.top.length?1:0)+(outGroups.top.length?1:0);
+            const bottomSockets=(inGroups.bottom.length?1:0)+(outGroups.bottom.length?1:0);
             if(allNamed.length>=3)card.classList.add("mlb-complex-api-node");
-            card.classList.add("mlb-top-ports-"+Math.min(sideCounts.top,4));
-            card.classList.add("mlb-bottom-ports-"+Math.min(sideCounts.bottom,4));
-            card.style.height=Math.max(315,(Math.max(sideCounts.left,sideCounts.right)+1)*42)+"px";
+            card.classList.add("mlb-top-ports-"+Math.min(topSockets,4));
+            card.classList.add("mlb-bottom-ports-"+Math.min(bottomSockets,4));
+            card.style.height="315px";
           }
           card.addEventListener("click",()=>{outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",()=>{if(n.definition_id)openInside(n);});
           flow.appendChild(card);

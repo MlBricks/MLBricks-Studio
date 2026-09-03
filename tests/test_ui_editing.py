@@ -342,11 +342,13 @@ def test_gallery_contains_tiny_compiler_test_models():
     assert 'loadCompilerTestESABOLT' in js
     assert 'loadCompilerTestResController' in js
     assert 'loadCompilerTestSAFFN' in js
-    assert 'Previous ESA · Zero Init' in js
+    assert 'Previous Signal · Zero Init' in js
     assert 'Previous State · Zero Init' in js
     assert 'cat(catalog,"value_buffer")' in js
-    assert 'const esa=makeNode(cat(catalog,"esa"))' in js
+    assert 'const esa1=makeNode(cat(catalog,"esa"))' in js
+    assert 'const esa2=makeNode(cat(catalog,"esa"))' in js
     assert 'const prevEsa=makeNode(cat(catalog,"esa"))' not in js
+    assert 'Layer 2 receives the real previous signal and state from physical depth 1' in js
     assert 'dim:64,heads:4,block:64,batch:2,vocab:2048' in js
     assert 'Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"})' in js
 
@@ -370,8 +372,11 @@ def test_saffn_catalog_exposes_original_api_named_runtime_ports():
     ports = catalog["saffn"]["runtime_ports"]
     assert [p["id"] for p in ports["inputs"]] == ["x", "esa_update", "previous_esa", "previous_state"]
     assert [p["id"] for p in ports["outputs"]] == ["main", "state"]
-    assert [p["side"] for p in ports["inputs"]] == ["left", "top", "top", "top"]
-    assert [p["side"] for p in ports["outputs"]] == ["right", "bottom"]
+    assert [p["name"] for p in ports["inputs"]] == ["Input Signal", "Current Signal", "Previous Signal", "Previous State"]
+    assert [p["name"] for p in ports["outputs"]] == ["Main Output", "State"]
+    assert [p["socket"] for p in ports["inputs"]] == ["top", "back", "bottom", "bottom"]
+    assert ports["outputs"][0]["socket"] == "front"
+    assert ports["outputs"][1]["sockets"] == ["top", "bottom"]
 
 
 def test_model_build_validation_counts_named_and_skip_edges_as_real_connectivity():
@@ -399,9 +404,15 @@ def test_complex_named_api_nodes_have_readable_graph_ui():
     assert 'width:196px!important;' in css
     assert 'function namedPortVisualSide(node,port,ioSide,key)' in js
     assert 'data-visual-side="' in js
-    assert 'namedBezier(x1,y1,sourceVisual,x2,y2,targetVisual)' in js
-    assert '.mlb-node.mlb-complex-api-node.mlb-top-ports-3{' in css
-    assert 'width:284px!important;' in css
+    assert 'function namedSocketOrder(side)' in js
+    assert 'function namedSocketGroups(node,side)' in js
+    assert 'namedNodeAvoidingPath(a,b,x1,y1,sourceVisual,x2,y2,targetVisual)' in js
+    assert 'openNamedPortHubPicker(portEl,items,item=>' in js
+    assert 'data-port-keys="' in js
+    assert 'data-tooltip="' in js
+    assert '.mlb-node.mlb-universal-six-socket{' in css
+    assert 'width:210px!important;' in css
+    assert '.mlb-port-hub-picker{' in css
     assert '.mlb-edge-dim{opacity:.13!important}' in css
     assert '.mlb-edge-focus{' in css
     assert '.mlb-zoom-fit{' in css
