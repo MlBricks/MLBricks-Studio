@@ -828,8 +828,16 @@ class Builder:
         old=self._model_servers.pop(model_id,None)
         if old is not None: old.stop()
 
+        entry["serve_status"] = "starting"
+        entry["serve_urls"] = {}
+        entry["serve_tunnel_error"] = None
+
         def emit(message,overall):
-            if progress_callback: progress_callback({"status":"running","runtime_kind":"serve","phase":"starting","overall":overall,"message":message,"model_id":model_id})
+            if progress_callback: progress_callback({
+                "status":"running","runtime_kind":"serve","phase":"starting","overall":overall,
+                "message":message,"model_id":model_id,
+                "model_update":{"serve_status":"starting","serve_urls":{}},
+            })
         emit("Loading trained model for API server…",10)
 
         compiled=tokenizer=None
@@ -2410,10 +2418,18 @@ class Builder:
                     })
                     return
                 self.last_run_error = exc
-                self._publish_bridge_progress({
-                    "status":"error","runtime_kind":action,"overall":0,
+                runtime_kind = "serve" if str(action).startswith("serve_") else action
+                error_payload = {
+                    "status":"error","runtime_kind":runtime_kind,"overall":0,
                     "message":f"{type(exc).__name__}: {exc}"
-                })
+                }
+                if runtime_kind == "serve":
+                    error_payload.update({
+                        "phase": action,
+                        "model_id": command.get("model_id"),
+                        "model_update": {"serve_status":"error"},
+                    })
+                self._publish_bridge_progress(error_payload)
 
         self._run_thread = threading.Thread(
             target=worker,

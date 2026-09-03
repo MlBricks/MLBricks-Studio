@@ -1085,6 +1085,7 @@
 .mlb-serve-url strong,.mlb-serve-url span{display:block}.mlb-serve-url strong{font-size:10.5px;color:#cdd8e2}.mlb-serve-url span{margin-top:3px;font-size:10.5px;color:#83a0b6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mlb-serve-url>div:last-child{display:flex;gap:4px;margin-top:6px}.mlb-serve-mini{border:1px solid #3a4d5e!important;background:#17222d!important;color:#b9c7d4!important;border-radius:5px!important;padding:4px 6px!important;font-size:10.5px!important}
 .mlb-serve-status{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px;border:1px solid #367759;border-radius:7px;background:#10241b}.mlb-serve-status strong{font-size:11px;color:#73d9a3}.mlb-serve-status span{font-size:10.5px;color:#8faa9b}
+.mlb-serve-status.starting{border-color:#6f6337;background:#211e12}.mlb-serve-status.starting strong{color:#ddc66f}.mlb-serve-status.starting span{color:#b8aa72}
 .mlb-serve-status.stopped{border-color:#5a4850;background:#1c1518}.mlb-serve-status.stopped strong{color:#b496a0}
 .mlb-serve-endpoints{display:grid;gap:4px}.mlb-serve-endpoints>div{display:grid;grid-template-columns:minmax(0,35%) minmax(0,65%);gap:8px;padding:6px 7px;border:1px solid #2d3e4c;border-radius:5px;background:#101820}
 .mlb-serve-endpoints span{font-size:10.5px;color:#7f91a1}.mlb-serve-endpoints strong{font-size:10.5px;color:#c9d5df;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

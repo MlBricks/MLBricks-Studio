@@ -1392,6 +1392,10 @@ function __MLB_STUDIO_FACTORY__(){
     function requestServeCommand(action,entry){
       entry=liveBuiltModel(entry);
       if(!entry)return;
+      if(action==="serve_start"){
+        entry.serve_status="starting";
+        entry.serve_live={...(entry.serve_live||{}),running:false,error:null,message:"Starting API server…"};
+      }
       if(!ensureBridgeForAction()){
         execution={status:"error",runtime_kind:"serve",overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
         applyExecutionProgress(execution);setStatus(execution.message);return;
@@ -3498,13 +3502,15 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(tab==="status"){
         const running=entry.serve_status==="running"||!!info.local_url;
+        const starting=!running&&entry.serve_status==="starting";
         const failed=entry.serve_status==="error"||!!info.error;
         const tunnelError=info.public_tunnel_error||entry.serve_tunnel_error||null;
         const hero=runtimeSection("API Server Status"),status=document.createElement("div");
-        status.className="mlb-serve-status "+(running?"running":failed?"error":"stopped");
-        status.innerHTML="<strong>"+(running?(tunnelError?"● RUNNING · LOCAL":"● RUNNING"):failed?"✕ ERROR":"○ STOPPED")+"</strong><span>"+
+        status.className="mlb-serve-status "+(running?"running":starting?"starting":failed?"error":"stopped");
+        status.innerHTML="<strong>"+(running?(tunnelError?"● RUNNING · LOCAL":"● RUNNING"):starting?"◌ STARTING":failed?"✕ ERROR":"○ STOPPED")+"</strong><span>"+
           (running
             ?(tunnelError?"HTTP server is running, but Public HTTPS failed. Check the ngrok error below.":"Model is accepting HTTP inference requests.")
+            :starting?(info.message||execution.message||"Starting model API server…")
             :failed?(info.error||"API server failed to start."):"Start the server from API Server Setup.")+
           "</span>";
         hero.appendChild(status);
@@ -3533,7 +3539,7 @@ function __MLB_STUDIO_FACTORY__(){
         const endpoints=runtimeSection("API Endpoints"),ep=document.createElement("div");ep.className="mlb-serve-endpoints";
         [["Playground","GET /"],["Health","GET /health"],["Generate","POST /v1/generate"],["OpenAI-style","POST /v1/completions"],["Models","GET /v1/models"]].forEach(([a,b])=>{const row=document.createElement("div");row.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";ep.appendChild(row);});endpoints.appendChild(ep);main.appendChild(endpoints);
         const code=runtimeSection("Web App Example"),pre=document.createElement("pre");pre.className="mlb-serve-code";pre.textContent=serveCodeExample(entry,info);code.appendChild(pre);main.appendChild(code);
-        const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Server</h3><div><span>Status</span><strong>"+(running?"Running":"Stopped")+"</strong></div><div><span>Port</span><strong>"+(info.port||config.port)+"</strong></div><div><span>API Key</span><strong>"+(config.require_api_key?"Required":"Off")+"</strong></div><div><span>Public Tunnel</span><strong>"+(config.public_tunnel||"off")+"</strong></div>";side.appendChild(summary);
+        const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Server</h3><div><span>Status</span><strong>"+(running?"Running":starting?"Starting":failed?"Error":"Stopped")+"</strong></div><div><span>Port</span><strong>"+(info.port||config.port)+"</strong></div><div><span>API Key</span><strong>"+(config.require_api_key?"Required":"Off")+"</strong></div><div><span>Public Tunnel</span><strong>"+(config.public_tunnel||"off")+"</strong></div>";side.appendChild(summary);
         if(config.require_api_key){const keyBox=document.createElement("div");keyBox.className="mlb-serve-secret";keyBox.innerHTML="<strong>API KEY</strong><code title='Click to select'>"+(secret.api_key||"Restart server to generate key")+"</code>";
           const keyCode=keyBox.querySelector("code");
           keyCode?.addEventListener("click",()=>{
