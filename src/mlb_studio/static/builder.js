@@ -5725,7 +5725,7 @@ function __MLB_STUDIO_FACTORY__(){
 
         if(binding.port_mode==="extended"){
           const terminalTitle=document.createElement("div");terminalTitle.className="mlb-section-title";terminalTitle.textContent="CUSTOM TERMINALS";body.appendChild(terminalTitle);
-          const terminalHelp=document.createElement("div");terminalHelp.className="mlb-api-path";terminalHelp.textContent="The six universal terminals stay fixed. Add up to 4 extra terminals on each side, choose Top / Right / Bottom / Left, then map each terminal to a function parameter or return value. Top/Bottom extras sit between the fixed pair; Left/Right extras share a centered 30–70% vertical region and redistribute equally above/below the center as terminals are added.";body.appendChild(terminalHelp);
+          const terminalHelp=document.createElement("div");terminalHelp.className="mlb-api-path";terminalHelp.textContent="The six universal terminals stay fixed. Add up to 4 extra terminals on each side, choose Top / Right / Bottom / Left, then map each terminal to a function parameter or return value. Top/Bottom extras sit between the fixed pair; Left/Right extras use reserved 30–70% slots around the fixed center socket, never overlap it, and redistribute from the center as terminals are added.";body.appendChild(terminalHelp);
 
           const terminalSideOptions=[
             {value:"top",label:"Top"},{value:"right",label:"Right"},{value:"bottom",label:"Bottom"},{value:"left",label:"Left"}
@@ -6823,6 +6823,24 @@ function __MLB_STUDIO_FACTORY__(){
       return CUSTOM_TERMINAL_REGION_MIN+((CUSTOM_TERMINAL_REGION_MAX-CUSTOM_TERMINAL_REGION_MIN)*i/(total-1));
     }
 
+    // Left/right have a fixed universal socket at 50%, so custom terminals use
+    // the four reserved slots around it instead of ever occupying the center.
+    // The occupied sequence (custom + fixed center) therefore stays evenly
+    // spaced at 10% steps inside the same 30–70% bounded region.
+    const CUSTOM_SIDE_TERMINAL_SLOTS={
+      1:[40],
+      2:[40,60],
+      3:[30,40,60],
+      4:[30,40,60,70]
+    };
+
+    function centeredSideCustomTerminalPercent(index,count){
+      const total=Math.max(1,Math.min(CUSTOM_TERMINAL_LIMIT_PER_SIDE,Number(count)||1));
+      const slots=CUSTOM_SIDE_TERMINAL_SLOTS[total]||CUSTOM_SIDE_TERMINAL_SLOTS[4];
+      const i=Math.max(0,Math.min(slots.length-1,Number(index)||0));
+      return slots[i];
+    }
+
     function customTerminalRecords(node){
       const inputs=customUserTerminals(node,"in");
       const outputs=customUserTerminals(node,"out");
@@ -6836,7 +6854,9 @@ function __MLB_STUDIO_FACTORY__(){
         const group=all.filter(item=>String(item.port.side||"top")===visualSide)
           .sort((a,b)=>(Number(a.port.order)||0)-(Number(b.port.order)||0)||String(a.port.id).localeCompare(String(b.port.id)));
         group.forEach((item,index)=>{
-          const percent=evenlySpacedCustomTerminalPercent(index,group.length);
+          const percent=(visualSide==="left"||visualSide==="right")
+            ?centeredSideCustomTerminalPercent(index,group.length)
+            :evenlySpacedCustomTerminalPercent(index,group.length);
           result.push({...item,visualSide,percent});
         });
       });
@@ -6848,13 +6868,10 @@ function __MLB_STUDIO_FACTORY__(){
       const p=percent.toFixed(2);
       if(item.visualSide==="top")return 'left:'+p+'%;top:-6px;transform:translateX(-50%)';
       if(item.visualSide==="bottom")return 'left:'+p+'%;bottom:-6px;top:auto;transform:translateX(-50%)';
-      // The fixed universal left/right socket lives at 50%. For odd custom
-      // counts the equal-spacing solution may also contain 50%, so offset only
-      // that custom dot slightly outward. Its vertical position remains exactly
-      // centered and the custom group keeps mathematically equal spacing.
-      const edgeOffset=Math.abs(percent-50)<0.01?'-18px':'-6px';
-      if(item.visualSide==="left")return 'left:'+edgeOffset+';top:'+p+'%;transform:translateY(-50%)';
-      return 'right:'+edgeOffset+';top:'+p+'%;transform:translateY(-50%)';
+      // Left/right custom terminals never occupy the universal 50% center
+      // socket, so they stay on the normal card edge without a second column.
+      if(item.visualSide==="left")return 'left:-6px;top:'+p+'%;transform:translateY(-50%)';
+      return 'right:-6px;top:'+p+'%;transform:translateY(-50%)';
     }
 
     function namedPortColor(key,index=0){
@@ -7023,7 +7040,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       // User-created terminals are additive. They are separate named sockets
       // while the three fixed input and three fixed output sockets above stay
-      // active. Every side uses the same centered 30–70% bounded region, so
+      // active. Top/bottom use the centered 30–70% region; left/right reserve a
       // adding/removing a terminal redistributes the whole side evenly.
       customTerminalRecords(node).filter(item=>item.io===side).forEach((item,customIndex)=>{
         const port=item.port;
