@@ -5165,11 +5165,31 @@ function __MLB_STUDIO_FACTORY__(){
       binding.source_revision=Math.max(1,Number(binding.source_revision||1));
       if(!Array.isArray(binding.dependencies))binding.dependencies=[];
       binding.dependencies=binding.dependencies.map(x=>String(x||"").trim()).filter(Boolean);
-      binding.port_mode=String(binding.port_mode||"standard").toLowerCase()==="named"?"named":"standard";
+      binding.port_mode=String(binding.port_mode||"standard").toLowerCase();
+      if(!["standard","extended","named"].includes(binding.port_mode))binding.port_mode="standard";
       if(!Array.isArray(binding.input_ports))binding.input_ports=[];
       if(!Array.isArray(binding.output_ports))binding.output_ports=[];
-      binding.input_ports=binding.input_ports.map((port,i)=>({id:String(port?.id||("in_"+(i+1))),name:String(port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),parameter:String(port?.parameter||port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),positional:!!port?.positional,required:port?.required!==false}));
-      binding.output_ports=binding.output_ports.map((port,i)=>({id:String(port?.id||("out_"+(i+1))),name:String(port?.name||("output_"+(i+1))).trim()||("output_"+(i+1)),selector:String(port?.selector??(i===0?"auto":String(i)))}));
+      const validTerminalSide=value=>["top","right","bottom","left"].includes(String(value||"").toLowerCase())?String(value).toLowerCase():"top";
+      binding.input_ports=binding.input_ports.map((port,i)=>({
+        id:String(port?.id||("in_"+(i+1))),
+        name:String(port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),
+        parameter:String(port?.parameter||port?.name||("input_"+(i+1))).trim()||("input_"+(i+1)),
+        positional:!!port?.positional,
+        required:port?.required!==false,
+        side:validTerminalSide(port?.side),
+        order:Number.isFinite(Number(port?.order))?Number(port.order):i,
+        ...(port?.socket!==undefined?{socket:port.socket}:{}),
+        ...(Array.isArray(port?.sockets)?{sockets:[...port.sockets]}:{})
+      }));
+      binding.output_ports=binding.output_ports.map((port,i)=>({
+        id:String(port?.id||("out_"+(i+1))),
+        name:String(port?.name||("output_"+(i+1))).trim()||("output_"+(i+1)),
+        selector:String(port?.selector??(i===0?"auto":String(i))),
+        side:validTerminalSide(port?.side),
+        order:Number.isFinite(Number(port?.order))?Number(port.order):i,
+        ...(port?.socket!==undefined?{socket:port.socket}:{}),
+        ...(Array.isArray(port?.sockets)?{sockets:[...port.sockets]}:{})
+      }));
       binding.multi_output=!!binding.multi_output;
       if(!binding.output_map||typeof binding.output_map!=="object")binding.output_map={main:"0",skip:"1",extra:"2"};
       binding.output_map.main=String(binding.output_map.main??"0");
@@ -5194,11 +5214,46 @@ function __MLB_STUDIO_FACTORY__(){
     function apiSafePortName(value,fallback="port"){
       return apiSafeObjectName(value,fallback);
     }
-    function defaultUserInputPort(index=0){
-      const n=index+1;return {id:uid("inport"),name:"input_"+n,parameter:"input_"+n,positional:false,required:true};
+    function defaultUserInputPort(index=0,side="top",order=index){
+      const n=index+1;return {id:uid("inport"),name:"input_"+n,parameter:"input_"+n,positional:false,required:true,side,order};
     }
-    function defaultUserOutputPort(index=0){
-      const n=index+1;return {id:uid("outport"),name:"output_"+n,selector:index===0?"auto":String(index)};
+    function defaultUserOutputPort(index=0,side="top",order=index){
+      const n=index+1;return {id:uid("outport"),name:"output_"+n,selector:index===0?"auto":String(index),side,order};
+    }
+
+    function customTerminalEntries(binding,side=null){
+      const all=[
+        ...(binding.input_ports||[]).map((port,index)=>({port,index,io:"in"})),
+        ...(binding.output_ports||[]).map((port,index)=>({port,index,io:"out"}))
+      ];
+      const filtered=side?all.filter(item=>String(item.port.side||"top")===side):all;
+      return filtered.sort((a,b)=>(Number(a.port.order)||0)-(Number(b.port.order)||0)||String(a.port.id).localeCompare(String(b.port.id)));
+    }
+    function resequenceCustomTerminals(binding,side){
+      customTerminalEntries(binding,side).forEach((item,index)=>item.port.order=index);
+    }
+    function nextCustomTerminalOrder(binding,side){
+      const items=customTerminalEntries(binding,side);
+      return items.length;
+    }
+    function moveCustomTerminal(binding,port,delta){
+      const side=String(port.side||"top");
+      const items=customTerminalEntries(binding,side);
+      const index=items.findIndex(item=>item.port===port||item.port.id===port.id);
+      const next=Math.max(0,Math.min(items.length-1,index+delta));
+      if(index<0||next===index)return;
+      const other=items[next].port;
+      const temp=Number(port.order)||index;
+      port.order=Number(other.order)||next;
+      other.order=temp;
+      resequenceCustomTerminals(binding,side);
+    }
+    function changeCustomTerminalSide(binding,port,nextSide){
+      const prev=String(port.side||"top");
+      port.side=String(nextSide||"top");
+      port.order=nextCustomTerminalOrder(binding,port.side);
+      resequenceCustomTerminals(binding,prev);
+      resequenceCustomTerminals(binding,port.side);
     }
 
     function ensureAPIStepObjectIds(step){
@@ -5574,39 +5629,76 @@ function __MLB_STUDIO_FACTORY__(){
         body.appendChild(editorRow("Function Name",binding.user_function_name||"custom_function",v=>{binding.user_function_name=String(v||"").trim()||"custom_function";customImportStatus[def.id+":"+step.id]=null;},{type:"text"}));
         body.appendChild(editorRow("Python Code",binding.user_code||"def custom_function(x):\n    return x",v=>{binding.user_code=v;binding.dependencies=extractPythonDependencies(v);binding.source_hash=userSourceHash(v);customImportStatus[def.id+":"+step.id]=null;},{textarea:true,rows:10}));
         const userHelp=document.createElement("div");userHelp.className="mlb-api-path";userHelp.textContent="Define one Python function. torch and torch.nn are available automatically; imports inside the editor use the notebook/kernel environment.";body.appendChild(userHelp);
+        const portModeOptions=[
+          {value:"standard",label:"Universal · 3 In / 3 Out"},
+          {value:"extended",label:"Universal + Custom Terminals"}
+        ];
+        if(binding.port_mode==="named")portModeOptions.push({value:"named",label:"Legacy Custom Ports"});
         body.appendChild(editorRow("Port Layout",binding.port_mode||"standard",v=>{
+          checkpoint("Change API port layout");
+          const previous=binding.port_mode;
           binding.port_mode=v;
-          if(v==="named"){
-            binding.auto_main_input=false;binding.multi_output=false;
-            if(!binding.input_ports.length)binding.input_ports=[defaultUserInputPort(0)];
-            if(!binding.output_ports.length)binding.output_ports=[defaultUserOutputPort(0)];
+          if(v==="standard"&&previous!=="standard"){
+            const inputIds=new Set((binding.input_ports||[]).map(port=>String(port.id)));
+            const outputIds=new Set((binding.output_ports||[]).map(port=>String(port.id)));
+            current(state).edges=(current(state).edges||[]).filter(e=>{
+              const ti=String(e.target_port||"").replace(/^named_in:/,"");
+              const so=String(e.source_port||"").replace(/^named_out:/,"");
+              return !(String(e.target_port||"").startsWith("named_in:")&&e.target===step.id&&inputIds.has(ti))
+                && !(String(e.source_port||"").startsWith("named_out:")&&e.source===step.id&&outputIds.has(so));
+            });
+            binding.input_ports=[];binding.output_ports=[];
           }
           pendingPort=null;draw();
-        },{select:true,options:[{value:"standard",label:"Standard"},{value:"named",label:"Custom"}]}));
-        if(binding.port_mode==="named"){
-          const inTitle=document.createElement("div");inTitle.className="mlb-section-title";inTitle.textContent="INPUT PORTS";body.appendChild(inTitle);
-          const inHelp=document.createElement("div");inHelp.className="mlb-api-path";inHelp.textContent="Each connected input port is passed to the Python function using its Function Parameter name. Named ports can connect directly between User Defined Function nodes.";body.appendChild(inHelp);
+        },{select:true,options:portModeOptions}));
+
+        if(binding.port_mode==="extended"){
+          const terminalTitle=document.createElement("div");terminalTitle.className="mlb-section-title";terminalTitle.textContent="CUSTOM TERMINALS";body.appendChild(terminalTitle);
+          const terminalHelp=document.createElement("div");terminalHelp.className="mlb-api-path";terminalHelp.textContent="The six universal terminals stay fixed. Add extra inputs or outputs, choose Top / Right / Bottom / Left, then map each terminal to a function parameter or return value. Top/Bottom extras sit between the fixed pair; Left/Right extras sit below the fixed side terminal.";body.appendChild(terminalHelp);
+
+          const terminalSideOptions=[
+            {value:"top",label:"Top"},{value:"right",label:"Right"},{value:"bottom",label:"Bottom"},{value:"left",label:"Left"}
+          ];
+          const appendMoveControls=(box,port)=>{
+            const side=String(port.side||"top");
+            const row=document.createElement("div");row.className="mlb-terminal-move-row";
+            const first=btn(side==="top"||side==="bottom"?"← Left":"↑ Up","mlb-terminal-move");
+            const second=btn(side==="top"||side==="bottom"?"Right →":"Down ↓","mlb-terminal-move");
+            const items=customTerminalEntries(binding,side);
+            const index=items.findIndex(item=>item.port===port||item.port.id===port.id);
+            first.disabled=index<=0;second.disabled=index<0||index>=items.length-1;
+            first.addEventListener("click",()=>{checkpoint("Move custom terminal");moveCustomTerminal(binding,port,-1);draw();});
+            second.addEventListener("click",()=>{checkpoint("Move custom terminal");moveCustomTerminal(binding,port,1);draw();});
+            row.append(first,second);box.appendChild(row);
+          };
+
+          const inTitle=document.createElement("div");inTitle.className="mlb-subsection-title";inTitle.textContent="EXTRA INPUT TERMINALS";body.appendChild(inTitle);
           (binding.input_ports||[]).forEach((port,index)=>{
-            const box=document.createElement("div");box.className="mlb-custom-arg-card";
+            const box=document.createElement("div");box.className="mlb-custom-arg-card mlb-terminal-card";
             const head=document.createElement("div");head.className="mlb-custom-arg-head";const nm=document.createElement("strong");nm.textContent=port.name||("Input "+(index+1));
-            const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove input port";rm.addEventListener("click",()=>{checkpoint("Remove user input port");current(state).edges=(current(state).edges||[]).filter(e=>!(e.target===step.id&&e.target_port==="named_in:"+port.id));binding.input_ports.splice(index,1);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
-            box.appendChild(editorRow("Port Name",port.name||"",v=>{port.name=apiSafePortName(v,"input_"+(index+1));draw();}));
+            const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove input terminal";rm.addEventListener("click",()=>{checkpoint("Remove custom input terminal");current(state).edges=(current(state).edges||[]).filter(e=>!(e.target===step.id&&e.target_port==="named_in:"+port.id));const oldSide=port.side;binding.input_ports.splice(index,1);resequenceCustomTerminals(binding,oldSide);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
+            box.appendChild(editorRow("Terminal Name",port.name||"",v=>{port.name=apiSafePortName(v,"input_"+(index+1));draw();}));
+            box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move input terminal side");changeCustomTerminalSide(binding,port,v);draw();},{select:true,options:terminalSideOptions}));
             box.appendChild(editorRow("Function Parameter",port.parameter||port.name||"",v=>port.parameter=apiSafePortName(v,port.name||("input_"+(index+1)))));
             box.appendChild(editorRow("Pass As",port.positional?"positional":"keyword",v=>port.positional=v==="positional",{select:true,options:["keyword","positional"]}));
             box.appendChild(editorRow("Required",port.required===false?"false":"true",v=>port.required=v==="true",{select:true,options:["true","false"]}));
-            body.appendChild(box);
+            appendMoveControls(box,port);body.appendChild(box);
           });
-          const addIn=btn("+ Add Input Port","mlb-create mlb-custom-add-arg");addIn.addEventListener("click",()=>{checkpoint("Add user input port");binding.input_ports.push(defaultUserInputPort(binding.input_ports.length));draw();});body.appendChild(addIn);
-          const outTitle=document.createElement("div");outTitle.className="mlb-section-title";outTitle.textContent="OUTPUT PORTS";body.appendChild(outTitle);
-          const outHelp=document.createElement("div");outHelp.className="mlb-api-path";outHelp.textContent="Map each visual output to the complete result (auto), a tuple/list index, or a dict/object key. Add as many outputs as your function returns.";body.appendChild(outHelp);
+          const addIn=btn("+ Add Input Terminal","mlb-create mlb-custom-add-arg");addIn.addEventListener("click",()=>{checkpoint("Add custom input terminal");const side="top";binding.input_ports.push(defaultUserInputPort(binding.input_ports.length,side,nextCustomTerminalOrder(binding,side)));draw();});body.appendChild(addIn);
+
+          const outTitle=document.createElement("div");outTitle.className="mlb-subsection-title";outTitle.textContent="EXTRA OUTPUT TERMINALS";body.appendChild(outTitle);
           (binding.output_ports||[]).forEach((port,index)=>{
-            const box=document.createElement("div");box.className="mlb-custom-arg-card";
+            const box=document.createElement("div");box.className="mlb-custom-arg-card mlb-terminal-card";
             const head=document.createElement("div");head.className="mlb-custom-arg-head";const nm=document.createElement("strong");nm.textContent=port.name||("Output "+(index+1));
-            const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove output port";rm.addEventListener("click",()=>{checkpoint("Remove user output port");current(state).edges=(current(state).edges||[]).filter(e=>!(e.source===step.id&&e.source_port==="named_out:"+port.id));binding.output_ports.splice(index,1);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
-            box.appendChild(editorRow("Port Name",port.name||"",v=>{port.name=apiSafePortName(v,"output_"+(index+1));draw();}));
-            box.appendChild(editorRow("Return Index / Key",port.selector??"auto",v=>port.selector=v));body.appendChild(box);
+            const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove output terminal";rm.addEventListener("click",()=>{checkpoint("Remove custom output terminal");current(state).edges=(current(state).edges||[]).filter(e=>!(e.source===step.id&&e.source_port==="named_out:"+port.id));const oldSide=port.side;binding.output_ports.splice(index,1);resequenceCustomTerminals(binding,oldSide);pendingPort=null;draw();});head.append(nm,rm);box.appendChild(head);
+            box.appendChild(editorRow("Terminal Name",port.name||"",v=>{port.name=apiSafePortName(v,"output_"+(index+1));draw();}));
+            box.appendChild(editorRow("Side",port.side||"top",v=>{checkpoint("Move output terminal side");changeCustomTerminalSide(binding,port,v);draw();},{select:true,options:terminalSideOptions}));
+            box.appendChild(editorRow("Return Index / Key",port.selector??"auto",v=>port.selector=v));
+            appendMoveControls(box,port);body.appendChild(box);
           });
-          const addOut=btn("+ Add Output Port","mlb-create mlb-custom-add-arg");addOut.addEventListener("click",()=>{checkpoint("Add user output port");binding.output_ports.push(defaultUserOutputPort(binding.output_ports.length));draw();});body.appendChild(addOut);
+          const addOut=btn("+ Add Output Terminal","mlb-create mlb-custom-add-arg");addOut.addEventListener("click",()=>{checkpoint("Add custom output terminal");const side="top";binding.output_ports.push(defaultUserOutputPort(binding.output_ports.length,side,nextCustomTerminalOrder(binding,side)));draw();});body.appendChild(addOut);
+        }else if(binding.port_mode==="named"){
+          const legacy=document.createElement("div");legacy.className="mlb-api-path";legacy.textContent="Legacy custom-port layout detected. Switch Port Layout to Universal + Custom Terminals to keep these mappings while restoring the six fixed universal terminals.";body.appendChild(legacy);
         }
       }
       if(isUserClass){
@@ -5704,7 +5796,11 @@ function __MLB_STUDIO_FACTORY__(){
       const argTitle=document.createElement("div");argTitle.className="mlb-section-title";argTitle.textContent="PARAMETERS";body.appendChild(argTitle);
       const note=document.createElement("div");note.className="mlb-api-path";
       note.textContent=callType==="user_function"
-        ?(binding.port_mode==="named"?"Custom layout lets you define the visual input and output ports for this function.":"Standard layout uses the built-in Studio port routing. Configure the function parameters below.")
+        ?(binding.port_mode==="named"
+          ?"Legacy custom-port layout maps named ports directly to this function."
+          :(binding.port_mode==="extended"
+            ?"Universal Main / Skip / Extra routing stays active; custom input terminals add mapped function arguments and custom output terminals expose mapped return values."
+            :"Standard layout uses the built-in Studio port routing. Configure the function parameters below."))
         :callType==="user_class"
         ?"Constructor parameters create one reusable instance from your cached class source. The object is registered once and later Instance Method nodes can reuse it."
         :callType==="constructor"
@@ -5757,7 +5853,11 @@ function __MLB_STUDIO_FACTORY__(){
           const namedArgs=(binding.input_ports||[]).map(p=>(p.positional?"":(p.parameter||p.name)+"=")+"<"+(p.name||"input")+">").join(", ");
           code+="result = "+(binding.user_function_name||"custom_function")+"("+namedArgs+")";
           (binding.output_ports||[]).forEach(p=>{code+="\n"+(p.name||"output")+" = result"+(String(p.selector||"auto")==="auto"?"":("["+p.selector+"]"));});
-        }else code+="result = "+(binding.user_function_name||"custom_function")+"("+callArgs+")";
+        }else{
+          const extraArgs=binding.port_mode==="extended"?(binding.input_ports||[]).map(p=>(p.positional?"":(p.parameter||p.name)+"=")+"<"+(p.name||"input")+">"):[];
+          const combined=[callArgs,...extraArgs].filter(Boolean).join(", ");
+          code+="result = "+(binding.user_function_name||"custom_function")+"("+combined+")";
+        }
       }
       else if(callType==="user_class")code+=objectName+" = "+(binding.user_class_name||"CustomClass")+"("+initArgs+")\n# registered for later nodes\ny = main";
       else if(callType==="function")code+="y = "+symbol+"("+callArgs+")";
@@ -5777,6 +5877,9 @@ function __MLB_STUDIO_FACTORY__(){
           if(String(om.skip??"").trim())code+="\nskip = result["+om.skip+"]";
           if(String(om.extra??"").trim())code+="\nextra = result["+om.extra+"]";
         }else code+="\ny = result"+(binding.output_selector&&binding.output_selector!=="auto"?("["+binding.output_selector+"]"):"");
+        if(binding.port_mode==="extended"){
+          (binding.output_ports||[]).forEach(p=>{code+="\n"+(p.name||"output")+" = result"+(String(p.selector||"auto")==="auto"?"":("["+p.selector+"]"));});
+        }
       }
       if(binding.register_result_object)code+="\n"+(binding.result_object_name||apiSafeObjectName(step.name+"_result"))+" = "+(isUserFunction?"result":"y")+"  # registered for reuse"+(binding.result_output_mode==="passthrough"?"\ny = main":"");
       pre.textContent=code;body.appendChild(pre);
@@ -6611,6 +6714,46 @@ function __MLB_STUDIO_FACTORY__(){
       return side==="in"?(b.input_ports||[]):(b.output_ports||[]);
     }
 
+    function customUserTerminals(node,side){
+      if(node?.type!=="api_step")return null;
+      const b=normalizeAPIBinding(node.api_binding||defaultAPIBinding());
+      if(b.port_mode!=="extended")return null;
+      return side==="in"?(b.input_ports||[]):(b.output_ports||[]);
+    }
+
+    function customTerminalRecords(node){
+      const inputs=customUserTerminals(node,"in");
+      const outputs=customUserTerminals(node,"out");
+      if(inputs===null&&outputs===null)return [];
+      const all=[
+        ...(inputs||[]).map((port,index)=>({port,index,io:"in"})),
+        ...(outputs||[]).map((port,index)=>({port,index,io:"out"}))
+      ];
+      const result=[];
+      ["top","right","bottom","left"].forEach(visualSide=>{
+        const group=all.filter(item=>String(item.port.side||"top")===visualSide)
+          .sort((a,b)=>(Number(a.port.order)||0)-(Number(b.port.order)||0)||String(a.port.id).localeCompare(String(b.port.id)));
+        group.forEach((item,index)=>{
+          let percent=50;
+          if(visualSide==="top"||visualSide==="bottom"){
+            percent=group.length<=1?50:(30+(40*index/(group.length-1)));
+          }else{
+            percent=group.length<=1?64:(62+(26*index/(group.length-1)));
+          }
+          result.push({...item,visualSide,percent});
+        });
+      });
+      return result;
+    }
+
+    function customTerminalStyle(item){
+      const p=Number(item.percent||50).toFixed(2);
+      if(item.visualSide==="top")return 'left:'+p+'%;top:-6px;transform:translateX(-50%)';
+      if(item.visualSide==="bottom")return 'left:'+p+'%;bottom:-6px;top:auto;transform:translateX(-50%)';
+      if(item.visualSide==="left")return 'left:-6px;top:'+p+'%;transform:translateY(-50%)';
+      return 'right:-6px;top:'+p+'%;transform:translateY(-50%)';
+    }
+
     function namedPortColor(key,index=0){
       const k=String(key||"").toLowerCase();
       if(k==="x"||k==="main"||k.includes("main"))return "#7087ff";
@@ -6774,6 +6917,20 @@ function __MLB_STUDIO_FACTORY__(){
           html+='<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' named-port named-socket dedicated-signal-socket visual-'+pos.visual+(items.length>1?' named-hub':'')+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+physicalSocketName(side,socket)+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+(3+auxIndex)+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"></button>';
         });
       }
+
+      // User-created terminals are additive. They are separate named sockets
+      // while the three fixed input and three fixed output sockets above stay
+      // active. Top/Bottom terminals are placed between the fixed pair; Left/
+      // Right terminals begin below the fixed side socket.
+      customTerminalRecords(node).filter(item=>item.io===side).forEach((item,customIndex)=>{
+        const port=item.port;
+        const key=String(port.id||((side==="in"?"in_":"out_")+(customIndex+1)));
+        const name=apiSafePortName(port.name||(side==="in"?"input":"output"),side==="in"?"input":"output");
+        const displayName=(side==="in"?"Custom Input":"Custom Output")+" · "+name+" · "+item.visualSide[0].toUpperCase()+item.visualSide.slice(1);
+        const color=namedPortColor(key,customIndex);
+        const socket="custom_"+key;
+        html+='<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' named-port named-socket custom-terminal-socket visual-'+item.visualSide+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="Custom '+item.visualSide+'" data-visual-side="'+item.visualSide+'" data-socket="'+socket+'" data-port-index="'+(10+customIndex)+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+key+'" data-port-names="'+name+'" data-tooltip="'+displayName+'" style="'+customTerminalStyle(item)+';--named-port-color:'+color+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"></button>';
+      });
       return html;
     }
     function nodeMiniFields(node,info){
@@ -8020,8 +8177,8 @@ function __MLB_STUDIO_FACTORY__(){
             card.querySelector(".mlb-node-fields").innerHTML=
               '<div class="mlb-mini-field"><span>API</span><strong>'+(binding.call_type==="user_function"?("User: "+(binding.user_function_name||"custom_function")):binding.call_type==="user_class"?("Class: "+(binding.user_class_name||"CustomClass")):(apiBindingImportPath(binding)||"Not bound"))+'</strong></div>'+ 
               '<div class="mlb-mini-field"><span>Type</span><strong>'+apiCallTypeLabel(binding.call_type)+'</strong></div>'+ 
-              (binding.call_type==="user_function"&&binding.port_mode==="named"
-                ?'<div class="mlb-mini-field"><span>Ports</span><strong>'+((binding.input_ports||[]).length)+' → '+((binding.output_ports||[]).length)+'</strong></div>'
+              (binding.call_type==="user_function"&&["named","extended"].includes(binding.port_mode)
+                ?'<div class="mlb-mini-field"><span>'+(binding.port_mode==="extended"?'Extra terminals':'Ports')+'</span><strong>'+((binding.input_ports||[]).length)+' → '+((binding.output_ports||[]).length)+'</strong></div>'
                 :'<div class="mlb-mini-field"><span>Parameters</span><strong>'+((binding.parameters||[]).length)+'</strong></div>');
           }else if(n.type==="custom"){
             const def=state.custom_components?.[n.definition_id];const isApi=String(def?.implementation||"graph")==="api";
@@ -8071,6 +8228,12 @@ function __MLB_STUDIO_FACTORY__(){
             card.classList.add("mlb-top-ports-"+Math.min(topSockets,4));
             card.classList.add("mlb-bottom-ports-"+Math.min(bottomSockets,4));
             card.style.height="315px";
+          }
+          const customTerms=customTerminalRecords(n);
+          if(customTerms.length){
+            card.classList.add("mlb-custom-terminal-node");
+            if(customTerms.length>=3)card.classList.add("mlb-complex-api-node");
+            card.style.height=Math.max(315,Number.parseInt(card.style.height||"0",10)||0)+"px";
           }
           card.addEventListener("click",()=>{outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",()=>{if(n.definition_id)openInside(n);});
           flow.appendChild(card);

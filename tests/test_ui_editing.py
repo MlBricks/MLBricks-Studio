@@ -155,14 +155,21 @@ def test_numeric_inputs_are_typing_only_without_custom_steppers():
     assert '.mlb-number-stepper,.mlb-number-step{display:none!important}' in css
 
 
-def test_port_layout_labels_are_simple_and_clear():
+def test_port_layout_exposes_universal_plus_custom_terminals():
     js = (Path(__file__).resolve().parents[1] / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
     assert 'editorRow("Port Layout"' in js
-    assert '{value:"standard",label:"Standard"}' in js
-    assert '{value:"named",label:"Custom"}' in js
+    assert '{value:"standard",label:"Universal · 3 In / 3 Out"}' in js
+    assert '{value:"extended",label:"Universal + Custom Terminals"}' in js
+    assert 'terminalTitle.textContent="CUSTOM TERMINALS"' in js
+    assert 'btn("+ Add Input Terminal"' in js
+    assert 'btn("+ Add Output Terminal"' in js
+    assert '{value:"top",label:"Top"}' in js
+    assert '{value:"right",label:"Right"}' in js
+    assert '{value:"bottom",label:"Bottom"}' in js
+    assert '{value:"left",label:"Left"}' in js
+    assert '?"← Left":"↑ Up"' in js
+    assert '?"Right →":"Down ↓"' in js
     assert 'editorRow("Visual Port Mode"' not in js
-    assert 'label:"Main / Skip / Extra"' not in js
-    assert 'label:"Custom Named Ports"' not in js
 
 
 def test_blueprints_and_loaded_designs_start_with_workspace_collapsed():

@@ -3256,3 +3256,46 @@
 .mlb-port.dedicated-signal-socket.visual-bottom.armed{
   transform:translateX(-50%) scale(1.18)!important;
 }
+
+/* MLB Studio v21 — additive custom API terminals */
+.mlb-node.mlb-custom-terminal-node{
+  width:220px!important;
+  min-width:220px!important;
+  max-width:220px!important;
+  overflow:visible!important;
+}
+.mlb-port.custom-terminal-socket{
+  z-index:10!important;
+  width:12px!important;
+  height:12px!important;
+}
+.mlb-port.custom-terminal-socket.mlb-input-socket{
+  background:#0d151d!important;
+  box-shadow:0 0 0 2px rgba(8,13,19,.94),0 0 8px color-mix(in srgb,var(--named-port-color,#8fa0b2) 40%,transparent)!important;
+}
+.mlb-port.custom-terminal-socket.mlb-output-socket{
+  background:var(--named-port-color,#8fa0b2)!important;
+  box-shadow:0 0 0 2px rgba(8,13,19,.94),0 0 0 3px rgba(255,255,255,.18),0 0 9px color-mix(in srgb,var(--named-port-color,#8fa0b2) 42%,transparent)!important;
+}
+.mlb-terminal-card{border-color:#3b4260!important}
+.mlb-subsection-title{
+  margin:10px 0 6px;
+  color:#9daac0;
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.06em;
+}
+.mlb-terminal-move-row{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:6px;
+  margin-top:7px;
+}
+.mlb-terminal-move{
+  min-width:0!important;
+  height:28px!important;
+  padding:0 7px!important;
+  border-color:#3b4b5d!important;
+  color:#c8d2df!important;
+  font-size:10px!important;
+}

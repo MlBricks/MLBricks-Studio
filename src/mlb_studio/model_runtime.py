@@ -340,6 +340,19 @@ class _APINamedOutputs:
         self.main = next(iter(self.values.values()), None)
 
 
+class _APIMixedOutputs:
+    """Standard Main/Skip/Extra outputs plus user-created named terminals.
+
+    Custom API terminals are additive: the six universal Studio sockets remain
+    available while extra named outputs can be wired independently.
+    """
+    __slots__ = ("standard", "values")
+
+    def __init__(self, standard, values):
+        self.standard = standard
+        self.values = dict(values or {})
+
+
 def _lane_output(value, lane):
     if isinstance(value, dict):
         if lane in value:
@@ -347,6 +360,8 @@ def _lane_output(value, lane):
         if lane == "main" and "main" in value:
             return value["main"]
         raise ModelCompileError(f"API output lane {lane!r} is connected but has no mapped return value.")
+    if isinstance(value, _APIMixedOutputs):
+        return _lane_output(value.standard, lane)
     if isinstance(value, _APILaneOutputs):
         selected = getattr(value, lane, None)
         if selected is None:
@@ -368,6 +383,12 @@ def _named_output(value, key):
         if lookup in value:
             return value[lookup]
         raise ModelCompileError(f"API contract output has no named output port {key!r}.")
+    if isinstance(value, _APIMixedOutputs):
+        if key in value.values:
+            return value.values[key]
+        if key in {"", "main", "skip", "extra", "output"}:
+            return _lane_output(value.standard, "main" if key in {"", "output"} else key)
+        raise ModelCompileError(f"Custom API has no named output terminal {key!r}.")
     if isinstance(value, _APINamedOutputs):
         if key in value.values:
             return value.values[key]
@@ -418,7 +439,8 @@ class _APIOperation(nn.Module):
         self.result_output_mode = "passthrough" if str(self.binding.get("result_output_mode") or "result").lower() == "passthrough" else "result"
         self.multi_output = bool(self.binding.get("multi_output"))
         self.output_map = deepcopy(self.binding.get("output_map") or {})
-        self.port_mode = "named" if str(self.binding.get("port_mode") or "standard").lower() == "named" else "standard"
+        _port_mode = str(self.binding.get("port_mode") or "standard").lower()
+        self.port_mode = _port_mode if _port_mode in {"standard", "extended", "named"} else "standard"
         self.input_ports = deepcopy(self.binding.get("input_ports") or [])
         self.output_ports = deepcopy(self.binding.get("output_ports") or [])
 
@@ -600,7 +622,12 @@ class _APIOperation(nn.Module):
         else:
             args, kwargs = ([x], {}) if self.auto_main_input else ([], {})
 
-        if self.call_type == "user_function" and self.port_mode == "named":
+        # User-created terminals are additive in ``extended`` mode: Main/Skip/
+        # Extra keep their universal behavior and these values are appended to
+        # the call using the configured function-parameter mapping.  ``named``
+        # remains supported for legacy designs whose custom ports replaced the
+        # universal layout.
+        if self.input_ports and self.port_mode in {"extended", "named"}:
             named_inputs = dict(named_inputs or {})
             for port in self.input_ports:
                 port_id = str(port.get("id") or "").strip()
@@ -609,7 +636,7 @@ class _APIOperation(nn.Module):
                 if port_id not in named_inputs:
                     if port.get("required", True):
                         raise ModelCompileError(
-                            f"User Function {self.label!r} input port {port_name!r} is not connected."
+                            f"API function {self.label!r} input terminal {port_name!r} is not connected."
                         )
                     continue
                 value = named_inputs[port_id]
@@ -624,19 +651,24 @@ class _APIOperation(nn.Module):
         except Exception as exc:
             raise RuntimeError(f"API function {self.label!r} failed: {exc}") from exc
 
+        custom_outputs = {}
+        if self.output_ports and self.port_mode in {"extended", "named"}:
+            for port in self.output_ports:
+                port_id = str(port.get("id") or port.get("name") or "output").strip()
+                selector = port.get("selector", "auto")
+                custom_outputs[port_id] = self._select_output(out, selector)
+
         if self.register_result_object:
             self.object_registry[self.result_object_id] = out
             if self.result_output_mode == "passthrough":
-                return x
+                standard_result = x
+                return _APIMixedOutputs(standard_result, custom_outputs) if custom_outputs else standard_result
 
-        if self.call_type == "user_function" and self.port_mode == "named":
-            mapped = {}
-            ports = self.output_ports or [{"id": "output", "name": "output", "selector": "auto"}]
-            for port in ports:
-                port_id = str(port.get("id") or port.get("name") or "output").strip()
-                selector = port.get("selector", "auto")
-                mapped[port_id] = self._select_output(out, selector)
-            return _APINamedOutputs(mapped)
+        # Legacy named-only layouts keep their historical behavior.
+        if self.port_mode == "named":
+            if not custom_outputs:
+                custom_outputs = {"output": self._select_output(out, "auto")}
+            return _APINamedOutputs(custom_outputs)
 
         if self.multi_output:
             mapping = self.output_map or {}
@@ -648,13 +680,17 @@ class _APIOperation(nn.Module):
             main_value = selected("main", "0")
             if main_value is None:
                 raise ModelCompileError(f"User/API function {self.label!r} needs a Main output mapping.")
-            return _APILaneOutputs(
+            standard_result = _APILaneOutputs(
                 main=main_value,
                 skip=selected("skip"),
                 extra=selected("extra"),
             )
+        else:
+            standard_result = self._select_output(out, self.binding.get("output_selector"))
 
-        return self._select_output(out, self.binding.get("output_selector"))
+        if custom_outputs:
+            return _APIMixedOutputs(standard_result, custom_outputs)
+        return standard_result
 
 
 class _APIBoundComponent(nn.Module):
@@ -1145,7 +1181,9 @@ class TensorGraph(nn.Module):
                 repeat=max(1,int(node.get("repeat") or 1))
                 if repeat>1 and getattr(mod,"port_mode","standard")=="named":
                     raise ModelCompileError(f"Named-port User Function {node.get('name')} cannot use Repeat > 1; connect another function node instead.")
-                for _ in range(1,repeat): y=mod(y,skip=skip_value,extra=extra_value,named_inputs=named_inputs)
+                for _ in range(1,repeat):
+                    repeat_input=_lane_output(y,"main")
+                    y=mod(repeat_input,skip=skip_value,extra=extra_value,named_inputs=named_inputs)
             elif t=="custom" and str((self.custom_components.get(node.get("definition_id")) or {}).get("implementation") or "graph") == "api":
                 if len(skip_sources)>1 or len(extra_sources)>1:
                     raise ModelCompileError(f"API component {node.get('name')} accepts at most one Skip and one Extra tensor lane.")
