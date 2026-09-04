@@ -42,7 +42,7 @@ MLB Studio V1.0 uses Jupyter's standard HTML representation protocol instead of 
 - A created instance is constructed once per compiled API graph and reused by later nodes, preserving object state without recreating it.
 - API results can optionally be registered as reusable objects for later nodes.
 
-MLBricks itself remains a separate dependency. MLB Studio V1.0 pins the compatible release to `mlbricks==1.0.0` for reproducible installs.
+MLBricks Kit remains a separate dependency while Studio integration is being validated. The current compatible distribution is `mlbricks-kit==1.0.0b1`; its Python import namespace remains `mlbricks`.
 
 ## v0.1.3 UI
 
@@ -84,7 +84,7 @@ The preset's ~30M value is an architecture target/estimate. Exact trainable para
 
 The right inspector is built from the currently installed MLBricks package with `inspect.signature`. No MLBricks algorithms are copied into Builder. Updating/reinstalling MLBricks updates the available constructor parameters shown by Builder.
 
-Examples found in MLBricks 1.0.0 include `ESA(embd, head=4, ..., backend="auto", precision="fp16", compass="auto", ..., device="auto")`, `FFN(hidden_size, intermediate_size=None, activation="gelu", ...)`, `StateAwareFFN(d_model, state_dim=256, ...)`, and `Bolt(d_model, num_heads, latent_dim=32, ...)`.
+Examples found in MLBricks Kit 1.0.0b1 include `ESA(embd, head=4, ..., backend="auto", precision="fp16", compass="auto", ..., device="auto")`, `FFN(hidden_size, intermediate_size=None, activation="gelu", ...)`, `StateAwareFFN(d_model, state_dim=256, ...)`, and `Bolt(d_model, num_heads, latent_dim=32, ...)`.
 
 Use `builder.component_api("esa")` to inspect the metadata in Python.
 
@@ -104,7 +104,7 @@ that global. The result was new CSS applied to an old renderer.
 v0.3.1 always replaces the old renderer before mounting, and shows `v0.3.1`
 visibly in the Builder header.
 
-It also aligns the TinyStories starter with the real MLBricks 1.0.0 constructor
+It also aligns the TinyStories starter with the real MLBricks Kit 1.0.0b1 constructor
 arguments from the uploaded library:
 
 - `ESA(embd=384, head=6, batch=16, block=512, ...)`
@@ -130,7 +130,7 @@ The API inspector no longer depends on importing every MLBricks component
 successfully at notebook startup.
 
 This release's API schema was generated directly from the supplied
-`MLBricks-main (2)(2).zip` source (MLBricks 1.0.0). Runtime introspection is
+`MLBricks Kit 1.0.0b1` source API. Runtime introspection is
 still attempted; when it works, it takes precedence. If it does not work,
 the exact source-derived constructor/config schema remains available.
 
@@ -1689,7 +1689,7 @@ The separate-tab launcher is configured for `https://builder.mlbricks.io/`. Depl
 - New training outputs/checkpoints use the package-level MLBricks lifecycle API: `mlbricks.save`, `mlbricks.load`, and `mlbricks.inspect`. Directory model artifacts (`model.pt` + `metadata.json`) are supported by local loading, cloud bundles, generation restore, and Hugging Face push/load. Legacy Builder `.pt/.pth/.ckpt` checkpoints remain loadable.
 - Builder resolves the current `LMHead(..., tie_to=...)` module-reference API visually through a `Tie Embeddings` setting.
 - Learned and sinusoidal position modules are executable in the Builder runtime.
-- SOUP and ElasticBit 4–32 remain aligned with the supplied MLBricks 1.0.0 source API.
+- SOUP and ElasticBit 4–32 remain aligned with the supplied MLBricks Kit 1.0.0b1 source API.
 - Generic `Brick` / `Bricks` composition-container APIs are not exposed as Builder palette components; reusable visual compositions live under **My Components** instead.
 
 

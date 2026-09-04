@@ -11,11 +11,16 @@ def get_mlbricks_info():
     Production diagnostics therefore verify distribution metadata first instead of
     treating any successful ``import mlbricks`` as an installed MLBricks release.
     """
-    try:
-        distribution = importlib.metadata.distribution("mlbricks")
-    except importlib.metadata.PackageNotFoundError:
-        return {"installed": False, "version": None, "module_path": None}
-    except Exception:
+    distribution = None
+    for distribution_name in ("mlbricks-kit", "mlbricks"):
+        try:
+            distribution = importlib.metadata.distribution(distribution_name)
+            break
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        except Exception:
+            continue
+    if distribution is None:
         return {"installed": False, "version": None, "module_path": None}
 
     version = distribution.version

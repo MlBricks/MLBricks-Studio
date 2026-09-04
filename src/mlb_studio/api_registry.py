@@ -26,12 +26,24 @@ CHOICES = {
     "precision": ["fp32", "fp16", "bf16"],
     "activation": ["gelu", "gelu_tanh", "relu", "silu", "swish", "tanh"],
     "device": ["auto", "cpu", "cuda", "None"],
-    "position": ["none", "auto", "learned", "sinusoidal", "rope"],
     "engine": ["Serpentine", "ViT", "CNN", "Diffusion", "AR"],
-    "scan": ["cross", "raster", "serpentine"],
     "ffn": ["standard", "ffnbrick", "virtual_ffnbrick", "micro_ffnbrick"],
     "residual": ["standard", "rescontroller"],
     "norm": ["rmsnorm", "layernorm"],
+}
+
+COMPONENT_CHOICES = {
+    "bolt": {
+        "position": ["none", "rope"],
+    },
+    "vesa": {
+        "position": ["auto", "none", "2d_sincos", "learned"],
+        "scan": ["cross", "horizontal", "vertical", "raster"],
+    },
+    "visualbolt": {
+        "position": ["auto", "none", "2d_sincos", "learned"],
+        "scan": ["cross", "horizontal", "vertical", "raster"],
+    },
 }
 
 
@@ -48,8 +60,9 @@ def _safe_default(value: Any):
     return str(value)
 
 
-def _field_type(name, annotation, default):
-    if name in CHOICES:
+def _field_type(name, annotation, default, choices=None):
+    choices = CHOICES if choices is None else choices
+    if name in choices:
         return "select"
     if isinstance(default, bool):
         return "bool"
@@ -63,7 +76,8 @@ def _field_type(name, annotation, default):
     return "text"
 
 
-def _fields(obj):
+def _fields(obj, *, choices=None):
+    choices = CHOICES if choices is None else choices
     sig = inspect.signature(obj)
     out = []
     for name, p in sig.parameters.items():
@@ -73,13 +87,13 @@ def _fields(obj):
         item = {
             "key": name,
             "label": name.replace("_", " ").title(),
-            "type": _field_type(name, p.annotation, default),
+            "type": _field_type(name, p.annotation, default, choices),
             "required": p.default is inspect._empty,
             "value": default,
             "annotation": "" if p.annotation is inspect._empty else str(p.annotation),
         }
-        if name in CHOICES:
-            item["options"] = CHOICES[name]
+        if name in choices:
+            item["options"] = choices[name]
         out.append(item)
     return sig, out
 
@@ -118,14 +132,16 @@ def _inspect_one(component_type: str, fallback: dict[str, Any]) -> dict[str, Any
     result = _canonical_metadata(component_type, fallback)
     try:
         obj = IMPORT_POOL.resolve_component(component_type)
-        sig, inspected_fields = _fields(obj)
+        component_choices = {**CHOICES, **COMPONENT_CHOICES.get(component_type, {})}
+        sig, inspected_fields = _fields(obj, choices=component_choices)
         source_defined = component_type in SOURCE_DEFINED_FIELDS
         fields = deepcopy(fallback.get("parameters", [])) if source_defined else inspected_fields
 
         config_info = result.get("config_api")
         if component_type in CONFIG_KEYS:
             cfg_obj = IMPORT_POOL.resolve_config(component_type)
-            cfg_sig, cfg_fields = _fields(cfg_obj)
+            cfg_choices = {**CHOICES, **COMPONENT_CHOICES.get(component_type, {})}
+            cfg_sig, cfg_fields = _fields(cfg_obj, choices=cfg_choices)
             if len(cfg_fields) > 1:
                 fields = cfg_fields
                 config_info = {

@@ -23,15 +23,41 @@ def test_workspace_does_not_shadow_mlbricks_namespace(tmp_path, monkeypatch):
 
 
 def test_mlbricks_diagnostics_does_not_treat_plain_namespace_dir_as_install(tmp_path, monkeypatch):
-    # This test only exercises the false-positive case when mlbricks distribution
-    # metadata is not present in the test environment.
-    try:
-        importlib.metadata.distribution("mlbricks")
-    except importlib.metadata.PackageNotFoundError:
-        monkeypatch.chdir(tmp_path)
-        (tmp_path / "mlbricks").mkdir()
-        info = get_mlbricks_info()
-        assert info == {"installed": False, "version": None, "module_path": None}
+    def missing_distribution(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(importlib.metadata, "distribution", missing_distribution)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mlbricks").mkdir()
+    info = get_mlbricks_info()
+    assert info == {"installed": False, "version": None, "module_path": None}
+
+
+def test_mlbricks_diagnostics_prefers_mlbricks_kit_distribution(monkeypatch):
+    calls = []
+
+    class Distribution:
+        version = "1.0.0b1"
+
+    def distribution(name):
+        calls.append(name)
+        if name == "mlbricks-kit":
+            return Distribution()
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    class Module:
+        __file__ = "/tmp/mlbricks/__init__.py"
+
+    monkeypatch.setattr(importlib.metadata, "distribution", distribution)
+    monkeypatch.setattr("mlb_studio.runtime.importlib.import_module", lambda name: Module())
+
+    info = get_mlbricks_info()
+    assert calls == ["mlbricks-kit"]
+    assert info == {
+        "installed": True,
+        "version": "1.0.0b1",
+        "module_path": "/tmp/mlbricks/__init__.py",
+    }
 
 
 def test_builder_html_no_longer_duplicates_popout_asset_payload(tmp_path, monkeypatch):
