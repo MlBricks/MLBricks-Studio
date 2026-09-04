@@ -28,10 +28,16 @@ def test_workspace_switch_forces_immediate_redraw():
     assert "draw(true);" in block
 
 
-def test_live_search_can_force_redraw_and_restore_focus():
+def test_live_search_filters_sidebar_without_full_studio_redraw():
     text = _builder_js()
-    assert "searchFocusRestore={start:searchInput.selectionStart" in text
-    assert "draw(true);" in text
+    start = text.index('function applySidebarSearch()')
+    end = text.index('sr.appendChild(searchInput);side.appendChild(sr);', start)
+    block = text[start:end]
+    assert 'side.querySelectorAll(".mlb-palette[data-search-category]")' in block
+    assert 'el.classList.toggle("mlb-search-hidden",!hit)' in block
+    assert 'applySidebarSearch();' in block
+    assert 'draw(true);' not in block
+    assert 'Typing never destroys/rebuilds the' in block
 
 
 def test_model_settings_do_not_reject_intermediate_width_head_values():
@@ -292,7 +298,8 @@ def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
     assert "[flow,canvas].forEach" not in text
     assert "[flow,wrap,canvas,root].forEach" not in text
     assert "if(wrap.style.width!==nextW)wrap.style.width=nextW;" in text
-    assert "setTimeout(renderConnections,180);" in text
+    assert 'requestIdleCallback(renderConnections,{timeout:260})' in text
+    assert "setTimeout(renderConnections,180);" not in text
 
 
 def test_library_subtext_is_descriptive_and_backend_neutral():

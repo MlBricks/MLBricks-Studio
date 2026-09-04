@@ -37,9 +37,12 @@ def test_mlbricks_diagnostics_does_not_treat_plain_namespace_dir_as_install(tmp_
 def test_builder_html_no_longer_duplicates_popout_asset_payload(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     html = Builder()._repr_html_()
-    # Original V1.0 output was ~1.5 MB because JS/CSS were embedded twice.
-    assert len(html.encode("utf-8")) < 1_100_000
-    assert "window.__MLB_STUDIO_JS_SOURCE__" in html
+    # Frontend assets are gzip+base64 encoded once, then expanded in-browser.
+    # This keeps notebook output compact and avoids reparsing raw source text.
+    assert len(html.encode("utf-8")) < 450_000
+    assert "DecompressionStream" in html
+    assert "window.__MLB_STUDIO_ASSETS_READY__" in html
+    assert "runtimeScript.textContent = jsText" in html
 
 
 def test_studio_import_does_not_eagerly_import_torch(tmp_path):

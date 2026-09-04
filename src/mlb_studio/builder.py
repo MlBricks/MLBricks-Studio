@@ -1,5 +1,7 @@
 from __future__ import annotations
 import html
+import base64
+import gzip
 import ast
 import importlib.util
 import importlib.metadata
@@ -32,6 +34,24 @@ from .import_pool import IMPORT_POOL
 from .runner import execute_data_pipeline, validate_data_pipeline, PipelineValidationError, PipelineStopped
 
 _STATIC = Path(__file__).parent / "static"
+
+# Notebook pages only need to parse/execute the large frontend bundle once per
+# live Python session.  Plain _repr_html_ remains standalone for compatibility.
+_FRONTEND_ASSETS_EMITTED = False
+_FRONTEND_ASSETS_LOCK = threading.Lock()
+_FRONTEND_BUNDLE_CACHE = None
+
+def _compressed_frontend_bundle():
+    """Return gzip+base64 frontend assets, cached for this Python process."""
+    global _FRONTEND_BUNDLE_CACHE
+    if _FRONTEND_BUNDLE_CACHE is None:
+        css = (_STATIC / "builder.css").read_bytes()
+        js = (_STATIC / "builder.js").read_bytes()
+        _FRONTEND_BUNDLE_CACHE = (
+            base64.b64encode(gzip.compress(css, compresslevel=9)).decode("ascii"),
+            base64.b64encode(gzip.compress(js, compresslevel=9)).decode("ascii"),
+        )
+    return _FRONTEND_BUNDLE_CACHE
 
 class Builder:
     """
@@ -67,7 +87,8 @@ class Builder:
         for item in self.catalog:
             real = self.mlbricks_api.get(item.get("type"))
             if real:
-                item["real_api"] = real
+                # Keep one canonical frontend copy of runtime API metadata.
+                # The catalog only needs the parameter schema used to construct nodes.
                 item["api"] = real.get("parameters", item.get("api", []))
                 if real.get("description"):
                     item["description"] = real["description"]
@@ -2540,20 +2561,30 @@ class Builder:
     def mlbricks_info(self):
         return get_mlbricks_info()
 
-    def _html(self, bridge=None):
-        css = (_STATIC / "builder.css").read_text(encoding="utf-8")
-        js = (_STATIC / "builder.js").read_text(encoding="utf-8")
+    def _html(self, bridge=None, *, include_assets=True):
+        css_gzip_b64, js_gzip_b64 = _compressed_frontend_bundle() if include_assets else ("", "")
         trust = self.project_trust_info()
+
+        # Parameter schemas already live in catalog[item]["api"].  Do not send
+        # the same lists/descriptions a second time inside mlbricks_api.
+        frontend_api = {
+            component_type: {
+                key: value
+                for key, value in info.items()
+                if key not in {"parameters", "description"}
+            }
+            for component_type, info in self.mlbricks_api.items()
+        }
         payload = json.dumps({
             "state": self.state,
             "catalog": self.catalog,
-            "mlbricks_api": self.mlbricks_api,
+            "mlbricks_api": frontend_api,
             "bridge": bridge,
             "runtime_capabilities": self.runtime_capabilities,
             "local_environment": self.local_environment,
             "instance_id": self._instance_id,
             "project_trust": trust,
-        }).replace("</", "<\\/")
+        }, separators=(",", ":")).replace("</", "<\\/")
         warning = ""
         if trust.get("requires_trust") and not trust.get("trusted"):
             count = len(trust.get("executable_features") or [])
@@ -2565,19 +2596,62 @@ class Builder:
                 'Review them, then run <code>builder.trust_project()</code> in Python to enable execution for this session.'
                 '</div>'
             )
-        style_id = f"{self._instance_id}_assets"
+        shared_style_id = "mlb-studio-shared-style"
+        assets = ""
+        if include_assets:
+            assets = f"""
+<script>
+window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
+  async function decodeGzipBase64(value) {{
+    const raw = atob(value);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    if (typeof DecompressionStream !== "function") {{
+      throw new Error("This browser does not support DecompressionStream required by MLB Studio.");
+    }}
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return await new Response(stream).text();
+  }}
+  const [cssText, jsText] = await Promise.all([
+    decodeGzipBase64({json.dumps(css_gzip_b64)}),
+    decodeGzipBase64({json.dumps(js_gzip_b64)})
+  ]);
+  let style = document.getElementById({json.dumps(shared_style_id)});
+  if (!style) {{
+    style = document.createElement("style");
+    style.id = {json.dumps(shared_style_id)};
+    document.head.appendChild(style);
+  }}
+  style.textContent = cssText;
+  window.__MLB_STUDIO_CSS_ELEMENT__ = style;
+  try {{ delete window.MLBricksBuilder; }} catch (e) {{ window.MLBricksBuilder = undefined; }}
+  const runtimeScript = document.createElement("script");
+  runtimeScript.textContent = jsText;
+  document.head.appendChild(runtimeScript);
+  runtimeScript.remove();
+  window.__MLB_STUDIO_FRONTEND_VERSION__ = {json.dumps(__version__)};
+}})();
+</script>
+"""
         return f"""
-<style id="{html.escape(style_id)}">{css}</style>
+{assets}
 {warning}
 <div id="{html.escape(self._instance_id)}" class="mlb-root" data-mlb-studio-version="{html.escape(__version__)}"></div>
 <script>
-window.__MLB_STUDIO_CSS_ELEMENT__ = document.getElementById({json.dumps(style_id)});
-try {{ delete window.MLBricksBuilder; }} catch (e) {{ window.MLBricksBuilder = undefined; }}
-{js}
-window.MLBricksBuilder.mount(
-  document.getElementById({json.dumps(self._instance_id)}),
-  {payload}
-);
+(function() {{
+  const root = document.getElementById({json.dumps(self._instance_id)});
+  root.innerHTML = '<div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Loading workspace…</div></div>';
+  Promise.resolve(window.__MLB_STUDIO_ASSETS_READY__).then(function() {{
+    if (!window.MLBricksBuilder || typeof window.MLBricksBuilder.mount !== "function") {{
+      root.innerHTML = '<div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Frontend assets are not loaded. Re-run this Builder cell.</div></div>';
+      return;
+    }}
+    window.MLBricksBuilder.mount(root, {payload});
+  }}).catch(function(error) {{
+    root.innerHTML = '<div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Frontend load failed: '+String(error && error.message || error)+'</div></div>';
+    console.error("MLB Studio frontend load failed", error);
+  }});
+}})();
 </script>
 """
 
@@ -2621,7 +2695,12 @@ window.MLBricksBuilder.mount(
             except Exception:
                 bridge_payload = None
 
-        display(HTML(self._html(bridge=bridge_payload)))
+        global _FRONTEND_ASSETS_EMITTED
+        with _FRONTEND_ASSETS_LOCK:
+            include_assets = not _FRONTEND_ASSETS_EMITTED
+            if include_assets:
+                _FRONTEND_ASSETS_EMITTED = True
+        display(HTML(self._html(bridge=bridge_payload, include_assets=include_assets)))
 
 
 BuilderWidget = Builder

@@ -1734,7 +1734,79 @@
 }
 .mlb-center-stop[style*="display: none"]{display:none!important}
 
-\n\n/* ------------------------------------------------------------------\n   v0.7.35 — refined primary actions + inspector/cloud/status alignment\n   ------------------------------------------------------------------ */\n.mlb-top-primary{gap:10px!important}\n.mlb-top-primary>.mlb-top-build-tab,\n.mlb-top-primary>.mlb-top-gallery-btn{\n  height:40px!important;min-height:40px!important;border-radius:10px!important;\n  padding:0 17px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;\n  gap:8px!important;font-size:12px!important;font-weight:800!important;letter-spacing:.01em!important;\n  transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease,background .16s ease!important;\n}\n.mlb-top-primary>.mlb-top-build-tab{\n  min-width:118px!important;color:#fff!important;border:1px solid #8f75ff!important;\n  background:linear-gradient(180deg,#7f5cf0 0%,#6845df 100%)!important;\n  box-shadow:0 7px 18px rgba(91,59,205,.24),inset 0 1px 0 rgba(255,255,255,.14)!important;\n}\n.mlb-top-primary>.mlb-top-build-tab:hover:not(:disabled){\n  transform:translateY(-1px);background:linear-gradient(180deg,#8b69f6 0%,#7351e7 100%)!important;\n  box-shadow:0 9px 22px rgba(91,59,205,.32),inset 0 1px 0 rgba(255,255,255,.16)!important;\n}\n.mlb-top-primary>.mlb-top-gallery-btn{\n  min-width:112px!important;color:#d9d2ff!important;border:1px solid #6957bd!important;\n  background:linear-gradient(180deg,#171729 0%,#121622 100%)!important;\n  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;\n}\n.mlb-top-primary>.mlb-top-gallery-btn:hover,\n.mlb-top-primary>.mlb-top-gallery-btn.active{\n  transform:translateY(-1px);border-color:#8e74f7!important;color:#fff!important;\n  background:linear-gradient(180deg,#282044 0%,#1c1930 100%)!important;\n  box-shadow:0 7px 18px rgba(72,48,158,.18),inset 0 1px 0 rgba(255,255,255,.055)!important;\n}\n.mlb-action-icon{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 16px}\n.mlb-action-icon svg{display:block;width:16px;height:16px}\n.mlb-action-label{display:inline-block;line-height:1;white-space:nowrap}\n.mlb-center-stop .mlb-action-icon{width:14px;height:14px;flex-basis:14px}.mlb-center-stop .mlb-action-icon svg{width:14px;height:14px}\n.mlb-top-cloud-action{display:inline-flex!important;align-items:center!important;gap:7px!important}\n.mlb-top-cloud-action .mlb-action-icon{width:15px;height:15px;flex-basis:15px}.mlb-top-cloud-action .mlb-action-icon svg{width:15px;height:15px}\n\n/* Do not repeat identical Inspector labels. */\n.mlb-selected.single-pill{justify-content:flex-start!important}\n.mlb-selected.single-pill .mlb-pill{margin-left:0}\n\n/* Provider and Connection are true peer fields with aligned controls. */\n.mlb-central-cloud-body .mlb-cloud-provider-bar{align-items:end!important}\n.mlb-central-cloud-body .mlb-cloud-provider-bar>.mlb-cloud-field{margin-bottom:0!important}\n.mlb-central-cloud-body .mlb-cloud-connection-field{display:grid;gap:3px;margin-bottom:0!important}\n.mlb-central-cloud-body .mlb-cloud-status{\n  height:34px!important;min-height:34px!important;padding:0 10px!important;display:flex!important;align-items:center!important;\n}\n.mlb-central-cloud-body .mlb-cloud-status span{margin:0!important;display:block!important;font-size:11px!important}\n.mlb-central-cloud-body .mlb-cloud-check{height:34px!important;min-height:34px!important;align-self:end!important}\n\n/* Data toolbar status chips share one visual height; prepared-data title lives in tooltip only. */\n.mlb-toolbar>.mlb-workspace-badge,\n.mlb-toolbar>.mlb-layout-toggle,\n.mlb-toolbar>.mlb-kernel-badge,\n.mlb-toolbar>.mlb-run-live,\n.mlb-toolbar>.mlb-data-ready-chip{\n  height:28px!important;min-height:28px!important;box-sizing:border-box!important;\n}\n.mlb-toolbar>.mlb-workspace-badge{padding:0 9px!important}\n.mlb-toolbar>.mlb-layout-toggle{padding:0 9px!important}\n.mlb-toolbar>.mlb-kernel-badge{padding:0 8px!important}\n.mlb-toolbar>.mlb-run-live{padding:0 8px!important}\n.mlb-toolbar>.mlb-data-ready-chip{\n  display:flex!important;align-items:center!important;justify-content:center!important;flex-direction:row!important;\n  max-width:270px!important;padding:0 9px!important;font-size:10.5px!important;font-weight:700!important;\n  white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;\n}\n\n\n
+
+
+/* ------------------------------------------------------------------
+   v0.7.35 — refined primary actions + inspector/cloud/status alignment
+   ------------------------------------------------------------------ */
+.mlb-top-primary{gap:10px!important}
+.mlb-top-primary>.mlb-top-build-tab,
+.mlb-top-primary>.mlb-top-gallery-btn{
+  height:40px!important;min-height:40px!important;border-radius:10px!important;
+  padding:0 17px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;
+  gap:8px!important;font-size:12px!important;font-weight:800!important;letter-spacing:.01em!important;
+  transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease,background .16s ease!important;
+}
+.mlb-top-primary>.mlb-top-build-tab{
+  min-width:118px!important;color:#fff!important;border:1px solid #8f75ff!important;
+  background:linear-gradient(180deg,#7f5cf0 0%,#6845df 100%)!important;
+  box-shadow:0 7px 18px rgba(91,59,205,.24),inset 0 1px 0 rgba(255,255,255,.14)!important;
+}
+.mlb-top-primary>.mlb-top-build-tab:hover:not(:disabled){
+  transform:translateY(-1px);background:linear-gradient(180deg,#8b69f6 0%,#7351e7 100%)!important;
+  box-shadow:0 9px 22px rgba(91,59,205,.32),inset 0 1px 0 rgba(255,255,255,.16)!important;
+}
+.mlb-top-primary>.mlb-top-gallery-btn{
+  min-width:112px!important;color:#d9d2ff!important;border:1px solid #6957bd!important;
+  background:linear-gradient(180deg,#171729 0%,#121622 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+}
+.mlb-top-primary>.mlb-top-gallery-btn:hover,
+.mlb-top-primary>.mlb-top-gallery-btn.active{
+  transform:translateY(-1px);border-color:#8e74f7!important;color:#fff!important;
+  background:linear-gradient(180deg,#282044 0%,#1c1930 100%)!important;
+  box-shadow:0 7px 18px rgba(72,48,158,.18),inset 0 1px 0 rgba(255,255,255,.055)!important;
+}
+.mlb-action-icon{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 16px}
+.mlb-action-icon svg{display:block;width:16px;height:16px}
+.mlb-action-label{display:inline-block;line-height:1;white-space:nowrap}
+.mlb-center-stop .mlb-action-icon{width:14px;height:14px;flex-basis:14px}.mlb-center-stop .mlb-action-icon svg{width:14px;height:14px}
+.mlb-top-cloud-action{display:inline-flex!important;align-items:center!important;gap:7px!important}
+.mlb-top-cloud-action .mlb-action-icon{width:15px;height:15px;flex-basis:15px}.mlb-top-cloud-action .mlb-action-icon svg{width:15px;height:15px}
+
+/* Do not repeat identical Inspector labels. */
+.mlb-selected.single-pill{justify-content:flex-start!important}
+.mlb-selected.single-pill .mlb-pill{margin-left:0}
+
+/* Provider and Connection are true peer fields with aligned controls. */
+.mlb-central-cloud-body .mlb-cloud-provider-bar{align-items:end!important}
+.mlb-central-cloud-body .mlb-cloud-provider-bar>.mlb-cloud-field{margin-bottom:0!important}
+.mlb-central-cloud-body .mlb-cloud-connection-field{display:grid;gap:3px;margin-bottom:0!important}
+.mlb-central-cloud-body .mlb-cloud-status{
+  height:34px!important;min-height:34px!important;padding:0 10px!important;display:flex!important;align-items:center!important;
+}
+.mlb-central-cloud-body .mlb-cloud-status span{margin:0!important;display:block!important;font-size:11px!important}
+.mlb-central-cloud-body .mlb-cloud-check{height:34px!important;min-height:34px!important;align-self:end!important}
+
+/* Data toolbar status chips share one visual height; prepared-data title lives in tooltip only. */
+.mlb-toolbar>.mlb-workspace-badge,
+.mlb-toolbar>.mlb-layout-toggle,
+.mlb-toolbar>.mlb-kernel-badge,
+.mlb-toolbar>.mlb-run-live,
+.mlb-toolbar>.mlb-data-ready-chip{
+  height:28px!important;min-height:28px!important;box-sizing:border-box!important;
+}
+.mlb-toolbar>.mlb-workspace-badge{padding:0 9px!important}
+.mlb-toolbar>.mlb-layout-toggle{padding:0 9px!important}
+.mlb-toolbar>.mlb-kernel-badge{padding:0 8px!important}
+.mlb-toolbar>.mlb-run-live{padding:0 8px!important}
+.mlb-toolbar>.mlb-data-ready-chip{
+  display:flex!important;align-items:center!important;justify-content:center!important;flex-direction:row!important;
+  max-width:270px!important;padding:0 9px!important;font-size:10.5px!important;font-weight:700!important;
+  white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;
+}
+
+
 
 /* ------------------------------------------------------------------
    v0.7.35 patch — slightly smaller logo + top padding + explicit Build/Gallery icons
@@ -3445,3 +3517,6 @@
   opacity:1!important;
   filter:none!important;
 }
+
+/* Search filtering must beat historical button display overrides. */
+.mlb-search-hidden{display:none!important}

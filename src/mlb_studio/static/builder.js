@@ -2,10 +2,20 @@ function __MLB_STUDIO_FACTORY__(){
   // Always overwrite any renderer left by an older notebook output.
   // Kaggle keeps browser globals even when Python modules are reinstalled.
 
-  function cp(v){return JSON.parse(JSON.stringify(v));}
+  function cp(v){
+    if(typeof structuredClone==="function"){
+      try{return structuredClone(v);}catch(_){}
+    }
+    return JSON.parse(JSON.stringify(v));
+  }
   function uid(p){return p+"_"+Math.random().toString(36).slice(2,10);}
   function current(state){return state.components[state.view_component_id];}
-  function cat(catalog,type){return catalog.find(x=>x.type===type)||{};}
+  const catalogIndexCache=new WeakMap();
+  function cat(catalog,type){
+    let index=catalogIndexCache.get(catalog);
+    if(!index){index=new Map(catalog.map(item=>[item.type,item]));catalogIndexCache.set(catalog,index);}
+    return index.get(type)||{};
+  }
   function edge(a,b,kind="main"){return{id:uid("edge"),source:a,target:b,source_port:"out",target_port:"in",kind};}
 
   function makeNode(item){
@@ -32,8 +42,11 @@ function __MLB_STUDIO_FACTORY__(){
     root.dataset.mounted="1";
 
     let state=cp(payload.state);
-    const catalog=cp(payload.catalog);
-    const mlapi=cp(payload.mlbricks_api||{});
+    // Catalog/API registries are read-mostly shared payloads. Avoid two large
+    // JSON stringify/parse clones during startup. Runtime import refreshes only
+    // replace the affected entry in-place.
+    const catalog=payload.catalog||[];
+    const mlapi=payload.mlbricks_api||{};
     let selected=null,pendingPort=null,filter="All",search="",inspectorTab="settings",zoom=1,status="Ready";
     let searchFocusRestore=null;
     const inspectorScrollPositions={};
@@ -1652,16 +1665,15 @@ function __MLB_STUDIO_FACTORY__(){
         const type=String(next.component_type||next.component_import?.component_type||"");
         if(type&&next.component_api){
           mlapi[type]=cp(next.component_api);
-          const item=catalog.find(entry=>entry.type===type);
-          if(item){
-            item.real_api=cp(next.component_api);
+          const item=cat(catalog,type);
+          if(item&&item.type){
             item.api=cp(next.component_api.parameters||item.api||[]);
             if(next.component_api.description)item.description=next.component_api.description;
           }
         }
         componentImportBusy=false;
         if(next.status==="error"&&next.message)setStatus(next.message);
-        else if(next.status==="done"&&type)setStatus((catalog.find(x=>x.type===type)?.name||type)+" API ready.");
+        else if(next.status==="done"&&type)setStatus((cat(catalog,type)?.name||type)+" API ready.");
         setTimeout(pumpComponentImportQueue,80);
         if(next.status==="done")setTimeout(draw,20);
         return;
@@ -2228,7 +2240,13 @@ function __MLB_STUDIO_FACTORY__(){
           source:"MLB Studio"
         };
       }
-      return mlapi[node.type] || item.real_api || {};
+      const runtimeInfo=mlapi[node.type]||{};
+      if(!runtimeInfo||Object.keys(runtimeInfo).length===0)return {};
+      return {
+        ...runtimeInfo,
+        parameters:runtimeInfo.parameters||item.api||[],
+        description:runtimeInfo.description||item.description||""
+      };
     }
 
     function availablePreparedDatasets(){
@@ -8108,12 +8126,50 @@ function __MLB_STUDIO_FACTORY__(){
       if(runtimeWorkspaceActive)side.classList.add("mlb-sidebar-hidden");
       const head=document.createElement("div");head.className="mlb-sidehead";head.innerHTML="<span>"+(state.active_workspace==="data"?"DATA LIBRARY":"COMPONENT LIBRARY")+"</span><span>×</span>";side.appendChild(head);
       const sr=document.createElement("div");sr.className="mlb-search-row";
-      const searchInput=document.createElement("input");searchInput.className="mlb-search";searchInput.placeholder="Search...";searchInput.setAttribute("aria-label",state.active_workspace==="data"?"Search data steps":"Search components");searchInput.value=search;searchInput.addEventListener("input",()=>{
+      const searchInput=document.createElement("input");searchInput.className="mlb-search";searchInput.placeholder="Search...";searchInput.setAttribute("aria-label",state.active_workspace==="data"?"Search data steps":"Search components");searchInput.value=search;
+      function applySidebarSearch(){
+        const term=String(search||"").trim().toLowerCase();
+        side.querySelectorAll(".mlb-palette[data-search-category]").forEach(pal=>{
+          const category=pal.dataset.searchCategory||"";
+          let matches=0;
+          pal.querySelectorAll("[data-search-text]").forEach(el=>{
+            const hit=!term||String(el.dataset.searchText||"").includes(term);
+            el.classList.toggle("mlb-search-hidden",!hit);if(hit)matches++;
+          });
+          const header=side.querySelector('.mlb-category[data-search-category="'+CSS.escape(category)+'"]');
+          if(header)header.classList.toggle("mlb-search-hidden",!!term&&matches===0);
+          pal.classList.toggle("mlb-search-hidden",!!term&&matches===0);
+          const collapsed=collapsedCategories.has(category);
+          pal.classList.toggle("collapsed",!term&&collapsed);
+          if(header){
+            header.setAttribute("aria-expanded",String(term||!collapsed));
+            const caret=header.querySelector(".mlb-category-caret");
+            if(caret)caret.textContent=term||!collapsed?"▾":"▸";
+          }
+        });
+        const customList=side.querySelector(".mlb-mybricks-list");
+        if(customList){
+          let matches=0;
+          customList.querySelectorAll("[data-search-text]").forEach(el=>{
+            const hit=!term||String(el.dataset.searchText||"").includes(term);
+            el.classList.toggle("mlb-search-hidden",!hit);if(hit)matches++;
+          });
+          customList.hidden=!term&&myBricksCollapsed;
+          customList.classList.toggle("mlb-search-hidden",!!term&&matches===0);
+          const customHeader=side.querySelector('.mlb-category[data-search-role="mybricks"]');
+          if(customHeader){
+            customHeader.classList.toggle("mlb-search-hidden",!!term&&matches===0);
+            customHeader.setAttribute("aria-expanded",String(term||!myBricksCollapsed));
+            const caret=customHeader.querySelector(".mlb-category-caret");
+            if(caret)caret.textContent=term||!myBricksCollapsed?"▾":"▸";
+          }
+        }
+      }
+      searchInput.addEventListener("input",()=>{
         search=searchInput.value;
-        searchFocusRestore={start:searchInput.selectionStart??search.length,end:searchInput.selectionEnd??search.length};
-        // Search intentionally redraws on every keystroke and restores its own
-        // focus/selection below, so bypass the background-edit redraw guard.
-        draw(true);
+        // Search is now a local DOM filter. Typing never destroys/rebuilds the
+        // graph, inspector, toolbar, event handlers, or edge layer.
+        applySidebarSearch();
       });
       sr.appendChild(searchInput);side.appendChild(sr);
       // Gallery owns the center workspace while it is open, so keep the sidebar
@@ -8181,35 +8237,37 @@ function __MLB_STUDIO_FACTORY__(){
         if(item.library_hidden===true)return false;
         if(itemWorkspace(item)!==state.active_workspace)return false;
         if(apiComposerMode&&!apiComposerAllowsCatalogItem(item))return false;
-        const q=(item.name+" "+item.description+" "+item.category).toLowerCase();
-        return !search || q.includes(search.toLowerCase());
+        return true;
       });
 
       [...new Set(visible.map(x=>x.category))].forEach(category=>{
-        // Search results always expand so a matching component can never be hidden.
-        const collapsed=collapsedCategories.has(category) && !search;
+        const collapsed=collapsedCategories.has(category);
         const h=document.createElement("button");
         h.type="button";
         h.className="mlb-category";
+        h.dataset.searchCategory=category;
         h.setAttribute("aria-expanded",String(!collapsed));
         h.innerHTML="<span>"+category+"</span><span class='mlb-category-caret'>"+(collapsed?"▸":"▾")+"</span>";
+        const pal=document.createElement("div");
+        pal.className="mlb-palette"+(collapsed?" collapsed":"");
+        pal.dataset.searchCategory=category;
         h.addEventListener("click",()=>{
           if(collapsedCategories.has(category)) collapsedCategories.delete(category);
           else collapsedCategories.add(category);
-          draw();
+          const nextCollapsed=collapsedCategories.has(category);
+          pal.classList.toggle("collapsed",nextCollapsed);
+          h.setAttribute("aria-expanded",String(!nextCollapsed));
+          const caret=h.querySelector(".mlb-category-caret");if(caret)caret.textContent=nextCollapsed?"▸":"▾";
         });
         side.appendChild(h);
 
-        const pal=document.createElement("div");
-        pal.className="mlb-palette"+(collapsed?" collapsed":"");
-        if(!collapsed){
-          visible.filter(x=>x.category===category).forEach(item=>{
-            const b=document.createElement("button");b.type="button";b.dataset.type=item.type||"";
-            const ico=document.createElement("span");ico.className="mlb-pal-icon";ico.textContent=compactIconLabel(item.icon||"ML");
-            const text=document.createElement("span");text.innerHTML="<strong>"+item.name+'</strong><span class="mlb-pal-sub">'+(item.description||"MLBricks component")+"</span>";
-            b.append(ico,text);b.disabled=layoutIsLocked();b.title=layoutIsLocked()?"Layout locked — click Edit Layout first":"Add "+item.name;b.addEventListener("click",()=>addPrimitive(item));pal.appendChild(b);
-          });
-        }
+        visible.filter(x=>x.category===category).forEach(item=>{
+          const b=document.createElement("button");b.type="button";b.dataset.type=item.type||"";
+          b.dataset.searchText=(item.name+" "+(item.description||"")+" "+item.category).toLowerCase();
+          const ico=document.createElement("span");ico.className="mlb-pal-icon";ico.textContent=compactIconLabel(item.icon||"ML");
+          const text=document.createElement("span");text.innerHTML="<strong>"+item.name+'</strong><span class="mlb-pal-sub">'+(item.description||"MLBricks component")+"</span>";
+          b.append(ico,text);b.disabled=layoutIsLocked();b.title=layoutIsLocked()?"Layout locked — click Edit Layout first":"Add "+item.name;b.addEventListener("click",()=>addPrimitive(item));pal.appendChild(b);
+        });
         side.appendChild(pal);
       });
 
@@ -8218,15 +8276,15 @@ function __MLB_STUDIO_FACTORY__(){
           if(!entry?.definition)return false;
           const parent=activeCustomDefinition();
           if(entry.id===parent?.gallery_entry_id||entry.source_definition_id===parent?.id||entry.definition.id===parent?.id)return false;
-          const q=(String(entry.name||entry.definition.name||"")+" saved component").toLowerCase();
-          return !search||q.includes(search.toLowerCase());
+          return true;
         });
         if(nestedEntries.length){
-          const sh=document.createElement("button");sh.type="button";sh.className="mlb-category";sh.setAttribute("aria-expanded","true");
+          const sh=document.createElement("button");sh.type="button";sh.className="mlb-category";sh.dataset.searchCategory="__saved_nested__";sh.setAttribute("aria-expanded","true");
           sh.innerHTML="<span>SAVED MODULES / API</span><span class='mlb-category-caret'>▾</span>";side.appendChild(sh);
-          const sp=document.createElement("div");sp.className="mlb-palette mlb-saved-nested-palette";
+          const sp=document.createElement("div");sp.className="mlb-palette mlb-saved-nested-palette";sp.dataset.searchCategory="__saved_nested__";
           nestedEntries.forEach(entry=>{
             const b=document.createElement("button");b.type="button";
+            b.dataset.searchText=(String(entry.name||entry.definition.name||"Module")+" saved component").toLowerCase();
             const isApi=String(entry.definition?.implementation||"graph")==="api";
             b.innerHTML='<span class="mlb-pal-icon">'+(isApi?"API":"MOD")+'</span><span><strong>'+String(entry.name||entry.definition.name||"Module")+'</strong><span class="mlb-pal-sub">Saved '+(isApi?"API Component":"Module")+' · click to insert</span></span>';
             b.disabled=layoutIsLocked();
@@ -8242,12 +8300,17 @@ function __MLB_STUDIO_FACTORY__(){
         const mh=document.createElement("button");
         mh.type="button";
         mh.className="mlb-category";
+        mh.dataset.searchRole="mybricks";
         mh.setAttribute("aria-expanded",String(!myBricksCollapsed));
         mh.innerHTML="<span>"+(apiComposerMode?"MY MODULES":"MY MODULES / API")+"</span><span class='mlb-category-caret'>"+(myBricksCollapsed?"▸":"▾")+"</span>";
-        mh.addEventListener("click",()=>{myBricksCollapsed=!myBricksCollapsed;draw();});
+        const myBricksList=document.createElement("div");myBricksList.className="mlb-mybricks-list";myBricksList.hidden=myBricksCollapsed;
+        mh.addEventListener("click",()=>{
+          myBricksCollapsed=!myBricksCollapsed;myBricksList.hidden=myBricksCollapsed;
+          mh.setAttribute("aria-expanded",String(!myBricksCollapsed));
+          const caret=mh.querySelector(".mlb-category-caret");if(caret)caret.textContent=myBricksCollapsed?"▸":"▾";
+        });
         side.appendChild(mh);
 
-        if(!myBricksCollapsed){
           Object.values(state.custom_components||{}).filter(def=>{
             if(def.palette_hidden===true)return false;
             const parent=activeCustomDefinition();
@@ -8257,7 +8320,7 @@ function __MLB_STUDIO_FACTORY__(){
             if(parent&&String(parent.implementation||"graph")==="api"&&String(def.implementation||"graph")==="api")return false;
             return !parent||customCanNest(parent,def);
           }).forEach(def=>{
-            const wrap=document.createElement("div");wrap.className="mlb-custom-card-wrap";
+            const wrap=document.createElement("div");wrap.className="mlb-custom-card-wrap";wrap.dataset.searchText=(String(def.name||"")+" module api component").toLowerCase();
             const row=document.createElement("div");row.className="mlb-custom-card-row";
             const b=document.createElement("button");b.className="mlb-custom-card";b.type="button";
             const isApi=String(def.implementation||"graph")==="api";
@@ -8275,10 +8338,12 @@ function __MLB_STUDIO_FACTORY__(){
               const removeAction=btn("Remove","mlb-custom-menu-action danger");removeAction.addEventListener("click",()=>removeCustomFromPalette(def));
               menu.append(editAction,renameAction,removeAction);wrap.appendChild(menu);
             }
-            side.appendChild(wrap);
+            myBricksList.appendChild(wrap);
           });
-        }
+        side.appendChild(myBricksList);
       }
+
+      applySidebarSearch();
 
       const sidePos=sidebarScroll[state.active_workspace]||{left:0,top:0};
       requestAnimationFrame(()=>{
@@ -8478,21 +8543,10 @@ function __MLB_STUDIO_FACTORY__(){
             const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · universal 3×3 sockets":"Nested Module · universal 3×3 sockets";
           }else meta.textContent=(apiInfo(n).public_name||n.type)+" · universal 3×3 sockets";
           card.querySelectorAll('.mlb-port').forEach(portEl=>{
-            const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",name=portEl.dataset.portName||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
+            const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
             const keys=String(portEl.dataset.portKeys||key||"").split("|").filter(Boolean);
-            const names=String(portEl.dataset.portNames||name||"").split("|");
             const pendingNamedMatch=mode==="named"&&pendingPort?.portKey&&keys.includes(pendingPort.portKey)&&(!pendingPort.portSocket||pendingPort.portSocket===socket);
             if(pendingPort?.nodeId===n.id&&pendingPort.side===side&&(pendingNamedMatch||(mode!=="named"&&pendingPort.portIndex===idx))) portEl.classList.add("armed");
-            if(portEl.disabled)return;
-            portEl.addEventListener("click",ev=>{
-              if(mode!=="named"){portClick(n.id,side,idx,ev,key,name,mode,socket);return;}
-              ev.stopPropagation();
-              const items=keys.map((logicalKey,i)=>({key:logicalKey,name:names[i]||logicalKey}));
-              openNamedPortHubPicker(portEl,items,item=>{
-                const synthetic={stopPropagation(){}};
-                portClick(n.id,side,idx,synthetic,item.key,item.name,"named",socket);
-              });
-            });
           });
           const namedIn=namedUserPorts(n,"in"),namedOut=namedUserPorts(n,"out");
           if(namedIn||namedOut){
@@ -8512,10 +8566,30 @@ function __MLB_STUDIO_FACTORY__(){
             if(customTerms.length>=3)card.classList.add("mlb-complex-api-node");
             card.style.height=Math.max(315,Number.parseInt(card.style.height||"0",10)||0)+"px";
           }
-          card.addEventListener("click",()=>{outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",()=>{if(n.definition_id)openInside(n);});
+          card.addEventListener("click",ev=>{if(ev.target.closest(".mlb-port"))return;outputDirectorySelection=null;selected=n.id;draw();});card.addEventListener("dblclick",ev=>{if(ev.target.closest(".mlb-port"))return;if(n.definition_id)openInside(n);});
           flow.appendChild(card);
         });
       }
+      // Port clicks are delegated once per graph instead of installing up to
+      // six listeners on every node during every redraw.
+      flow.addEventListener("click",ev=>{
+        const portEl=ev.target.closest(".mlb-port");
+        if(!portEl||!flow.contains(portEl)||portEl.disabled)return;
+        const card=portEl.closest(".mlb-node");
+        const nodeId=card?.dataset.nodeId||"";
+        const n=(current(state).nodes||[]).find(item=>item.id===nodeId);
+        if(!n)return;
+        const side=portEl.dataset.side,idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",name=portEl.dataset.portName||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
+        if(mode!=="named"){portClick(n.id,side,idx,ev,key,name,mode,socket);return;}
+        ev.stopPropagation();
+        const keys=String(portEl.dataset.portKeys||key||"").split("|").filter(Boolean);
+        const names=String(portEl.dataset.portNames||name||"").split("|");
+        const items=keys.map((logicalKey,i)=>({key:logicalKey,name:names[i]||logicalKey}));
+        openNamedPortHubPicker(portEl,items,item=>{
+          const synthetic={stopPropagation(){}};
+          portClick(n.id,side,idx,synthetic,item.key,item.name,"named",socket);
+        });
+      });
       wrap.appendChild(flow);canvas.appendChild(wrap);
       // Keep only action-specific port guidance. Persistent canvas instruction
       // bars are intentionally disabled across every Studio workspace.
@@ -8547,10 +8621,13 @@ function __MLB_STUDIO_FACTORY__(){
           if(canvas.scrollTop!==(pos.top||0))canvas.scrollTop=pos.top||0;
           return generation;
         };
-        // One double-frame measurement is enough for the initial graph. Keep one
-        // delayed settle pass for notebook layout, instead of four eager layouts.
-        requestAnimationFrame(()=>requestAnimationFrame(renderConnections));
-        setTimeout(renderConnections,180);
+        // Edge routing performs synchronous geometry reads. Defer it until the
+        // browser has painted the Studio shell, and do only one initial pass.
+        const scheduleInitialConnections=()=>{
+          if(typeof requestIdleCallback==="function")requestIdleCallback(renderConnections,{timeout:260});
+          else setTimeout(renderConnections,0);
+        };
+        requestAnimationFrame(()=>requestAnimationFrame(scheduleInitialConnections));
         // Never observe `wrap`: renderConnections changes wrap dimensions itself,
         // which can create a ResizeObserver feedback loop in Kaggle/Jupyter.
         if(typeof ResizeObserver!=="undefined" && flow){
