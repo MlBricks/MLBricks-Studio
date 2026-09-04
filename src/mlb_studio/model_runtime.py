@@ -875,7 +875,7 @@ class TensorGraph(nn.Module):
                 label=node.get("name") or "API Function",
                 object_registry=self.api_object_registry,
             )
-        if t in {"text_input","text_output","logits_output"}: return _Identity()
+        if t in {"text_input","image_input","text_output","logits_output"}: return _Identity()
         if t=="classifier":
             default_dim = runtime_int(
                 self.runtime.get("model_dim"),
@@ -1042,7 +1042,7 @@ class TensorGraph(nn.Module):
         # Not silently faking execution for unsupported advanced blocks.
         raise ModelCompileError(
             f"Training compiler does not yet support component {node.get('name')!r} ({t}). "
-            "Supported today: declarative MLBricks API components (including BOLT and ResController), API Function, Text Input/Output, "
+            "Supported today: declarative MLBricks API components (including BOLT and ResController), API Function, Text/Image Input/Output, "
             "Embedding, Learned/Sinusoidal Position, ESA, StateAware ESA Stack, SOUP, RMSNorm, LayerNorm, Linear, FFN, Residual, "
             "Dropout, Previous Value Buffer, LM Head, nested custom components, and API-bound custom components. "
             "ElasticBit is a post-training/inference runtime component, not a differentiable training layer."

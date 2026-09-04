@@ -168,6 +168,24 @@ class APIComponentContract:
         return outputs
 
 
+class VisionClassificationContract(APIComponentContract):
+    # TensorGraph contract for image-classification vision engines.
+    _CLASSIFIER_ENGINES = {"serpentine", "vit", "visiontransformer", "cnn"}
+
+    def constructor_kwargs(self, node, runtime):
+        kwargs = super().constructor_kwargs(node, runtime)
+        engine = str(kwargs.get("engine") or "Serpentine").strip()
+        key = engine.lower().replace("-", "").replace("_", "").replace(" ", "")
+        if key not in self._CLASSIFIER_ENGINES:
+            raise ValueError(
+                f"{node.get('name', self.component_type)} engine={engine!r} is "
+                "not an image-classification TensorGraph mode. Studio currently "
+                "supports Serpentine, ViT/VisionTransformer and CNN here; "
+                "Diffusion requires timesteps and AR requires visual token IDs."
+            )
+        return kwargs
+
+
 class APIComponentRegistry:
     def __init__(self):
         self._contracts: dict[str, APIComponentContract] = {}
@@ -307,5 +325,23 @@ API_COMPONENTS.register(APIComponentContract(
         "d_model": "model_dim",
         "backend": "backend",
     },
+))
+
+# Vision classification path. Both current MLBricks Kit 1.0.0b1 families take
+# raw image tensors [B,C,H,W] for Serpentine / ViT / CNN and return class logits.
+API_COMPONENTS.register(VisionClassificationContract(
+    component_type="vesa",
+    import_key="vesa",
+    input_ports={"main": "images"},
+    output_ports={"main": None},
+    runtime_sources={"backend": "backend"},
+))
+
+API_COMPONENTS.register(VisionClassificationContract(
+    component_type="visualbolt",
+    import_key="visualbolt",
+    input_ports={"main": "images"},
+    output_ports={"main": None},
+    runtime_sources={"backend": "backend"},
 ))
 
