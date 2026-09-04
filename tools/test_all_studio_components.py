@@ -21,6 +21,11 @@ from mlb_studio.runner import EXECUTABLE_TYPES  # noqa: E402
 
 # Component capability groups in the current Studio runtime.
 DATA_RUNNER = set(EXECUTABLE_TYPES)
+
+# Runtime operations execute end-to-end in Studio, but are intentionally not
+# differentiable TensorGraph layers. ElasticBit is the first such operation.
+RUNTIME_OPERATION = {"elasticbit_runtime"}
+
 MODEL_RUNTIME = {
     "text_input", "text_output", "logits_output", "value_buffer", "dropout",
     "classifier",
@@ -38,7 +43,6 @@ LIMITED_EXECUTION = {
     "audio_input": "Audio input card; no general model-execution adapter in the causal-LM compiler.",
     "vesa": "MLBricks vision component is discoverable/importable, but not wired into the causal-LM TensorGraph compiler.",
     "visualbolt": "MLBricks vision component is discoverable/importable, but not wired into the causal-LM TensorGraph compiler.",
-    "elasticbit_runtime": "Post-training/inference precision runtime; intentionally not a differentiable training layer.",
 }
 
 
@@ -135,6 +139,10 @@ def audit(*, eager_mlbricks: bool = False) -> dict:
             execution = "data-runner"
             execution_ok = True
             note = "Executable through Data Processing runner."
+        elif typ in RUNTIME_OPERATION:
+            execution = "runtime-op"
+            execution_ok = True
+            note = "Executable as a post-training/inference Studio runtime operation."
         elif typ in MODEL_RUNTIME:
             execution = "model-runtime"
             execution_ok = True
