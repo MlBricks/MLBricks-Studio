@@ -23,6 +23,7 @@ from mlb_studio.runner import EXECUTABLE_TYPES  # noqa: E402
 DATA_RUNNER = set(EXECUTABLE_TYPES)
 MODEL_RUNTIME = {
     "text_input", "text_output", "logits_output", "value_buffer", "dropout",
+    "classifier",
     "embedding", "lm_head", "learned_position", "sinusoidal_position",
     "esa", "stateaware_esa_stack", "soup", "rmsnorm", "layernorm", "linear",
     "ffn", "residual",
@@ -38,7 +39,6 @@ LIMITED_EXECUTION = {
     "vesa": "MLBricks vision component is discoverable/importable, but not wired into the causal-LM TensorGraph compiler.",
     "visualbolt": "MLBricks vision component is discoverable/importable, but not wired into the causal-LM TensorGraph compiler.",
     "elasticbit_runtime": "Post-training/inference precision runtime; intentionally not a differentiable training layer.",
-    "classifier": "Classifier card is present, but the current model compiler is causal-LM oriented and has no classifier execution branch.",
 }
 
 

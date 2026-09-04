@@ -190,6 +190,38 @@ class _Identity(nn.Module):
     def forward(self,x): return x
 
 
+class _ClassifierHead(nn.Module):
+    """Trainable Studio classification head.
+
+    Two-dimensional input ``[B,D]`` is projected directly. Sequence input
+    ``[B,T,D]`` is mean-pooled across T before projection so the node produces
+    one class-score vector per sample.
+    """
+
+    def __init__(self, dim: int, classes: int):
+        super().__init__()
+        self.dim = int(dim)
+        self.classes = int(classes)
+        if self.dim < 1:
+            raise ValueError("Classifier hidden dim must be >= 1.")
+        if self.classes < 1:
+            raise ValueError("Classifier classes must be >= 1.")
+        self.proj = nn.Linear(self.dim, self.classes)
+
+    def forward(self, x):
+        if x.ndim == 3:
+            x = x.mean(dim=-2)
+        elif x.ndim != 2:
+            raise ValueError("Classifier Head expects [B,D] or [B,T,D] input.")
+
+        if x.size(-1) != self.dim:
+            raise ValueError(
+                f"Classifier Head expected feature width {self.dim}, "
+                f"received {x.size(-1)}."
+            )
+        return self.proj(x)
+
+
 class _PreviousValueBuffer(nn.Module):
     """Builder utility for previous physical-depth tensors.
 
@@ -844,6 +876,27 @@ class TensorGraph(nn.Module):
                 object_registry=self.api_object_registry,
             )
         if t in {"text_input","text_output","logits_output"}: return _Identity()
+        if t=="classifier":
+            default_dim = runtime_int(
+                self.runtime.get("model_dim"),
+                384,
+                f"{node.get('name','Classifier Head')} runtime model dim",
+                minimum=1,
+            )
+            return _ClassifierHead(
+                dim=runtime_int(
+                    p.get("dim") or p.get("hidden_size"),
+                    default_dim,
+                    f"{node.get('name','Classifier Head')} hidden dim",
+                    minimum=1,
+                ),
+                classes=runtime_int(
+                    p.get("classes"),
+                    10,
+                    f"{node.get('name','Classifier Head')} classes",
+                    minimum=1,
+                ),
+            )
         if t=="value_buffer":
             return _PreviousValueBuffer(
                 mode=str(p.get("mode") or "hold"),
