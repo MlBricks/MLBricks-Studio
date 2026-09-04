@@ -288,7 +288,7 @@ def test_full_window_invalidates_stale_frontend_source_snapshot():
     block = text[start:end]
     assert 'window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__()' in block
     assert 'window.__MLB_STUDIO_JS_SOURCE__||(window.__MLB_STUDIO_GET_JS_SOURCE__' not in block
-    assert 'COMPONENT TEST MODELS' in text
+    assert 'PREBUILT MODELS' in text
 
 
 def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
@@ -351,47 +351,34 @@ def test_logo_is_centered_over_left_sidebar():
     assert 'object-position:center center!important;' in css
 
 
-def test_gallery_contains_tiny_compiler_test_models():
+def test_gallery_excludes_component_test_models_and_test_compositions():
     js = _builder_js()
-    assert 'COMPONENT TEST MODELS' in js
+    assert 'PREBUILT MODELS' in js
     assert 'SPECIALIZED API PROBES' in js
-    assert 'TEST · Core Trainable Stack' in js
-    assert 'TEST · ESA Direct' in js
-    assert 'TEST · BOLT Direct API' in js
-    assert 'TEST · ESA → BOLT Pipeline' in js
-    assert 'TEST · Residual Add Multi-Input' in js
-    assert 'TEST · ResController Multi-Input' in js
-    assert 'TEST · MicroVirtualFFN API' in js
-    assert 'TEST · SAFFN Stateful API' in js
-    assert 'TEST · VirtualStateAwareFFN Stateful API' in js
-    assert 'TEST · SOUP Direct' in js
-    assert 'TEST · StateAware ESA Stack' in js
-    assert 'TEST · Previous Value Buffer' in js
+    assert 'COMPONENT TEST MODELS' not in js
+    assert 'Open Test' not in js
+    assert 'TEST · Core Trainable Stack' not in js
+    assert 'TEST · ESA Direct' not in js
+    assert 'TEST · BOLT Direct API' not in js
+    assert 'TEST · ESA → BOLT Pipeline' not in js
+    assert 'TEST · Residual Add Multi-Input' not in js
+    assert 'TEST · ResController Multi-Input' not in js
+    assert 'TEST · MicroVirtualFFN API' not in js
+    assert 'TEST · SAFFN Stateful API' not in js
+    assert 'TEST · VirtualStateAwareFFN API' not in js
+    assert 'TEST · SOUP Direct' not in js
+    assert 'TEST · StateAware ESA Stack' not in js
+    assert 'TEST · Previous Value Buffer' not in js
+    for fn in (
+        'loadCompilerTestCoreStack', 'loadCompilerTestESA', 'loadCompilerTestBOLT',
+        'loadCompilerTestESABOLT', 'loadCompilerTestResidual', 'loadCompilerTestResController',
+        'loadCompilerTestMicroFFN', 'loadCompilerTestSAFFN', 'loadCompilerTestVirtualSAFFN',
+        'loadCompilerTestSOUP', 'loadCompilerTestStateAwareESAStack', 'loadCompilerTestValueBuffer',
+    ):
+        assert fn not in js
+    # Specialized non-training probes remain available in Gallery.
     assert 'PROBE · RoPE 4D API' in js
     assert 'PROBE · ElasticBit Post-Training' in js
-    assert 'loadCompilerTestCoreStack' in js
-    assert 'loadCompilerTestESA' in js
-    assert 'loadCompilerTestBOLT' in js
-    assert 'loadCompilerTestESABOLT' in js
-    assert 'loadCompilerTestResidual' in js
-    assert 'loadCompilerTestResController' in js
-    assert 'loadCompilerTestMicroFFN' in js
-    assert 'loadCompilerTestSAFFN' in js
-    assert 'loadCompilerTestVirtualSAFFN' in js
-    assert 'loadCompilerTestSOUP' in js
-    assert 'loadCompilerTestStateAwareESAStack' in js
-    assert 'loadCompilerTestValueBuffer' in js
-    assert 'Previous Signal · Zero Init' not in js
-    assert 'Previous State · Zero Init' not in js
-    assert 'Layer 1 auto-initializes unconnected previous signal/state' in js
-    assert 'const esa1=makeNode(cat(catalog,"esa"))' in js
-    assert 'const esa2=makeNode(cat(catalog,"esa"))' in js
-    assert 'const prevEsa=makeNode(cat(catalog,"esa"))' not in js
-    assert 'Layer 2 receives the real previous signal and state from physical depth 1' in js
-    assert 'toNamed(esa1,saffn2,"previous_esa","main_out","","top_aux")' in js
-    assert 'toNamed(saffn1,saffn2,"previous_state","named_out:state","bottom_aux","bottom_aux")' in js
-    assert 'dim:64,heads:4,block:64,batch:2,vocab:2048' in js
-    assert 'Object.assign(edge(ctx.emb.id,rc.id,"residual"),{source_port:"skip_out",target_port:"skip_in"})' in js
 
 
 def test_previous_value_buffer_is_available_as_builder_utility():
