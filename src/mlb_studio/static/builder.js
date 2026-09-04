@@ -512,7 +512,34 @@ function __MLB_STUDIO_FACTORY__(){
     function itemWorkspace(item){
       return dataNodeTypes.has(item.type) ? "data" : "model";
     }
-    function defaultDataNodes(){
+    const mlbricksDataPresets=[
+      {
+        id:"tinystories",name:"TinyStories",dataset_id:"MlBricks/tinystories",config:"",split:"train",text_column:"text",
+        license:"CDLA-Sharing-1.0",focus:"Stories · Small-model pretraining",edition:"Full MLBricks mirror"
+      },
+      {
+        id:"wikipedia_en_1b",name:"Wikipedia EN 1B",dataset_id:"MlBricks/wikipedia-en-1b",config:"",split:"train",text_column:"text",
+        license:"CC BY-SA 3.0 + GFDL",focus:"General knowledge · Encyclopedic text",edition:"MLBricks curated · ~1B GPT-2 tokens"
+      },
+      {
+        id:"cosmopedia",name:"Cosmopedia Education",dataset_id:"MlBricks/cosmopedia",config:"openstax",split:"train",text_column:"text",
+        license:"Apache-2.0",focus:"Science & education · Synthetic textbooks",edition:"Full MLBricks mirror · OpenStax config"
+      },
+      {
+        id:"fineweb_edu_1b",name:"FineWeb-Edu 1B",dataset_id:"MlBricks/fineweb-edu-1b",config:"",split:"train",text_column:"text",
+        license:"ODC-By 1.0",focus:"Educational web · General pretraining",edition:"MLBricks curated · ~1B GPT-2 tokens"
+      },
+      {
+        id:"openwebmath_1b",name:"OpenWebMath 1B",dataset_id:"MlBricks/openwebmath-1b",config:"",split:"train",text_column:"text",
+        license:"ODC-By 1.0",focus:"Mathematics · Reasoning pretraining",edition:"MLBricks curated · ~1B GPT-2 tokens"
+      },
+      {
+        id:"ultrachat_200k",name:"UltraChat 200K",dataset_id:"MlBricks/ultrachat-200k",config:"",split:"train",text_column:"text",
+        license:"MIT",focus:"Chat · Instruction/SFT",edition:"MLBricks normalized mirror"
+      }
+    ];
+
+    function defaultDataNodes(preset=mlbricksDataPresets[0]){
       const nodes=[
         makeNode(cat(catalog,"hf_dataset")),
         makeNode(cat(catalog,"text_process")),
@@ -520,9 +547,16 @@ function __MLB_STUDIO_FACTORY__(){
         makeNode(cat(catalog,"tokenize_text")),
         makeNode(cat(catalog,"prepared_dataset"))
       ];
-      nodes[0].params.dataset_id="roneneldan/TinyStories";
-      nodes[0].params.split="train";
-      nodes[0].params.max_rows=10000;
+      const source=nodes[0];
+      source.name=preset.name+" Source";
+      source.params.dataset_id=preset.dataset_id;
+      source.params.config=preset.config||"";
+      source.params.split=preset.split||"train";
+      source.params.text_column=preset.text_column||"text";
+      source.params.streaming="false";
+      // Gallery presets are intentionally safe quickstarts. Users can set 0
+      // explicitly when they want to process the entire maintained edition.
+      source.params.max_rows=10000;
       nodes[2].params.train_size=90;
       nodes[2].params.validation_size=5;
       nodes[2].params.test_size=5;
@@ -4126,9 +4160,12 @@ function __MLB_STUDIO_FACTORY__(){
         {name:"StateAware ESA 200M",meta:"8 layers · Context 256 · Batch 16 · 199,982,344 parameters",action:"Load Model",load:loadStateAwareESA200M},
         {name:"SOUP 200M",meta:"3 SOUP layers · Context 256 · Batch 16 · 199,916,160 parameters",action:"Load Model",load:loadSOUP200M}
       ];
-      const builtInSampleData=[
-        {name:"TinyStories Text Pipeline",meta:"Hugging Face → Text Processing → Train 90% · Validation 5% · Test 5% → GPT-2 Tokenize → Prepared Dataset",action:"Load Pipeline",load:loadTextDataStarter}
-      ];
+      const builtInSampleData=mlbricksDataPresets.map(preset=>({
+        name:preset.name+" Pipeline",
+        meta:preset.focus+" · "+preset.edition+" · "+preset.license+" · 10k-row quickstart",
+        action:"Load Pipeline",
+        load:()=>loadDataPreset(preset)
+      }));
       const sampleModels=makeSection("SAMPLE MODELS",builtInSampleModels.length+" built-in","sample");
       builtInSampleModels.forEach(item=>sampleModels.appendChild(makeSampleCard(item.name,item.meta,item.action,item.load)));
       const sampleData=makeSection("SAMPLE DATA",builtInSampleData.length+" built-in","sample");
@@ -4292,10 +4329,13 @@ function __MLB_STUDIO_FACTORY__(){
         body.appendChild(mine);
       }else{
         body.classList.add("data-tab");
-        const samples=makeSection("PREBUILT DATA","1 available","featured full-width");
-        const load=btn("Open Pipeline","mlb-gallery-action sample");load.addEventListener("click",openAndClose(loadTextDataStarter));
+        const samples=makeSection("PREBUILT DATA",mlbricksDataPresets.length+" available","featured full-width");
         const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
-        sampleGrid.appendChild(card("TinyStories Text Pipeline","Hugging Face → Text Processing → Train 90% · Validation 5% · Test 5% → GPT-2 Tokenize → Prepared Dataset","DATA",[load]));
+        mlbricksDataPresets.forEach(preset=>{
+          const load=btn("Open Pipeline","mlb-gallery-action sample");load.addEventListener("click",openAndClose(()=>loadDataPreset(preset)));
+          const meta=preset.focus+" · "+preset.edition+" · "+preset.license+" · 10k-row quickstart";
+          sampleGrid.appendChild(card(preset.name+" Pipeline",meta,"DATA",[load]));
+        });
         samples.appendChild(sampleGrid);
         body.appendChild(samples);
 
@@ -7390,20 +7430,22 @@ function __MLB_STUDIO_FACTORY__(){
       }
     }
 
-    function loadTextDataStarter(){
-      checkpoint("Load Default Data Pipeline");
+    function loadDataPreset(preset){
+      preset=preset||mlbricksDataPresets[0];
+      checkpoint("Load "+preset.name+" Data Pipeline");
       rememberWorkspaceView();
       state.active_workspace="data";
       const ws=state.workspaces.data;
+      const pipelineName=preset.name+" Pipeline";
       state.view_component_id=ws.root_component_id;
-      state.breadcrumbs=[{id:ws.root_component_id,name:"Data Processing"}];
+      state.breadcrumbs=[{id:ws.root_component_id,name:pipelineName}];
       ws.view_component_id=ws.root_component_id;
       ws.breadcrumbs=cp(state.breadcrumbs);
 
-      const starter=defaultDataNodes();
+      const starter=defaultDataNodes(preset);
       state.components[ws.root_component_id]={
         id:ws.root_component_id,
-        name:"Data Processing",
+        name:pipelineName,
         kind:"data",
         revision:1,
         nodes:starter.nodes,
@@ -7412,9 +7454,13 @@ function __MLB_STUDIO_FACTORY__(){
       selected=null;pendingPort=null;
       execution={status:"idle",overall:0,message:"Ready",nodes:{}};
       collapseArtifactWorkspace();
-      setStatus("Default pipeline restored: Hugging Face → Clean → Train/Val/Test → Tokenize → Prepared Dataset.");
+      setStatus(preset.name+" loaded from "+preset.dataset_id+" · 10k-row quickstart. Set Max Rows to 0 for the full edition.");
       switchingWorkspace=true;
       draw();
+    }
+
+    function loadTextDataStarter(){
+      return loadDataPreset(mlbricksDataPresets[0]);
     }
 
     function loadTinyStories(){

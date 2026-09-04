@@ -1843,3 +1843,25 @@ A User Defined Class node constructs one reusable object instance. Later Instanc
 ### Custom named ports
 
 User Defined Function nodes can use either the standard Main/Skip/Extra interface or **Custom Named Ports**. Named mode allows an arbitrary number of visual inputs and outputs. Each input maps to a Python function parameter; each output maps to `auto`, a tuple/list index, or a dict/object key. Named User Function ports can connect to other named User Functions or directly to standard MLB Studio Main/Skip/Extra ports.
+
+## MLBricks maintained Data Gallery presets
+
+Gallery → Data includes six ready-to-open text pipelines backed by MLBricks-maintained
+Hugging Face dataset repositories:
+
+- `MlBricks/tinystories` — full TinyStories mirror.
+- `MlBricks/wikipedia-en-1b` — curated English Wikipedia edition at about 1B GPT-2 tokens.
+- `MlBricks/cosmopedia` — full Cosmopedia mirror; Studio opens the `openstax` config.
+- `MlBricks/fineweb-edu-1b` — curated FineWeb-Edu edition at about 1B GPT-2 tokens.
+- `MlBricks/openwebmath-1b` — curated OpenWebMath edition at about 1B GPT-2 tokens.
+- `MlBricks/ultrachat-200k` — normalized UltraChat SFT mirror with a common `text` column.
+
+Every prebuilt data pipeline defaults to a 10,000-row quickstart so opening a Gallery card
+does not accidentally process the entire maintained edition. Set **Max Rows = 0** on the
+Hugging Face Dataset source only when full-dataset processing is intended.
+
+The publishing utility is `tools/publish_mlbricks_datasets.py` (with a PowerShell wrapper at
+`tools/publish_mlbricks_datasets.ps1`). It records upstream repository/revision provenance and
+keeps the original dataset license/attribution requirements visible in the destination dataset
+card/manifest. Hugging Face credentials are read from `HF_TOKEN` or the normal `hf auth login`
+configuration and are never stored in Studio project files.

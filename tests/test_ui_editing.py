@@ -379,6 +379,38 @@ def test_gallery_excludes_test_models_compositions_and_specialized_probes():
         assert fn not in js
 
 
+def test_data_gallery_has_six_mlbricks_curated_presets():
+    js = _builder_js()
+    assert 'const mlbricksDataPresets=[' in js
+    assert 'mlbricksDataPresets.length+" available"' in js
+    for repo_id in (
+        'MlBricks/tinystories',
+        'MlBricks/wikipedia-en-1b',
+        'MlBricks/cosmopedia',
+        'MlBricks/fineweb-edu-1b',
+        'MlBricks/openwebmath-1b',
+        'MlBricks/ultrachat-200k',
+    ):
+        assert repo_id in js
+    for label in (
+        'TinyStories', 'Wikipedia EN 1B', 'Cosmopedia Education',
+        'FineWeb-Edu 1B', 'OpenWebMath 1B', 'UltraChat 200K',
+    ):
+        assert label in js
+    assert '10k-row quickstart' in js
+    assert 'function loadDataPreset(preset)' in js
+    assert 'source.params.max_rows=10000;' in js
+
+
+def test_data_gallery_preserves_dataset_license_labels():
+    js = _builder_js()
+    assert 'CDLA-Sharing-1.0' in js
+    assert 'CC BY-SA 3.0 + GFDL' in js
+    assert 'Apache-2.0' in js
+    assert 'ODC-By 1.0' in js
+    assert 'MIT' in js
+
+
 def test_previous_value_buffer_is_available_as_builder_utility():
     from mlb_studio.graph import primitive_catalog
 
