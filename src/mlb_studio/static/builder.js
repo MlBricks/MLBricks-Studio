@@ -8124,7 +8124,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Sidebar
       const side=document.createElement("aside");side.className="mlb-sidebar";
       if(runtimeWorkspaceActive)side.classList.add("mlb-sidebar-hidden");
-      const head=document.createElement("div");head.className="mlb-sidehead";head.innerHTML="<span>"+(state.active_workspace==="data"?"DATA LIBRARY":"COMPONENT LIBRARY")+"</span><span>×</span>";side.appendChild(head);
+      const head=document.createElement("div");head.className="mlb-sidehead";head.innerHTML="<span>"+(state.active_workspace==="data"?"DATA LIBRARY":"COMPONENT LIBRARY")+"</span>";side.appendChild(head);
       const sr=document.createElement("div");sr.className="mlb-search-row";
       const searchInput=document.createElement("input");searchInput.className="mlb-search";searchInput.placeholder="Search...";searchInput.setAttribute("aria-label",state.active_workspace==="data"?"Search data steps":"Search components");searchInput.value=search;
       function applySidebarSearch(){
