@@ -351,34 +351,32 @@ def test_logo_is_centered_over_left_sidebar():
     assert 'object-position:center center!important;' in css
 
 
-def test_gallery_excludes_component_test_models_and_test_compositions():
+def test_gallery_excludes_test_models_compositions_and_specialized_probes():
     js = _builder_js()
     assert 'PREBUILT MODELS' in js
-    assert 'SPECIALIZED API PROBES' in js
     assert 'COMPONENT TEST MODELS' not in js
+    assert 'SPECIALIZED API PROBES' not in js
     assert 'Open Test' not in js
-    assert 'TEST · Core Trainable Stack' not in js
-    assert 'TEST · ESA Direct' not in js
-    assert 'TEST · BOLT Direct API' not in js
-    assert 'TEST · ESA → BOLT Pipeline' not in js
-    assert 'TEST · Residual Add Multi-Input' not in js
-    assert 'TEST · ResController Multi-Input' not in js
-    assert 'TEST · MicroVirtualFFN API' not in js
-    assert 'TEST · SAFFN Stateful API' not in js
-    assert 'TEST · VirtualStateAwareFFN API' not in js
-    assert 'TEST · SOUP Direct' not in js
-    assert 'TEST · StateAware ESA Stack' not in js
-    assert 'TEST · Previous Value Buffer' not in js
+    assert 'Open Probe' not in js
+    for label in (
+        'TEST · Core Trainable Stack', 'TEST · ESA Direct', 'TEST · BOLT Direct API',
+        'TEST · ESA → BOLT Pipeline', 'TEST · Residual Add Multi-Input',
+        'TEST · ResController Multi-Input', 'TEST · MicroVirtualFFN API',
+        'TEST · SAFFN Stateful API', 'TEST · VirtualStateAwareFFN API',
+        'TEST · SOUP Direct', 'TEST · StateAware ESA Stack', 'TEST · Previous Value Buffer',
+        'VESA Vision API', 'VisualBOLT Vision API', 'RoPE 4D API',
+        'PROBE · ElasticBit Post-Training',
+    ):
+        assert label not in js
     for fn in (
         'loadCompilerTestCoreStack', 'loadCompilerTestESA', 'loadCompilerTestBOLT',
         'loadCompilerTestESABOLT', 'loadCompilerTestResidual', 'loadCompilerTestResController',
         'loadCompilerTestMicroFFN', 'loadCompilerTestSAFFN', 'loadCompilerTestVirtualSAFFN',
         'loadCompilerTestSOUP', 'loadCompilerTestStateAwareESAStack', 'loadCompilerTestValueBuffer',
+        'compilerTestContext', 'commitCompilerTestModel', 'loadCompilerProbeRoPE',
+        'loadCompilerProbeElasticBit', 'loadCompilerProbeVision',
     ):
         assert fn not in js
-    # Specialized non-training probes remain available in Gallery.
-    assert 'PROBE · RoPE 4D API' in js
-    assert 'PROBE · ElasticBit Post-Training' in js
 
 
 def test_previous_value_buffer_is_available_as_builder_utility():

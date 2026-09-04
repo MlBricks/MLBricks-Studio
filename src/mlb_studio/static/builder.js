@@ -4249,16 +4249,6 @@ function __MLB_STUDIO_FACTORY__(){
         samples.appendChild(sampleGrid);
         body.appendChild(samples);
 
-        const probes=makeSection("SPECIALIZED API PROBES","4 adapters","featured full-width compiler-tests");
-        const probeGrid=document.createElement("div");probeGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
-        const addProbe=(title,meta,loader)=>{const b=btn("Open Probe","mlb-gallery-action");b.addEventListener("click",openAndClose(loader));probeGrid.appendChild(card(title,meta,"PROBE",[b]));};
-        addProbe("VESA Vision API","Image model · separate vision task adapter from causal-LM training",()=>loadCompilerProbeVision("vesa","VESA"));
-        addProbe("VisualBOLT Vision API","Image model · separate vision task adapter from causal-LM training",()=>loadCompilerProbeVision("visualbolt","VisualBOLT"));
-        addProbe("RoPE 4D API","Requires [B,H,T,D] Q/K-like tensor adapter",loadCompilerProbeRoPE);
-        addProbe("ElasticBit Runtime","Post-training/inference 4–32-bit runtime · not differentiable training",loadCompilerProbeElasticBit);
-        probes.appendChild(probeGrid);
-        body.appendChild(probes);
-
         const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
         if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Gallery will appear here."));}
         else{
@@ -7425,69 +7415,6 @@ function __MLB_STUDIO_FACTORY__(){
       setStatus("Default pipeline restored: Hugging Face → Clean → Train/Val/Test → Tokenize → Prepared Dataset.");
       switchingWorkspace=true;
       draw();
-    }
-
-    function compilerTestContext(spec){
-      checkpoint("Load "+spec.name);
-      rememberWorkspaceView();
-      state.active_workspace="model";
-      const rootId=state.workspaces.model.root_component_id;
-      state.root_component_id=rootId;
-      state.view_component_id=rootId;
-      state.project={
-        ...(state.project||{}),
-        name:spec.name,
-        context_length:spec.block||64,
-        batch_size:spec.batch||2,
-        model_settings:{
-          embedding_size:spec.dim||64,
-          heads:spec.heads||4,
-          block:spec.block||64,
-          default_batch:spec.batch||2,
-          vocab_size:spec.vocab||2048,
-          precision:spec.precision||"fp32"
-        },
-        dataset:"Compiler Test",
-        estimated_parameters:"Tiny test model",
-        description:spec.description||"Compiler/runtime validation model"
-      };
-      state.breadcrumbs=[{id:rootId,name:spec.name}];
-      state.workspaces.model.view_component_id=rootId;
-      state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
-      const input=makeNode(cat(catalog,"text_input"));configureTextInputForLatest(input);input.name="Test Text Input";
-      const emb=makeNode(cat(catalog,"embedding"));emb.name="Test Embedding";emb.params={...(emb.params||{}),vocab_size:spec.vocab||2048,embedding_dim:spec.dim||64,hidden_size:spec.dim||64,dim:spec.dim||64,dtype:"float32"};
-      const norm=makeNode(cat(catalog,"rmsnorm"));norm.name="Test RMSNorm";norm.params={...(norm.params||{}),normalized_shape:spec.dim||64,hidden_size:spec.dim||64,dim:spec.dim||64,eps:1e-6,elementwise_affine:true};
-      const head=makeNode(cat(catalog,"lm_head"));head.name="Test LM Head";head.params={...(head.params||{}),hidden_size:spec.dim||64,dim:spec.dim||64,vocab_size:spec.vocab||2048,bias:false,tie_embeddings:true};
-      const out=makeNode(cat(catalog,"text_output"));out.name="Test Output";
-      return {spec,rootId,input,emb,norm,head,out};
-    }
-
-    function commitCompilerTestModel(ctx,nodes,edges){
-      state.components[ctx.rootId]={id:ctx.rootId,name:ctx.spec.name,kind:"model",revision:1,nodes,edges};
-      syncModelSettingsToGraph(state.project.model_settings,state.project.model_settings);
-      selected=null;pendingPort=null;collapseArtifactWorkspace();
-      setStatus(ctx.spec.name+" loaded — ready for compiler/runtime testing.");
-      draw();
-    }
-
-    function loadCompilerProbeRoPE(){
-      const ctx=compilerTestContext({name:"PROBE · RoPE 4D API",description:"RoPE expects [B,H,T,D]. This canvas probe is intentionally separated from causal-LM training until the Q/K tensor adapter is attached.",dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"});
-      const rope=makeNode(cat(catalog,"rope"));rope.name="RoPE API Probe";rope.params={...(rope.params||{}),dim:16,base:10000.0};
-      const nodes=[ctx.input,ctx.emb,rope,ctx.norm,ctx.head,ctx.out];const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));commitCompilerTestModel(ctx,nodes,edges);
-    }
-
-    function loadCompilerProbeElasticBit(){
-      const ctx=compilerTestContext({name:"PROBE · ElasticBit Post-Training",description:"ElasticBit is a post-training/inference precision runtime. This probe exposes it in Test Gallery without pretending it is a differentiable training layer.",dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"});
-      const eb=makeNode(cat(catalog,"elasticbit_runtime"));eb.name="ElasticBit Runtime Probe";eb.params={...(eb.params||{}),threshold:0.01,min_bits:4,max_bits:32,runtime_mode:"compact"};
-      const nodes=[ctx.input,ctx.emb,eb,ctx.norm,ctx.head,ctx.out];const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));commitCompilerTestModel(ctx,nodes,edges);
-    }
-
-    function loadCompilerProbeVision(type,label){
-      const ctx=compilerTestContext({name:"PROBE · "+label+" Vision API",description:"Tiny image-model API probe. Vision training uses a separate task adapter from the causal-LM trainer.",dim:64,heads:4,block:64,batch:2,vocab:2048,precision:"fp32"});
-      const image=makeNode(cat(catalog,"image_input"));image.name="Test Image Input";
-      const vision=makeNode(cat(catalog,type));vision.name=label+" API Probe";vision.params={...(vision.params||{}),image_size:32,patch_size:8,in_channels:3,num_classes:10,dim:64,depth:1,heads:4,backend:"pytorch",engine:"Serpentine",position:"auto",scan:"cross",ffn:"standard",residual:"standard"};
-      const output=makeNode(cat(catalog,"logits_output"));output.name="Test Logits Output";
-      commitCompilerTestModel(ctx,[image,vision,output],[edge(image.id,vision.id),edge(vision.id,output.id)]);
     }
 
     function loadTinyStories(){
