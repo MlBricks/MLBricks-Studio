@@ -38,7 +38,6 @@ LIMITED_EXECUTION = {
     "vesa": "MLBricks vision component is discoverable/importable, but not wired into the causal-LM TensorGraph compiler.",
     "visualbolt": "MLBricks vision component is discoverable/importable, but not wired into the causal-LM TensorGraph compiler.",
     "elasticbit_runtime": "Post-training/inference precision runtime; intentionally not a differentiable training layer.",
-    "rope": "MLBricks RoPE API is discoverable/importable, but no direct TensorGraph execution branch/contract is registered.",
     "classifier": "Classifier card is present, but the current model compiler is causal-LM oriented and has no classifier execution branch.",
 }
 

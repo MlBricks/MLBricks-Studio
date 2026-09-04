@@ -185,6 +185,16 @@ class APIComponentRegistry:
 
 API_COMPONENTS = APIComponentRegistry()
 
+# RoPE is a standard one-input/one-output MLBricks module. The original API
+# expects a Q/K-like tensor [B,H,T,D]; start_pos defaults to zero in MLBricks,
+# so Studio can use the universal execution path without a TensorGraph branch.
+API_COMPONENTS.register(APIComponentContract(
+    component_type="rope",
+    import_key="rope",
+    input_ports={"main": "x"},
+    output_ports={"main": None},
+))
+
 # First proof of the universal path.  No BOLT-specific branch is required in
 # TensorGraph: this declaration maps the visual node to Bolt's original API.
 API_COMPONENTS.register(APIComponentContract(
