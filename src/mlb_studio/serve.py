@@ -283,7 +283,8 @@ class ModelHTTPRuntime:
                 body = _json_bytes(payload)
                 self.send_response(status); self._headers()
                 self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+                self.send_header("Content-Length", str(len(body))); self.end_headers()
+                self.wfile.write(body); self.wfile.flush()
 
             def _html(self, status, page):
                 body = page.encode("utf-8")
@@ -297,13 +298,35 @@ class ModelHTTPRuntime:
                 self._json(401, {"error": "Unauthorized. Supply a valid Bearer API key."})
                 return False
 
+            def _drain_small_rejected_body(self, length):
+                # On Windows, closing a TCP socket with unread request bytes can
+                # turn an otherwise valid 413 response into WSAECONNABORTED
+                # (WinError 10053) on the client. Drain only modest overages;
+                # never consume an unbounded attacker-controlled body.
+                drain_limit = runtime.max_request_bytes + 65_536
+                if length <= 0 or length > drain_limit:
+                    return
+                remaining = length
+                try:
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(remaining, 65_536))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                except (OSError, TimeoutError):
+                    pass
+
             def _body(self):
                 raw_length = self.headers.get("Content-Length", "0") or "0"
                 try:
                     length = int(raw_length)
                 except ValueError as exc:
                     raise ValueError("Invalid Content-Length header.") from exc
-                if length < 0 or length > runtime.max_request_bytes:
+                if length < 0:
+                    raise _PayloadTooLarge(f"Request body exceeds {runtime.max_request_bytes} bytes.")
+                if length > runtime.max_request_bytes:
+                    self._drain_small_rejected_body(length)
+                    self.close_connection = True
                     raise _PayloadTooLarge(f"Request body exceeds {runtime.max_request_bytes} bytes.")
                 raw = self.rfile.read(length) if length else b"{}"
                 try:
