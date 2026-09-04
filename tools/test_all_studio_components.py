@@ -27,7 +27,7 @@ DATA_RUNNER = set(EXECUTABLE_TYPES)
 RUNTIME_OPERATION = {"elasticbit_runtime"}
 
 MODEL_RUNTIME = {
-    "text_input", "image_input", "text_output", "logits_output", "value_buffer", "dropout",
+    "text_input", "image_input", "audio_input", "text_output", "logits_output", "value_buffer", "dropout",
     "classifier",
     "embedding", "lm_head", "learned_position", "sinusoidal_position",
     "esa", "stateaware_esa_stack", "soup", "rmsnorm", "layernorm", "linear",
@@ -39,7 +39,6 @@ MODEL_RUNTIME = {
 # execution path in the causal-LM compiler/data runner. They are release-gate
 # items if the goal is "every visible component executes end-to-end".
 LIMITED_EXECUTION = {
-    "audio_input": "Audio input card; no general model-execution adapter in the causal-LM compiler.",
 }
 
 
