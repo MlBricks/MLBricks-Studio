@@ -571,3 +571,19 @@ def test_user_function_has_central_visual_to_function_mapping_editor():
     assert 'Return mapping is configured in Visual ↔ Function Mapping below.' in js
     assert '.mlb-visual-map-card' in css
     assert '.mlb-visual-map-row' in css
+
+
+def test_local_studio_storage_is_in_gallery_not_cloud():
+    js = _builder_js()
+    gallery_start = js.index('function renderCentralGallery(canvas)')
+    cloud_start = js.index('function renderCentralCloud(canvas)')
+    local_start = js.index('function renderLocalPersistencePanel(container)')
+    cloud_view_start = js.index('function renderCloudView(container,showHead=true)')
+    gallery_block = js[gallery_start:cloud_start]
+    cloud_view_block = js[cloud_view_start:]
+    assert '["drafts","Drafts"]' in gallery_block
+    assert 'renderLocalPersistencePanel(body);' in gallery_block
+    assert 'renderLocalPersistencePanel(container);' not in cloud_view_block
+    assert 'Drafts are automatic.' in js[local_start:cloud_view_start]
+    assert 'const drafts=(localPersistence.drafts||[]);' in js
+    assert 'const saved=(localPersistence.repository||[]);' in js

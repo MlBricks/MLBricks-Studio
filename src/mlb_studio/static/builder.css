@@ -3552,3 +3552,22 @@
   .mlb-local-repository-row{grid-template-columns:1fr}
   .mlb-cloud-credential-summary{grid-template-columns:1fr}
 }
+
+/* ------------------------------------------------------------------
+   v0.7.36 — Local drafts/repository live in Gallery, not Cloud
+   ------------------------------------------------------------------ */
+.mlb-central-gallery-body.drafts-tab{
+  display:block!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+}
+.mlb-central-gallery-body.drafts-tab>.mlb-local-persistence-card{
+  width:100%!important;
+  max-width:none!important;
+  margin:0!important;
+  box-sizing:border-box!important;
+}
+.mlb-central-gallery-body.drafts-tab .mlb-local-repository-list{
+  max-height:none!important;
+  overflow:visible!important;
+}

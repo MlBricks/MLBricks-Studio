@@ -185,10 +185,32 @@ class StudioPersistence:
     def list_drafts(self, *, limit: int = 30) -> list[dict[str, Any]]:
         with self._db_lock, self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, project_name, workspace, updated_at FROM drafts ORDER BY updated_at DESC LIMIT ?",
+                "SELECT id, project_name, workspace, updated_at, payload FROM drafts ORDER BY updated_at DESC LIMIT ?",
                 (max(1, min(int(limit), 200)),),
             ).fetchall()
-        return [dict(row) for row in rows]
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = {
+                "id": row["id"],
+                "project_name": row["project_name"],
+                "workspace": row["workspace"],
+                "updated_at": row["updated_at"],
+                "node_count": 0,
+                "edge_count": 0,
+            }
+            try:
+                state = json.loads(row["payload"] or "{}")
+                workspace = str(item["workspace"] or state.get("active_workspace") or "model")
+                workspaces = state.get("workspaces") or {}
+                ws = workspaces.get(workspace) or {}
+                root_id = ws.get("root_component_id") or state.get("root_component_id")
+                component = (state.get("components") or {}).get(root_id) or {}
+                item["node_count"] = len(component.get("nodes") or [])
+                item["edge_count"] = len(component.get("edges") or [])
+            except Exception:
+                pass
+            out.append(item)
+        return out
 
     def load_draft(self, draft_id: str) -> dict[str, Any] | None:
         with self._db_lock, self._connect() as conn:

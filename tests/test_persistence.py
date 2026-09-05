@@ -64,3 +64,24 @@ def test_mask_secret_keeps_only_small_identifier_edges():
     masked = mask_secret("github_pat_1234567890abcdef")
     assert "1234567890" not in masked
     assert masked.endswith("cdef")
+
+
+def test_draft_summary_reports_active_graph_progress(tmp_path):
+    store = StudioPersistence(tmp_path)
+    state = {
+        "project": {"name": "Progress", "local_id": "progress-1"},
+        "active_workspace": "model",
+        "workspaces": {"model": {"root_component_id": "root"}},
+        "components": {
+            "root": {
+                "id": "root",
+                "nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+                "edges": [{"id": "e1"}, {"id": "e2"}],
+            }
+        },
+        "root_component_id": "root",
+    }
+    store.save_draft("progress-1", "Progress", state, workspace="model")
+    draft = store.list_drafts()[0]
+    assert draft["node_count"] == 3
+    assert draft["edge_count"] == 2

@@ -1064,7 +1064,7 @@ function __MLB_STUDIO_FACTORY__(){
       else if(cloudWorkspace.open)galleryPreviousBottomExpanded=cloudPreviousBottomExpanded;
       cloudWorkspace.open=false;
       bottomExpanded=false;
-      galleryWorkspace={open:true,tab:["models","components","data"].includes(tab)?tab:"models"};
+      galleryWorkspace={open:true,tab:["models","components","data","drafts"].includes(tab)?tab:"models"};
       outputDirectorySelection=null;
       selected=null;
       setStatus("Gallery opened.");
@@ -4364,13 +4364,13 @@ function __MLB_STUDIO_FACTORY__(){
 
       const head=document.createElement("div");head.className="mlb-gallery-page-head";
       const copy=document.createElement("div");copy.className="mlb-gallery-page-copy";
-      copy.innerHTML="<strong>GALLERY</strong><span>Prebuilt MLBricks models, reusable Modules/API Components, data pipelines, and your saved designs.</span>";
+      copy.innerHTML="<strong>GALLERY</strong><span>Prebuilt MLBricks models, reusable Modules/API Components, data pipelines, autosaved drafts, and your local designs.</span>";
       const close=btn("×","mlb-gallery-page-close");close.title="Close Gallery";close.addEventListener("click",closeGallery);
       head.append(copy,close);outer.appendChild(head);
 
       const tabsRow=document.createElement("div");tabsRow.className="mlb-gallery-tabs-row";
       const tabs=document.createElement("div");tabs.className="mlb-central-gallery-tabs";
-      [["models","Models"],["components","Components"],["data","Data"]].forEach(([key,label])=>{
+      [["models","Models"],["components","Components"],["data","Data"],["drafts","Drafts"]].forEach(([key,label])=>{
         const b=btn(label,"mlb-central-gallery-tab"+(galleryWorkspace.tab===key?" active":""));
         b.addEventListener("click",()=>{galleryWorkspace.tab=key;draw();});tabs.appendChild(b);
       });
@@ -4479,6 +4479,9 @@ function __MLB_STUDIO_FACTORY__(){
           mine.appendChild(savedGrid);
         }
         body.appendChild(mine);
+      }else if(galleryWorkspace.tab==="drafts"){
+        body.classList.add("drafts-tab");
+        renderLocalPersistencePanel(body);
       }else{
         body.classList.add("data-tab");
         const samples=makeSection("PREBUILT DATA",mlbricksDataPresets.length+" available","featured full-width");
@@ -4513,7 +4516,7 @@ function __MLB_STUDIO_FACTORY__(){
       const outer=document.createElement("div");outer.className="mlb-central-cloud";
       const head=document.createElement("div");head.className="mlb-cloud-page-head";
       const copy=document.createElement("div");copy.className="mlb-cloud-page-copy";
-      copy.innerHTML="<strong>CLOUD & REPOSITORIES</strong><span>Connect providers, push or load models, datasets, reusable Modules/API Components, and projects.</span>";
+      copy.innerHTML="<strong>CLOUD & REPOSITORIES</strong><span>Connect external providers, credentials and remote repositories for datasets, models and project artifacts.</span>";
       const close=btn("×","mlb-gallery-page-close");close.title="Close Cloud & Repositories";close.addEventListener("click",closeCloudWorkspace);
       head.append(copy,close);outer.appendChild(head);
       const body=document.createElement("div");body.className="mlb-central-cloud-body";
@@ -4881,24 +4884,31 @@ function __MLB_STUDIO_FACTORY__(){
       actions.append(saveCurrent,saveProject,refresh);card.appendChild(actions);
 
       const note=document.createElement("div");note.className="mlb-cloud-secret-note mlb-local-storage-rule";
-      note.innerHTML="<strong>Design-only storage.</strong> Drafts and Local Repository items contain graphs, component definitions, code/configuration, metadata and artifact references. Model parameters, optimizer tensors, datasets and checkpoint bodies are never copied into the Studio database.";
+      note.innerHTML="<strong>Drafts are automatic.</strong> Every meaningful Builder change updates the current draft; the save buttons below only create named reusable versions. Drafts and Local Repository items contain graphs, component definitions, code/configuration, metadata and artifact references. Model parameters, optimizer tensors, datasets and checkpoint bodies are never copied into the Studio database.";
       card.appendChild(note);
 
-      const drafts=(localPersistence.drafts||[]).slice(0,3);
+      const drafts=(localPersistence.drafts||[]);
       if(drafts.length){
         const sub=document.createElement("div");sub.className="mlb-cloud-subtitle";sub.textContent="RECENT DRAFTS";card.appendChild(sub);
         const list=document.createElement("div");list.className="mlb-local-repository-list";
         drafts.forEach(item=>{
           const row=document.createElement("div");row.className="mlb-local-repository-row";
           const info=document.createElement("div");const strong=document.createElement("strong");strong.textContent=item.project_name||"Draft";
-          const meta=document.createElement("span");meta.textContent=(item.workspace||"model")+" · "+new Date(Number(item.updated_at||0)*1000).toLocaleString();info.append(strong,meta);
-          const rowActions=document.createElement("div");const open=btn("Recover","mlb-cloud-check");open.addEventListener("click",()=>requestPersistenceCommand("persistence_load_draft",{draft_id:item.id}));
-          const del=btn("Remove","mlb-cloud-check danger");del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_draft",{draft_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
+          const currentDraft=String(item.id||"")===String(state.project?.local_id||"");
+          const progress=[];
+          progress.push(String(item.workspace||"model"));
+          if(Number(item.node_count||0)>0)progress.push(Number(item.node_count)+" components");
+          if(Number(item.edge_count||0)>0)progress.push(Number(item.edge_count)+" connections");
+          progress.push("autosaved "+new Date(Number(item.updated_at||0)*1000).toLocaleString());
+          if(currentDraft)progress.unshift("CURRENT");
+          const meta=document.createElement("span");meta.textContent=progress.join(" · ");info.append(strong,meta);
+          const rowActions=document.createElement("div");const open=btn(currentDraft?"Current":"Recover","mlb-cloud-check");open.disabled=currentDraft;open.addEventListener("click",()=>{galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;requestPersistenceCommand("persistence_load_draft",{draft_id:item.id});});
+          const del=btn("Remove","mlb-cloud-check danger");del.disabled=currentDraft;del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_draft",{draft_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
         });
         card.appendChild(list);
       }
 
-      const saved=(localPersistence.repository||[]).slice(0,8);
+      const saved=(localPersistence.repository||[]);
       const sub=document.createElement("div");sub.className="mlb-cloud-subtitle";sub.textContent="LOCAL REPOSITORY";card.appendChild(sub);
       if(!saved.length){
         const empty=document.createElement("div");empty.className="mlb-cloud-secret-note";empty.textContent="No saved designs yet. Draft autosave is active; use Save Model Design / Save Data Pipeline when you want a named reusable version.";card.appendChild(empty);
@@ -4908,7 +4918,7 @@ function __MLB_STUDIO_FACTORY__(){
           const row=document.createElement("div");row.className="mlb-local-repository-row";
           const info=document.createElement("div");const strong=document.createElement("strong");strong.textContent=item.name||"Design";
           const meta=document.createElement("span");meta.textContent=localRepositoryKindLabel(item.kind)+" · "+new Date(Number(item.updated_at||0)*1000).toLocaleString();info.append(strong,meta);
-          const rowActions=document.createElement("div");const open=btn("Open","mlb-cloud-check");open.addEventListener("click",()=>requestPersistenceCommand("persistence_load_item",{item_id:item.id}));
+          const rowActions=document.createElement("div");const open=btn("Open","mlb-cloud-check");open.addEventListener("click",()=>{galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;requestPersistenceCommand("persistence_load_item",{item_id:item.id});});
           const del=btn("Remove","mlb-cloud-check danger");del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_item",{item_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
         });
         card.appendChild(list);
@@ -4923,8 +4933,6 @@ function __MLB_STUDIO_FACTORY__(){
         head.innerHTML="<div><strong>CLOUD & REPOSITORIES</strong><span>Push and load Builder data, models and projects</span></div><span class='mlb-cloud-badge'>CLOUD</span>";
         container.appendChild(head);
       }
-
-      renderLocalPersistencePanel(container);
 
       const providerCard=document.createElement("section");providerCard.className="mlb-cloud-card mlb-cloud-provider-card";
       const providerTitle=document.createElement("div");providerTitle.className="mlb-cloud-section-title";providerTitle.innerHTML="<span>☁</span><strong>PROVIDER & CONNECTION</strong>";providerCard.appendChild(providerTitle);
