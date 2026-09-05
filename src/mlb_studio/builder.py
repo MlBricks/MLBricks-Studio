@@ -2115,12 +2115,19 @@ class Builder:
         # snapshots. sanitize_design strips credentials and heavyweight runtime state.
         return {"state": sanitize_design(self.state), "focus_kind": kind}
 
-    def _restore_persistence_component(self, payload):
+    def _prepare_persistence_component_restore(self, payload):
+        """Build a small browser-side patch for a saved component.
+
+        Opening a Local Repository component does not replace the current model, so
+        returning the entire Builder state is unnecessary and expensive in notebook
+        bridges. Remap the saved component tree and send only its definitions/cache.
+        """
         definitions = copy.deepcopy(payload.get("definitions") or {})
         root_old = str(payload.get("root_definition_id") or "")
         if root_old not in definitions:
             raise RuntimeError("Local component item is missing its root definition.")
         remap = {old_id: f"custom_{uuid.uuid4().hex}" for old_id in definitions}
+        restored = {}
         for old_id, definition in definitions.items():
             new_id = remap[old_id]
             definition["id"] = new_id
@@ -2134,11 +2141,23 @@ class Builder:
                 child = str(node.get("definition_id") or "")
                 if child in remap:
                     node["definition_id"] = remap[child]
-            self.state.setdefault("custom_components", {})[new_id] = definition
-        for cache_id, item in (payload.get("component_cache") or {}).items():
-            if cache_id and item:
-                self.state.setdefault("component_cache", {})[cache_id] = item
-        return remap[root_old]
+            restored[new_id] = definition
+        cache = {
+            cache_id: copy.deepcopy(item)
+            for cache_id, item in (payload.get("component_cache") or {}).items()
+            if cache_id and item
+        }
+        return {
+            "root_definition_id": remap[root_old],
+            "custom_components": restored,
+            "component_cache": cache,
+        }
+
+    def _restore_persistence_component(self, payload):
+        restore = self._prepare_persistence_component_restore(payload)
+        self.state.setdefault("custom_components", {}).update(restore["custom_components"])
+        self.state.setdefault("component_cache", {}).update(restore["component_cache"])
+        return restore["root_definition_id"]
 
     def _execute_persistence_command(self, command, progress_callback=None):
         config = command.get("persistence") or {}
@@ -2189,11 +2208,12 @@ class Builder:
             self.state = incoming
             self.state.setdefault("project", {}).setdefault("local_id", str(config.get("draft_id") or f"project_{uuid.uuid4().hex}"))
             self._apply_local_workspace_defaults()
-            summary = self.persistence.summary()
             emit({
                 "status": "done", "runtime_kind": "persistence", "phase": "load_draft",
                 "overall": 100, "message": f'Draft {(self.state.get("project") or {}).get("name") or "design"} recovered.',
-                "persistence_summary": summary, "state_replace": self.to_dict(),
+                # Loading does not change repository metadata, so avoid rebuilding
+                # the Gallery summary (which parses every saved draft payload).
+                "state_replace": self.to_dict(),
             })
             return self.state
 
@@ -2277,8 +2297,11 @@ class Builder:
             if not item:
                 raise FileNotFoundError("Local Repository item was not found.")
             payload = item.get("payload") or {}
+            state_replace = None
+            component_restore = None
             if item.get("kind") == "component":
-                root_definition_id = self._restore_persistence_component(payload)
+                component_restore = self._prepare_persistence_component_restore(payload)
+                root_definition_id = component_restore["root_definition_id"]
                 result = {"item": {k: item[k] for k in ("id", "kind", "name", "updated_at")}, "root_definition_id": root_definition_id}
             else:
                 incoming = payload.get("state")
@@ -2288,13 +2311,19 @@ class Builder:
                 self.state.setdefault("project", {}).setdefault("local_id", f"project_{uuid.uuid4().hex}")
                 self._apply_local_workspace_defaults()
                 result = {"item": {k: item[k] for k in ("id", "kind", "name", "updated_at")}}
-            emit({
+                state_replace = self.to_dict()
+            event = {
                 "status": "done", "runtime_kind": "persistence", "phase": "load_item",
                 "overall": 100, "message": f'{item.get("name") or "Design"} loaded from Local Repository.',
                 "persistence_result": result,
-                "persistence_summary": self.persistence.summary(),
-                "state_replace": self.to_dict(),
-            })
+            }
+            # Opening does not mutate the Local Repository listing. Avoid the
+            # expensive full summary rebuild on this latency-sensitive path.
+            if state_replace is not None:
+                event["state_replace"] = state_replace
+            if component_restore is not None:
+                event["component_restore"] = component_restore
+            emit(event)
             return result
 
         if action == "persistence_delete_item":
@@ -2737,7 +2766,16 @@ class Builder:
             except Exception:
                 command = {}
 
-        if state_widget is not None:
+        action = str(command.get("action") or "data").lower()
+        # These operations are fully DB/credential backed and do not consume the
+        # current Builder graph. Skipping the often-large state textarea removes a
+        # full JSON parse/copy from every Gallery Recover/Open operation.
+        state_independent_actions = {
+            "persistence_load_draft", "persistence_load_item",
+            "persistence_list", "persistence_delete_draft", "persistence_delete_item",
+            "persistence_save_credentials", "persistence_delete_credentials",
+        }
+        if state_widget is not None and action not in state_independent_actions:
             try:
                 incoming = json.loads(state_widget.value)
                 if isinstance(incoming, dict) and incoming.get("components"):
@@ -2758,7 +2796,6 @@ class Builder:
         self._stop_event.clear()
         self.last_run_error = None
 
-        action = str(command.get("action") or "data").lower()
         model_id = command.get("model_id")
         self._active_bridge_action = action
 

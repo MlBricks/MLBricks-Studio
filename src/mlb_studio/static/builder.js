@@ -138,6 +138,7 @@ function __MLB_STUDIO_FACTORY__(){
     let popoutHelloTimer=null;
     let pendingBroadcastState=null;
     let pendingBroadcastCommand=null;
+    let pendingBroadcastSkipState=false;
     let popoutSyncTimer=null;
     let popoutMessageSerial=0;
     const seenPopoutMessageIds=new Map();
@@ -442,6 +443,27 @@ function __MLB_STUDIO_FACTORY__(){
           draftSaveText="Recovered local draft";
         }
       }catch(_){/* Browser local storage can be unavailable in hardened notebook iframes. */}
+    }
+    function recoverBrowserDraftById(draftId){
+      try{
+        const store=(root.ownerDocument?.defaultView||window).localStorage;
+        const parsed=JSON.parse(store.getItem("mlb-studio-draft-"+String(draftId||""))||"null");
+        const incoming=parsed?.state;
+        if(String(parsed?.draft_id||"")!==String(draftId||"")||!incoming?.components||!incoming?.project)return false;
+        state=cp(incoming);
+        ensureWorkspaces();
+        customEditorTransactions.length=0;undoStack.length=0;redoStack.length=0;
+        selected=null;pendingPort=null;outputDirectorySelection=null;switchingWorkspace=true;
+        draftSaveState="recovered";draftSaveText="Recovered local draft instantly";
+        let hash="";try{hash=simpleDraftHash(JSON.stringify(state));}catch(_){}
+        lastBrowserDraftHash=hash||lastBrowserDraftHash;
+        setStatus("Draft recovered from local cache.");
+        draw();
+        // Browser cache is the fastest recovery path; sync it back to SQLite in
+        // the background so both persistence layers remain consistent.
+        if(hash)schedulePythonDraftSync(hash);
+        return true;
+      }catch(_){return false;}
     }
     function updateDraftIndicator(){
       const el=root.querySelector(".mlb-save-state");
@@ -1461,8 +1483,16 @@ function __MLB_STUDIO_FACTORY__(){
       if(isPopout&&button.__mlbBroadcastKind){
         if(!popoutHostConnected)return false;
         if(button.__mlbBroadcastKind==="stop") return sendPopoutMessage({type:"stop",source:"popout",ts:Date.now()});
-        const ok=sendPopoutMessage({type:"command",source:"popout",ts:Date.now(),state:pendingBroadcastState||bridgeStatePayload(),command:pendingBroadcastCommand||{action:"data",ts:Date.now()}});
+        const skipState=!!pendingBroadcastSkipState;
+        const ok=sendPopoutMessage({
+          type:"command",source:"popout",ts:Date.now(),
+          state:skipState?null:(pendingBroadcastState||bridgeStatePayload()),
+          skip_state_sync:skipState,
+          command:pendingBroadcastCommand||{action:"data",ts:Date.now()}
+        });
         pendingBroadcastCommand=null;
+        pendingBroadcastState=null;
+        pendingBroadcastSkipState=false;
         return ok;
       }
       try{
@@ -1748,9 +1778,17 @@ function __MLB_STUDIO_FACTORY__(){
       }
       const command={action,persistence:cp(config),ts:Date.now()};
       if(syncHash)command.persistence.sync_hash=syncHash;
-      if(!setBridgeState()||!setBridgeCommand(command)){
+      // Recover/Open/List/Delete are DB-backed operations and do not need the
+      // current Builder graph sent to Python first. Sending a large design through
+      // the hidden notebook textarea was the main reason Local Repository/Draft
+      // navigation felt much slower than opening an in-memory Gallery component.
+      const needsCurrentState=action==="persistence_save_draft"||action==="persistence_save_item";
+      if(isPopout)pendingBroadcastSkipState=!needsCurrentState;
+      const stateReady=needsCurrentState?setBridgeState():true;
+      if(!stateReady||!setBridgeCommand(command)){
         if(action==="persistence_save_draft")draftSyncInFlight=false;
         if(navigationAction)persistenceNavigationInFlight=false;
+        if(isPopout)pendingBroadcastSkipState=false;
         if(!silent)setStatus("Could not send local persistence command to Python.");
         return;
       }
@@ -1968,6 +2006,16 @@ function __MLB_STUDIO_FACTORY__(){
             cloudCredentialSelection[p]=name;cloudCredentialNames[p]=name;
             if(cloudSecrets[p])Object.keys(cloudSecrets[p]).forEach(k=>cloudSecrets[p][k]="");
           }
+        }
+        // Component repository items are returned as a tiny patch instead of a
+        // complete project state. This keeps Open fast even when the active model
+        // is large, and mirrors the speed of the regular Components tab.
+        if(next.component_restore&&typeof next.component_restore==="object"){
+          state.custom_components=state.custom_components||{};
+          state.component_cache=state.component_cache||{};
+          Object.entries(next.component_restore.custom_components||{}).forEach(([id,def])=>{state.custom_components[id]=cp(def);});
+          Object.entries(next.component_restore.component_cache||{}).forEach(([id,item])=>{state.component_cache[id]=cp(item);});
+          ensurePersistentIds();
         }
         if(next.state_replace){
           state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
@@ -2297,12 +2345,13 @@ function __MLB_STUDIO_FACTORY__(){
         return;
       }
       if(msg.type==="command"){
-        if(msg.state?.components){state=cp(msg.state);ensureWorkspaces();}
+        const skipStateSync=!!msg.skip_state_sync;
+        if(!skipStateSync&&msg.state?.components){state=cp(msg.state);ensureWorkspaces();}
         if(!ensureBridgeForAction()){
           sendHostReply(sourceWindow,{type:"progress",payload:{status:"error",overall:0,message:"Notebook Python bridge is offline."},ts:Date.now()});
           return;
         }
-        const okState=setBridgeState();
+        const okState=skipStateSync?true:setBridgeState();
         const okCommand=setBridgeCommand(msg.command||{action:"data"});
         const runButton=bridgeControl(bridge.run,"button");
         if(okState&&okCommand&&runButton)clickBridgeButton(runButton);
@@ -5035,7 +5084,10 @@ function __MLB_STUDIO_FACTORY__(){
           progress.push("autosaved "+new Date(Number(item.updated_at||0)*1000).toLocaleString());
           if(currentDraft)progress.unshift("CURRENT");
           const meta=document.createElement("span");meta.textContent=progress.join(" · ");info.append(strong,meta);
-          const rowActions=document.createElement("div");const open=btn(currentDraft?"Current":"Recover","mlb-cloud-check");open.disabled=currentDraft;open.addEventListener("click",()=>{galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;requestPersistenceCommand("persistence_load_draft",{draft_id:item.id});});
+          const rowActions=document.createElement("div");const open=btn(currentDraft?"Current":"Recover","mlb-cloud-check");open.disabled=currentDraft;open.addEventListener("click",()=>{
+            galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;
+            if(!recoverBrowserDraftById(item.id))requestPersistenceCommand("persistence_load_draft",{draft_id:item.id});
+          });
           const del=btn("Remove","mlb-cloud-check danger");del.disabled=currentDraft;del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_draft",{draft_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
         });
         card.appendChild(list);
