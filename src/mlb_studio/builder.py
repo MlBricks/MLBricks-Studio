@@ -28,6 +28,7 @@ from .graph import (
 )
 from .runtime import get_mlbricks_info
 from .security import project_executable_features, safe_extract_zip, safe_torch_load
+from .persistence import StudioPersistence, sanitize_design
 from .version import __version__, FORMAT_VERSION
 from .api_registry import discover_mlbricks_api, refresh_component_api
 from .import_pool import IMPORT_POOL
@@ -122,6 +123,12 @@ class Builder:
         self.prepared_datasets = {}
         self.state.setdefault("prepared_datasets", [])
         self.state.setdefault("component_cache", {})
+        self.state.setdefault("project", {})
+        self.state["project"].setdefault("local_id", f"project_{uuid.uuid4().hex}")
+        # Local persistence stores design/configuration state only. Heavy model
+        # tensors, optimizer state, datasets and credentials are intentionally
+        # excluded by StudioPersistence.
+        self.persistence = StudioPersistence()
         self.runtime_capabilities = self._detect_runtime_capabilities()
         from .local_runtime import detect_local_environment, ensure_mlbricks_workspace
         self.local_environment = detect_local_environment()
@@ -736,6 +743,7 @@ class Builder:
                 self.state,
                 progress_callback=relay,
                 stop_event=self._stop_event,
+                credential_resolver=lambda provider, name: self.persistence.get_credentials(provider, name),
             )
             metadata = self._register_prepared_dataset(self.last_data_result)
 
@@ -2068,9 +2076,229 @@ class Builder:
         emit({"status":"done","runtime_kind":"local","phase":"load","overall":100,"message":f"Loaded {result.get('name') or 'local content'}.","local_result":result,"state_replace":self.to_dict()})
         return result
 
+    def _persistence_component_snapshot(self, definition_id):
+        definition_id = str(definition_id or "").strip()
+        definitions = self.state.get("custom_components") or {}
+        if not definition_id or definition_id not in definitions:
+            raise ValueError("A saved Module/API Component definition is required.")
+
+        selected = {}
+        pending = [definition_id]
+        while pending:
+            current_id = pending.pop()
+            if current_id in selected or current_id not in definitions:
+                continue
+            definition = copy.deepcopy(definitions[current_id])
+            selected[current_id] = definition
+            for node in definition.get("nodes") or []:
+                child = str(node.get("definition_id") or "").strip()
+                if child and child not in selected:
+                    pending.append(child)
+        return {
+            "root_definition_id": definition_id,
+            "definitions": selected,
+            "component_cache": copy.deepcopy(self.state.get("component_cache") or {}),
+        }
+
+    def _persistence_repository_payload(self, kind, config):
+        kind = str(kind or "project").strip().lower()
+        if kind == "component":
+            return self._persistence_component_snapshot(config.get("definition_id"))
+        # Models, data pipelines and complete projects are lightweight graph/config
+        # snapshots. sanitize_design strips credentials and heavyweight runtime state.
+        return {"state": sanitize_design(self.state), "focus_kind": kind}
+
+    def _restore_persistence_component(self, payload):
+        definitions = copy.deepcopy(payload.get("definitions") or {})
+        root_old = str(payload.get("root_definition_id") or "")
+        if root_old not in definitions:
+            raise RuntimeError("Local component item is missing its root definition.")
+        remap = {old_id: f"custom_{uuid.uuid4().hex}" for old_id in definitions}
+        for old_id, definition in definitions.items():
+            new_id = remap[old_id]
+            definition["id"] = new_id
+            definition["gallery_entry_id"] = None
+            if old_id == root_old:
+                definition["palette_hidden"] = False
+                definition["palette_installed"] = True
+            else:
+                definition["palette_hidden"] = True
+            for node in definition.get("nodes") or []:
+                child = str(node.get("definition_id") or "")
+                if child in remap:
+                    node["definition_id"] = remap[child]
+            self.state.setdefault("custom_components", {})[new_id] = definition
+        for cache_id, item in (payload.get("component_cache") or {}).items():
+            if cache_id and item:
+                self.state.setdefault("component_cache", {})[cache_id] = item
+        return remap[root_old]
+
+    def _execute_persistence_command(self, command, progress_callback=None):
+        config = command.get("persistence") or {}
+        action = str(command.get("action") or "")
+
+        def emit(payload):
+            if progress_callback:
+                progress_callback(payload)
+
+        if action == "persistence_save_draft":
+            project = self.state.setdefault("project", {})
+            draft_id = str(project.get("local_id") or config.get("draft_id") or f"project_{uuid.uuid4().hex}")
+            project["local_id"] = draft_id
+            result = self.persistence.save_draft(
+                draft_id,
+                project.get("name") or "Untitled Model",
+                self.state,
+                workspace=self.state.get("active_workspace") or "model",
+            )
+            if config.get("sync_hash"):
+                result["sync_hash"] = str(config.get("sync_hash"))
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "save_draft",
+                "overall": 100, "message": "Draft autosaved locally.",
+                "persistence_result": result,
+                "persistence_summary": self.persistence.summary(),
+            })
+            return result
+
+        if action == "persistence_load_draft":
+            incoming = self.persistence.load_draft(config.get("draft_id"))
+            if not isinstance(incoming, dict) or not incoming.get("components"):
+                raise FileNotFoundError("Local draft was not found or is invalid.")
+            self.state = incoming
+            self.state.setdefault("project", {}).setdefault("local_id", str(config.get("draft_id") or f"project_{uuid.uuid4().hex}"))
+            self._apply_local_workspace_defaults()
+            summary = self.persistence.summary()
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "load_draft",
+                "overall": 100, "message": f'Draft {(self.state.get("project") or {}).get("name") or "design"} recovered.',
+                "persistence_summary": summary, "state_replace": self.to_dict(),
+            })
+            return self.state
+
+        if action == "persistence_delete_draft":
+            removed = self.persistence.delete_draft(config.get("draft_id"))
+            summary = self.persistence.summary()
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "delete_draft",
+                "overall": 100, "message": "Draft removed." if removed else "Draft was already absent.",
+                "persistence_summary": summary,
+            })
+            return removed
+
+        if action == "persistence_list":
+            summary = self.persistence.summary()
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "list",
+                "overall": 100, "message": "Local repository refreshed.",
+                "persistence_summary": summary,
+            })
+            return summary
+
+        if action == "persistence_save_item":
+            kind = str(config.get("kind") or "project").lower()
+            name = str(config.get("name") or (self.state.get("project") or {}).get("name") or "Untitled").strip()
+            payload = self._persistence_repository_payload(kind, config)
+            result = self.persistence.save_repository_item(
+                kind=kind,
+                name=name,
+                payload=payload,
+                item_id=config.get("item_id") or None,
+                metadata={
+                    "design_only": True,
+                    "contains_model_parameters": False,
+                    "source_project_id": (self.state.get("project") or {}).get("local_id"),
+                },
+            )
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "save_item",
+                "overall": 100, "message": f'{name} saved to Local Repository (design only).',
+                "persistence_result": result,
+                "persistence_summary": self.persistence.summary(),
+            })
+            return result
+
+        if action == "persistence_load_item":
+            item = self.persistence.load_repository_item(config.get("item_id"))
+            if not item:
+                raise FileNotFoundError("Local Repository item was not found.")
+            payload = item.get("payload") or {}
+            if item.get("kind") == "component":
+                root_definition_id = self._restore_persistence_component(payload)
+                result = {"item": {k: item[k] for k in ("id", "kind", "name", "updated_at")}, "root_definition_id": root_definition_id}
+            else:
+                incoming = payload.get("state")
+                if not isinstance(incoming, dict) or not incoming.get("components"):
+                    raise RuntimeError("Saved Local Repository item does not contain a valid Builder design.")
+                self.state = incoming
+                self.state.setdefault("project", {}).setdefault("local_id", f"project_{uuid.uuid4().hex}")
+                self._apply_local_workspace_defaults()
+                result = {"item": {k: item[k] for k in ("id", "kind", "name", "updated_at")}}
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "load_item",
+                "overall": 100, "message": f'{item.get("name") or "Design"} loaded from Local Repository.',
+                "persistence_result": result,
+                "persistence_summary": self.persistence.summary(),
+                "state_replace": self.to_dict(),
+            })
+            return result
+
+        if action == "persistence_delete_item":
+            removed = self.persistence.delete_repository_item(config.get("item_id"))
+            summary = self.persistence.summary()
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "delete_item",
+                "overall": 100, "message": "Local Repository item removed." if removed else "Local Repository item was already absent.",
+                "persistence_summary": summary,
+            })
+            return removed
+
+        if action == "persistence_save_credentials":
+            provider = str(config.get("provider") or "").lower()
+            name = str(config.get("name") or "Default")
+            result = self.persistence.save_credentials(provider, name, config.get("credentials") or {})
+            message = (
+                f'{provider} credential "{name}" saved in the operating-system credential store.'
+                if result.get("persistent")
+                else f'{provider} credential "{name}" is available for this session; only its masked reference was saved locally because no OS keyring is available.'
+            )
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "save_credentials",
+                "overall": 100, "message": message,
+                "credential_result": result,
+                "persistence_summary": self.persistence.summary(),
+            })
+            return result
+
+        if action == "persistence_delete_credentials":
+            provider = str(config.get("provider") or "").lower()
+            name = str(config.get("name") or "Default")
+            removed = self.persistence.delete_credentials(provider, name)
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "delete_credentials",
+                "overall": 100, "message": "Saved credential removed." if removed else "Saved credential was already absent.",
+                "persistence_summary": self.persistence.summary(),
+            })
+            return removed
+
+        raise ValueError(f"Unknown persistence command: {action!r}")
+
+    def _resolve_cloud_credentials(self, provider, cloud):
+        direct = dict(cloud.get("credentials") or {})
+        profile = str(cloud.get("credential_name") or "").strip()
+        if profile:
+            saved = self.persistence.get_credentials(provider, profile)
+            # Explicit non-empty values override a saved field without ever being
+            # copied into the persistent Builder state.
+            saved.update({k: v for k, v in direct.items() if v not in {None, ""}})
+            direct = saved
+        if str(provider).lower() == "aws" and cloud.get("region") and not direct.get("region"):
+            direct["region"] = cloud.get("region")
+        return direct
+
     def _cloud_provider_status(self, provider, cloud):
         provider = str(provider or "").lower()
-        credentials = cloud.get("credentials") or {}
+        credentials = self._resolve_cloud_credentials(provider, cloud)
         if provider == "huggingface":
             return self.hub_status(token=credentials.get("token"))
         from . import cloud as cloud_backend
@@ -2087,7 +2315,7 @@ class Builder:
     def _push_generic_cloud(self, provider, cloud):
         from . import cloud as cloud_backend
         provider = str(provider).lower()
-        credentials = cloud.get("credentials") or {}
+        credentials = self._resolve_cloud_credentials(provider, cloud)
         content_type = cloud.get("content_type") or "project"
         artifact_id = cloud.get("artifact_id")
         name = self._safe_cloud_name(
@@ -2137,7 +2365,7 @@ class Builder:
     def _load_generic_cloud(self, provider, cloud):
         from . import cloud as cloud_backend
         provider = str(provider).lower()
-        credentials = cloud.get("credentials") or {}
+        credentials = self._resolve_cloud_credentials(provider, cloud)
         with tempfile.TemporaryDirectory(prefix="mlbricks_cloud_load_") as td:
             archive = Path(td) / "download.mlbricks.zip"
             if provider == "github":
@@ -2199,7 +2427,7 @@ class Builder:
         })
 
         if provider == "huggingface":
-            credentials = cloud.get("credentials") or {}
+            credentials = self._resolve_cloud_credentials(provider, cloud)
             token = credentials.get("token")
             repo_id = str(cloud.get("repo") or "").strip()
             revision = str(cloud.get("revision") or "main").strip() or "main"
@@ -2439,6 +2667,11 @@ class Builder:
                         command,
                         progress_callback=self._publish_bridge_progress,
                     )
+                elif action.startswith("persistence_"):
+                    self._execute_persistence_command(
+                        command,
+                        progress_callback=self._publish_bridge_progress,
+                    )
                 elif action.startswith("cloud_"):
                     self._execute_cloud_command(
                         command,
@@ -2475,6 +2708,14 @@ class Builder:
                     return
                 self.last_run_error = exc
                 runtime_kind = "serve" if str(action).startswith("serve_") else action
+                if str(action).startswith("cloud_"):
+                    runtime_kind = "cloud"
+                elif str(action).startswith("hub_"):
+                    runtime_kind = "hub"
+                elif str(action).startswith("local_"):
+                    runtime_kind = "local"
+                elif str(action).startswith("persistence_"):
+                    runtime_kind = "persistence"
                 error_payload = {
                     "status":"error","runtime_kind":runtime_kind,"overall":0,
                     "message":f"{type(exc).__name__}: {exc}"
@@ -2584,6 +2825,7 @@ class Builder:
             "local_environment": self.local_environment,
             "instance_id": self._instance_id,
             "project_trust": trust,
+            "local_persistence": self.persistence.summary(),
         }, separators=(",", ":")).replace("</", "<\\/")
         warning = ""
         if trust.get("requires_trust") and not trust.get("trusted"):

@@ -69,6 +69,7 @@ def primitive_catalog():
                 {"key": "dataset_id", "label": "Dataset ID", "type": "text", "value": "roneneldan/TinyStories"},
                 {"key": "config", "label": "Config", "type": "text", "value": ""},
                 {"key": "split", "label": "Hub Source Split", "type": "text", "value": "train", "help": "Which split is downloaded from Hugging Face. Use the Train / Validation / Test Split step for percentages."},
+                {"key": "credential_profile", "label": "Credential Profile", "type": "text", "value": "Default", "help": "Optional saved Hugging Face credential from Cloud & Repositories. Public datasets work without a token."},
                 {"key": "text_column", "label": "Text Column", "type": "text", "value": "text"},
                 {"key": "streaming", "label": "Streaming", "type": "select", "value": "false", "options": ["false", "true"]},
                 {"key": "max_rows", "label": "Max Rows (0 = All)", "type": "number", "value": 0}

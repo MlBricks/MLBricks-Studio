@@ -62,6 +62,7 @@ def load_huggingface_dataset(
     text_column: str = "text",
     streaming: bool = False,
     max_rows: int | None = None,
+    token: str | None = None,
 ):
     """Load a dataset from the Hugging Face Hub.
 
@@ -71,12 +72,33 @@ def load_huggingface_dataset(
     """
     ds = _datasets()
     config = (config or "").strip() or None
-    data = ds.load_dataset(
-        dataset_id,
-        config,
-        split=split or "train",
-        streaming=bool(streaming),
-    )
+    try:
+        data = ds.load_dataset(
+            dataset_id,
+            config,
+            split=split or "train",
+            streaming=bool(streaming),
+            token=token or None,
+        )
+    except Exception as exc:
+        text = f"{type(exc).__name__}: {exc}"
+        lowered = text.lower()
+        if "gatedrepo" in lowered or "gated repo" in lowered or ("403" in lowered and "access" in lowered):
+            raise PermissionError(
+                f"Hugging Face access approval is required for {dataset_id!r}. "
+                "Your account may be authenticated but not approved for this gated dataset. "
+                "Accept/request access on the dataset page, then retry with the saved credential profile."
+            ) from exc
+        if any(marker in lowered for marker in ("401", "unauthorized", "authentication", "invalid token", "token is required")):
+            raise PermissionError(
+                f"Hugging Face authentication is required for {dataset_id!r}. "
+                "Open Cloud & Repositories, save a Hugging Face credential, and select its Credential Profile on this source node."
+            ) from exc
+        if "403" in lowered or "forbidden" in lowered:
+            raise PermissionError(
+                f"Hugging Face denied access to {dataset_id!r}. Verify that the saved token has permission to this private/gated repository."
+            ) from exc
+        raise
     if not streaming:
         data = _limit_rows(data, max_rows)
     if text_column and hasattr(data, "column_names") and text_column not in data.column_names:

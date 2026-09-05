@@ -1123,9 +1123,9 @@ Hugging Face continues to use native Hub dataset/model repositories.
 GitHub, S3, GCS and Azure store portable `.mlbricks.zip` bundles containing the
 selected dataset/model/project so the same content can be restored into Builder.
 
-### Session-only credentials
+### Credentials + local secure references
 
-The Cloud panel includes masked credential fields:
+The Cloud panel includes masked credential fields for:
 
 - Hugging Face API/access token
 - GitHub personal access token
@@ -1133,12 +1133,16 @@ The Cloud panel includes masked credential fields:
 - Google Cloud service-account JSON
 - Azure Storage connection string
 
-Credentials are session-only. They are extracted from the browser runtime
-command before Builder state is persisted and are explicitly excluded from
-JSON/BIN exports and cloud bundles.
+Credentials can be given a local **Credential Name** and saved. MLBricks Studio
+keeps only masked credential metadata in its SQLite Studio database. The real
+secret is stored in the operating-system credential store through `keyring` when
+a secure backend is available. In notebook/headless environments without an OS
+keyring, the real secret remains session-only and the UI marks the saved reference
+as requiring re-entry after the session ends.
 
-Environment/default credentials still work when supported, so users do not
-have to type a key into the UI if their notebook is already authenticated.
+Real credentials are never included in Builder state, autosaved drafts, Gallery
+items, JSON/BIN exports, model designs, dataset metadata, or cloud bundles.
+Environment/default credentials continue to work when supported.
 
 ### Optional cloud packages
 
@@ -1865,3 +1869,21 @@ The publishing utility is `tools/publish_mlbricks_datasets.py` (with a PowerShel
 keeps the original dataset license/attribution requirements visible in the destination dataset
 card/manifest. Hugging Face credentials are read from `HF_TOKEN` or the normal `hf auth login`
 configuration and are never stored in Studio project files.
+
+
+## v1.0 local persistence — drafts + Local Repository
+
+MLBricks Studio now keeps lightweight design work across restarts instead of treating
+the browser session as disposable:
+
+- every model/data/component edit is browser-autosaved as a recovery draft;
+- the Python side mirrors drafts into a local SQLite Studio store when the kernel bridge is available;
+- **Cloud & Repositories → Local Studio Storage** lists recent drafts and named Local Repository items;
+- users can save model designs, data pipelines, complete projects, and reusable Module/API Component definitions locally;
+- saved components are also mirrored into the Local Repository when they are saved to Gallery;
+- Hugging Face data nodes can reference a saved credential profile (default: `Default`) for private/gated datasets.
+
+The local database is deliberately **design-only**. It stores graphs, component source/config,
+layout, metadata, hyperparameters, and references/paths to external artifacts. It does **not**
+store model parameter tensors, optimizer state, checkpoint bodies, or dataset contents. Large
+artifacts remain in their proper local/cloud repository and Studio stores only the reference.

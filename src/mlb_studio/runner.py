@@ -212,6 +212,7 @@ def execute_data_pipeline(
     *,
     progress_callback: Callable[[dict], None] | None = None,
     stop_event: threading.Event | None = None,
+    credential_resolver: Callable[[str, str], dict] | None = None,
 ):
     """Execute the Data Processing graph in Main-lane order."""
     stop_event = stop_event or threading.Event()
@@ -276,6 +277,8 @@ def execute_data_pipeline(
                 )
 
             elif typ == "hf_dataset":
+                credential_name = str(p.get("credential_profile") or "Default").strip()
+                credentials = credential_resolver("huggingface", credential_name) if credential_resolver and credential_name else {}
                 result = data_api.load_huggingface_dataset(
                     p.get("dataset_id", "roneneldan/TinyStories"),
                     config=(p.get("config") or None),
@@ -283,6 +286,7 @@ def execute_data_pipeline(
                     text_column=p.get("text_column", "text"),
                     streaming=_bool(p.get("streaming", False)),
                     max_rows=_optional_positive(p.get("max_rows")),
+                    token=(credentials or {}).get("token"),
                 )
 
             elif typ == "kaggle_dataset":

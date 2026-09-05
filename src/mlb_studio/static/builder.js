@@ -101,6 +101,23 @@ function __MLB_STUDIO_FACTORY__(){
       private:true,
       region:""
     };
+    let localPersistence=cp(payload.local_persistence||{root:"Local Studio Store",drafts:[],repository:[],credentials:[]});
+    const cloudCredentialSelection={huggingface:"",github:"",aws:"",gcp:"",azure:""};
+    const cloudCredentialNames={huggingface:"Default",github:"Default",aws:"Default",gcp:"Default",azure:"Default"};
+    (localPersistence.credentials||[]).forEach(item=>{
+      const provider=String(item?.provider||"");
+      if(provider&&Object.prototype.hasOwnProperty.call(cloudCredentialSelection,provider)&&!cloudCredentialSelection[provider]){
+        cloudCredentialSelection[provider]=String(item.name||"Default");
+        cloudCredentialNames[provider]=String(item.name||"Default");
+      }
+    });
+    let draftSaveState="saved";
+    let draftSaveText="Draft protected";
+    let browserDraftTimer=null;
+    let pythonDraftTimer=null;
+    let lastBrowserDraftHash="";
+    let lastPythonDraftHash="";
+    let draftSyncInFlight=false;
     let lastProgressRaw="";
     let bridgePollTimer=null;
     let bridgeAwaitTimer=null;
@@ -346,6 +363,84 @@ function __MLB_STUDIO_FACTORY__(){
     let outputDirectorySelection=null;
     let filesFilter="all";
 
+    const browserDraftStorageKey="mlb-studio-last-draft-v2";
+    function simpleDraftHash(raw){
+      raw=String(raw||"");let h=0x811c9dc5;
+      for(let i=0;i<raw.length;i++){h^=raw.charCodeAt(i);h=Math.imul(h,0x01000193);}
+      return (h>>>0).toString(16)+":"+raw.length;
+    }
+    function browserDraftPayload(){
+      return {
+        version:2,
+        saved_at:Date.now(),
+        project_name:String(state.project?.name||"Untitled Model"),
+        project_id:String(state.project?.local_id||""),
+        state:cp(state)
+      };
+    }
+    function tryRestoreBrowserDraft(){
+      try{
+        const store=(root.ownerDocument?.defaultView||window).localStorage;
+        const parsed=JSON.parse(store.getItem(browserDraftStorageKey)||"null");
+        const incoming=parsed?.state;
+        const sameName=String(parsed?.project_name||"")===String(state.project?.name||"");
+        const recent=Number(parsed?.saved_at||0)>Date.now()-1000*60*60*24*30;
+        if(incoming?.components&&incoming?.project&&sameName&&recent){
+          state=cp(incoming);
+          draftSaveState="recovered";
+          draftSaveText="Recovered local draft";
+        }
+      }catch(_){/* Browser local storage can be unavailable in hardened notebook iframes. */}
+    }
+    function updateDraftIndicator(){
+      const el=root.querySelector(".mlb-save-state");
+      if(el){el.className="mlb-save-state "+draftSaveState;el.textContent="• "+draftSaveText;}
+    }
+    function persistBrowserDraftNow(){
+      browserDraftTimer=null;
+      try{
+        const payloadDraft=browserDraftPayload();
+        const raw=JSON.stringify(payloadDraft);
+        const hash=simpleDraftHash(JSON.stringify(payloadDraft.state));
+        if(hash===lastBrowserDraftHash){draftSaveState="saved";draftSaveText="Draft autosaved locally";updateDraftIndicator();return hash;}
+        const store=(root.ownerDocument?.defaultView||window).localStorage;
+        store.setItem(browserDraftStorageKey,raw);
+        if(payloadDraft.project_id)store.setItem("mlb-studio-draft-"+payloadDraft.project_id,raw);
+        lastBrowserDraftHash=hash;
+        draftSaveState="saved";
+        draftSaveText="Draft autosaved locally";
+        updateDraftIndicator();
+        schedulePythonDraftSync(hash);
+        return hash;
+      }catch(err){
+        draftSaveState="warn";
+        draftSaveText="Browser draft unavailable · local DB will be used when connected";
+        updateDraftIndicator();
+        return "";
+      }
+    }
+    function scheduleDraftPersist(){
+      let currentHash="";
+      try{currentHash=simpleDraftHash(JSON.stringify(state));}catch(_){}
+      if(currentHash&&currentHash===lastBrowserDraftHash)return;
+      if(browserDraftTimer)clearTimeout(browserDraftTimer);
+      draftSaveState="saving";
+      draftSaveText="Saving draft…";
+      updateDraftIndicator();
+      browserDraftTimer=setTimeout(persistBrowserDraftNow,900);
+    }
+    function schedulePythonDraftSync(hash){
+      if(!hash||hash===lastPythonDraftHash||draftSyncInFlight)return;
+      if(pythonDraftTimer)clearTimeout(pythonDraftTimer);
+      pythonDraftTimer=setTimeout(()=>{
+        pythonDraftTimer=null;
+        if(execution.status==="running"||draftSyncInFlight){schedulePythonDraftSync(hash);return;}
+        if(!bridge){return;}
+        draftSyncInFlight=true;
+        requestPersistenceCommand("persistence_save_draft",{},true,hash);
+      },3500);
+    }
+
     // Full Window must open on the exact page the notebook is currently showing
     // (Training Setup/Status, Generation, Gallery, etc.), not reset to Model Builder.
     const initialView=(payload.initial_view&&typeof payload.initial_view==="object")?cp(payload.initial_view):null;
@@ -359,6 +454,8 @@ function __MLB_STUDIO_FACTORY__(){
       if(typeof initialView.inspector_tab==="string")inspectorTab=initialView.inspector_tab;
       if(Number.isFinite(Number(initialView.zoom)))zoom=Math.max(.65,Math.min(1.5,Number(initialView.zoom)));
     }
+
+    if(!initialView)tryRestoreBrowserDraft();
 
     Object.values(state.components||{}).forEach(c=>{if(!c.edges)c.edges=[];});
     if(state.auto_connect===undefined) state.auto_connect=true;
@@ -802,7 +899,8 @@ function __MLB_STUDIO_FACTORY__(){
           id:uid("gallery_component"),name,kind:"component",saved_at:new Date().toISOString(),
           source_definition_id:def?.id||snapshot.id,definition:snapshot
         });
-        persistGallery();persistComponentCache();setStatus(name+" saved to Gallery with cached user source.");draw();return;
+        persistGallery();persistComponentCache();setStatus(name+" saved to Gallery with cached user source.");draw();
+        setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"component",name,definition_id:def?.id||snapshot.id},true),180);return;
       }
       if(state.active_workspace==="data"){
         const pipeline=current(state);if(!pipeline)return;
@@ -812,7 +910,8 @@ function __MLB_STUDIO_FACTORY__(){
           id:uid("gallery_data"),name,kind:"data",saved_at:new Date().toISOString(),
           architecture:cp(pipeline)
         });
-        persistGallery();setStatus(name+" saved to Data Gallery.");draw();return;
+        persistGallery();setStatus(name+" saved to Data Gallery.");draw();
+        setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"data",name},true),180);return;
       }
       if(state.active_workspace!=="model"){
         setStatus("Open Model Builder or Data Processing to save the current design to Gallery.");return;
@@ -825,6 +924,7 @@ function __MLB_STUDIO_FACTORY__(){
         project:cp(state.project||{}),architecture:cp(model),custom_components:cp(state.custom_components||{}),component_cache:cp(state.component_cache||{})
       });
       persistGallery();setStatus(name+" saved to Model Gallery.");draw();
+      setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"model",name},true),180);
     }
 
     function restoreGalleryComponentDefinition(entry,{installed=false,allowNameConflictWith=null}={}){
@@ -1550,6 +1650,34 @@ function __MLB_STUDIO_FACTORY__(){
       setTimeout(()=>{clickBridgeButton(button);},250);
     }
 
+    function requestPersistenceCommand(action,config={},silent=false,syncHash=""){
+      if(!ensureBridgeForAction()){
+        if(action==="persistence_save_draft")draftSyncInFlight=false;
+        if(!silent)setStatus("Local persistence needs the Python kernel bridge. Browser draft protection is still active.");
+        return;
+      }
+      const command={action,persistence:cp(config),ts:Date.now()};
+      if(syncHash)command.persistence.sync_hash=syncHash;
+      if(!setBridgeState()||!setBridgeCommand(command)){
+        if(action==="persistence_save_draft")draftSyncInFlight=false;
+        if(!silent)setStatus("Could not send local persistence command to Python.");
+        return;
+      }
+      const button=bridgeControl(bridge.run,"button");
+      if(!button){
+        if(action==="persistence_save_draft")draftSyncInFlight=false;
+        if(!silent)setStatus("Python local persistence control was not found.");
+        return;
+      }
+      if(!silent){
+        const label=action==="persistence_save_item"?"Saving design to Local Repository…":
+          action==="persistence_load_item"?"Loading design from Local Repository…":
+          action==="persistence_save_credentials"?"Saving credential securely…":"Updating local storage…";
+        setStatus(label);
+      }
+      setTimeout(()=>{clickBridgeButton(button);},120);
+    }
+
     function requestHubCommand(action,config={}){
       if(!ensureBridgeForAction()){
         execution={status:"error",runtime_kind:"hub",overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
@@ -1724,6 +1852,30 @@ function __MLB_STUDIO_FACTORY__(){
         if(did)customImportStatus[did]={status:next.status,message:next.message||"User source checked.",details};
         setStatus(next.message||"User source checked.");
         setTimeout(draw,20);return;
+      }
+      if(next.runtime_kind==="persistence"){
+        if(next.status==="error")draftSyncInFlight=false;
+        if(next.persistence_summary)localPersistence=cp(next.persistence_summary);
+        if(next.phase==="save_draft"){
+          draftSyncInFlight=false;
+          lastPythonDraftHash=String(next.persistence_result?.sync_hash||lastBrowserDraftHash||lastPythonDraftHash);
+          draftSaveState="saved";draftSaveText="Draft autosaved locally";
+        }
+        if(next.phase==="save_credentials"&&next.credential_result){
+          const p=String(next.credential_result.provider||"");
+          const name=String(next.credential_result.name||"Default");
+          if(p&&Object.prototype.hasOwnProperty.call(cloudCredentialSelection,p)){
+            cloudCredentialSelection[p]=name;cloudCredentialNames[p]=name;
+            if(cloudSecrets[p])Object.keys(cloudSecrets[p]).forEach(k=>cloudSecrets[p][k]="");
+          }
+        }
+        if(next.state_replace){
+          state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
+          selected=null;pendingPort=null;outputDirectorySelection=null;switchingWorkspace=true;
+        }
+        if(next.message&&next.phase!=="save_draft")setStatus(next.message);
+        if(next.status==="done"||next.status==="error")setTimeout(draw,60);
+        return;
       }
       execution=next;
       if(!isPopout)sendPopoutMessage({type:"progress",source:"host",payload:cp(next),state:next.state_replace?cp(state):null,ts:Date.now()});
@@ -4528,50 +4680,104 @@ function __MLB_STUDIO_FACTORY__(){
       }[provider]||provider;
     }
 
+    function savedCredentialProfiles(provider){
+      return (localPersistence.credentials||[]).filter(item=>String(item?.provider||"")===String(provider||""));
+    }
+    function savedCredentialProfile(provider,name){
+      return savedCredentialProfiles(provider).find(item=>String(item.name||"")===String(name||""))||null;
+    }
+    function savedCredentialMask(provider,field,fallback){
+      const selected=cloudCredentialSelection[provider];
+      const profile=selected?savedCredentialProfile(provider,selected):null;
+      return String(profile?.masks?.[field]||fallback||"");
+    }
+    function currentCredentialHasInput(provider){
+      return Object.values(cloudSecrets[provider]||{}).some(v=>String(v||"").trim());
+    }
     function renderProviderCredentials(card){
       const p=cloudForm.provider;
       const title=document.createElement("div");title.className="mlb-cloud-subtitle";
-      title.textContent="🔑  SESSION CREDENTIALS";card.appendChild(title);
+      title.textContent="🔑  CREDENTIALS & LOCAL SECRET STORE";card.appendChild(title);
+
+      const profiles=savedCredentialProfiles(p);
+      const profileGrid=document.createElement("div");profileGrid.className="mlb-cloud-mini-grid mlb-credential-profile-grid";
+      const profileOptions=[{value:"",label:"Session / enter below"},...profiles.map(item=>({value:item.name,label:item.name+(item.persistent?" · OS keyring":item.available?" · session only":" · re-enter required")}))];
+      profileGrid.appendChild(cloudSelect("Use Saved Credential",cloudCredentialSelection[p]||"",profileOptions,v=>{
+        cloudCredentialSelection[p]=v;
+        if(v)cloudCredentialNames[p]=v;
+        draw();
+      }));
+      profileGrid.appendChild(cloudField("Credential Name","text",cloudCredentialNames[p]||"Default","Default",v=>cloudCredentialNames[p]=v));
+      card.appendChild(profileGrid);
+
+      const selectedProfile=cloudCredentialSelection[p]?savedCredentialProfile(p,cloudCredentialSelection[p]):null;
+      if(selectedProfile){
+        const summary=document.createElement("div");summary.className="mlb-cloud-credential-summary";
+        const masks=Object.entries(selectedProfile.masks||{}).map(([k,v])=>k+": "+v).join(" · ");
+        summary.innerHTML="<strong>"+(selectedProfile.available!==false?"Saved credential active":"Credential reference saved")+"</strong><span>"+(masks||"Masked secret stored")+"</span><b>"+(selectedProfile.persistent?"OS KEYRING":selectedProfile.available!==false?"SESSION":"RE-ENTER")+"</b>";
+        card.appendChild(summary);
+      }
 
       if(p==="huggingface"){
         card.appendChild(cloudField(
           "API Token / Access Token","text",cloudSecrets.huggingface.token,
-          "hf_...  (optional if already logged in)",
+          savedCredentialMask(p,"token","hf_...  (public repositories can stay blank)"),
           v=>cloudSecrets.huggingface.token=v,true
         ));
       }else if(p==="github"){
         card.appendChild(cloudField(
           "GitHub Personal Access Token","text",cloudSecrets.github.token,
-          "github_pat_... / ghp_...",
+          savedCredentialMask(p,"token","github_pat_... / ghp_..."),
           v=>cloudSecrets.github.token=v,true
         ));
       }else if(p==="aws"){
         const grid=document.createElement("div");grid.className="mlb-cloud-mini-grid";
         grid.append(
-          cloudField("Access Key ID","text",cloudSecrets.aws.access_key,"AKIA...",v=>cloudSecrets.aws.access_key=v,true),
-          cloudField("Secret Access Key","text",cloudSecrets.aws.secret_key,"••••••",v=>cloudSecrets.aws.secret_key=v,true)
+          cloudField("Access Key ID","text",cloudSecrets.aws.access_key,savedCredentialMask(p,"access_key","AKIA..."),v=>cloudSecrets.aws.access_key=v,true),
+          cloudField("Secret Access Key","text",cloudSecrets.aws.secret_key,savedCredentialMask(p,"secret_key","••••••"),v=>cloudSecrets.aws.secret_key=v,true)
         );
         card.appendChild(grid);
         card.appendChild(cloudField(
-          "Session Token (optional)","text",cloudSecrets.aws.session_token,"Temporary session token",
+          "Session Token (optional)","text",cloudSecrets.aws.session_token,savedCredentialMask(p,"session_token","Temporary session token"),
           v=>cloudSecrets.aws.session_token=v,true
         ));
       }else if(p==="gcp"){
         card.appendChild(cloudField(
-          "Service Account JSON","textarea",cloudSecrets.gcp.service_account_json,
-          '{"type":"service_account", ...}  (blank = Application Default Credentials)',
+          "Service Account JSON","text",cloudSecrets.gcp.service_account_json,
+          savedCredentialMask(p,"service_account_json",'{"type":"service_account", ...}  (blank = Application Default Credentials)'),
           v=>cloudSecrets.gcp.service_account_json=v,true
         ));
       }else if(p==="azure"){
         card.appendChild(cloudField(
-          "Connection String","textarea",cloudSecrets.azure.connection_string,
-          "DefaultEndpointsProtocol=...;AccountName=...;AccountKey=...",
+          "Connection String","text",cloudSecrets.azure.connection_string,
+          savedCredentialMask(p,"connection_string","DefaultEndpointsProtocol=...;AccountName=...;AccountKey=..."),
           v=>cloudSecrets.azure.connection_string=v,true
         ));
       }
 
+      const actions=document.createElement("div");actions.className="mlb-cloud-credential-actions";
+      const saveCredential=btn("Save Credential","mlb-cloud-check");
+      saveCredential.disabled=!currentCredentialHasInput(p);
+      saveCredential.title="Store the real secret in the OS credential store when available; Studio DB keeps only the masked reference.";
+      saveCredential.addEventListener("click",()=>{
+        const name=String(cloudCredentialNames[p]||"Default").trim()||"Default";
+        const credentials=currentCloudCredentials();
+        if(p==="aws")delete credentials.region;
+        requestPersistenceCommand("persistence_save_credentials",{provider:p,name,credentials});
+      });
+      actions.appendChild(saveCredential);
+      if(selectedProfile){
+        const removeCredential=btn("Remove Saved Credential","mlb-cloud-check danger");
+        removeCredential.addEventListener("click",()=>{
+          requestPersistenceCommand("persistence_delete_credentials",{provider:p,name:selectedProfile.name});
+          cloudCredentialSelection[p]="";
+        });
+        actions.appendChild(removeCredential);
+      }
+      card.appendChild(actions);
+
       const note=document.createElement("div");note.className="mlb-cloud-secret-note";
-      note.textContent="Session only · masked · never included in Save JSON, BIN, model, dataset, or project metadata.";
+      note.textContent="Real secrets never enter project JSON/BIN, Gallery items, drafts, model designs, or dataset metadata. The local Studio database stores only masked credential metadata; persistent secrets use the operating-system keyring when available.";
       card.appendChild(note);
     }
 
@@ -4636,8 +4842,78 @@ function __MLB_STUDIO_FACTORY__(){
         object_path:cloudForm.object_path,
         region:cloudForm.region,
         private:!!cloudForm.private,
+        credential_name:cloudCredentialSelection[cloudForm.provider]||"",
         credentials:currentCloudCredentials()
       };
+    }
+
+    function localRepositoryKindLabel(kind){
+      return {model:"MODEL DESIGN",data:"DATA PIPELINE",project:"PROJECT",component:"COMPONENT",pipeline:"PIPELINE",template:"TEMPLATE"}[String(kind||"")]||String(kind||"DESIGN").toUpperCase();
+    }
+    function saveCurrentDesignToLocalRepository(kindOverride=""){
+      const kind=kindOverride||((state.active_workspace==="data")?"data":"model");
+      const defaultName=kind==="project"?(state.project?.name||"MLBricks Project"):
+        kind==="data"?(current(state)?.name||"Data Processing"):(state.project?.name||modelRootComponent()?.name||"Model Design");
+      const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
+      const proposed=win&&typeof win.prompt==="function"?win.prompt("Save design to Local Repository as:",defaultName):defaultName;
+      if(proposed===null)return;
+      const name=String(proposed||"").trim();
+      if(!name){setStatus("Local Repository name cannot be empty.");return;}
+      requestPersistenceCommand("persistence_save_item",{kind,name});
+    }
+    function renderLocalPersistencePanel(container){
+      const card=document.createElement("section");card.className="mlb-cloud-card mlb-local-persistence-card";
+      const title=document.createElement("div");title.className="mlb-cloud-section-title";
+      title.innerHTML="<span>▣</span><strong>LOCAL STUDIO STORAGE</strong>";card.appendChild(title);
+
+      const stats=document.createElement("div");stats.className="mlb-local-persistence-stats";
+      [["Drafts",(localPersistence.drafts||[]).length],["Saved Designs",(localPersistence.repository||[]).length],["Credentials",(localPersistence.credentials||[]).length]].forEach(([label,value])=>{
+        const item=document.createElement("div");const a=document.createElement("span");a.textContent=label;const b=document.createElement("strong");b.textContent=String(value);item.append(a,b);stats.appendChild(item);
+      });
+      const path=document.createElement("div");path.className="mlb-local-persistence-path";path.textContent=String(localPersistence.root||"Local Studio Store");path.title=path.textContent;
+      card.append(stats,path);
+
+      const actions=document.createElement("div");actions.className="mlb-local-persistence-actions";
+      const saveCurrent=btn(state.active_workspace==="data"?"Save Data Pipeline":"Save Model Design","mlb-cloud-primary");
+      saveCurrent.addEventListener("click",()=>saveCurrentDesignToLocalRepository());
+      const saveProject=btn("Save Project","mlb-cloud-primary secondary");saveProject.addEventListener("click",()=>saveCurrentDesignToLocalRepository("project"));
+      const refresh=btn("Refresh","mlb-cloud-check");refresh.addEventListener("click",()=>requestPersistenceCommand("persistence_list",{}));
+      actions.append(saveCurrent,saveProject,refresh);card.appendChild(actions);
+
+      const note=document.createElement("div");note.className="mlb-cloud-secret-note mlb-local-storage-rule";
+      note.innerHTML="<strong>Design-only storage.</strong> Drafts and Local Repository items contain graphs, component definitions, code/configuration, metadata and artifact references. Model parameters, optimizer tensors, datasets and checkpoint bodies are never copied into the Studio database.";
+      card.appendChild(note);
+
+      const drafts=(localPersistence.drafts||[]).slice(0,3);
+      if(drafts.length){
+        const sub=document.createElement("div");sub.className="mlb-cloud-subtitle";sub.textContent="RECENT DRAFTS";card.appendChild(sub);
+        const list=document.createElement("div");list.className="mlb-local-repository-list";
+        drafts.forEach(item=>{
+          const row=document.createElement("div");row.className="mlb-local-repository-row";
+          const info=document.createElement("div");const strong=document.createElement("strong");strong.textContent=item.project_name||"Draft";
+          const meta=document.createElement("span");meta.textContent=(item.workspace||"model")+" · "+new Date(Number(item.updated_at||0)*1000).toLocaleString();info.append(strong,meta);
+          const rowActions=document.createElement("div");const open=btn("Recover","mlb-cloud-check");open.addEventListener("click",()=>requestPersistenceCommand("persistence_load_draft",{draft_id:item.id}));
+          const del=btn("Remove","mlb-cloud-check danger");del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_draft",{draft_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
+        });
+        card.appendChild(list);
+      }
+
+      const saved=(localPersistence.repository||[]).slice(0,8);
+      const sub=document.createElement("div");sub.className="mlb-cloud-subtitle";sub.textContent="LOCAL REPOSITORY";card.appendChild(sub);
+      if(!saved.length){
+        const empty=document.createElement("div");empty.className="mlb-cloud-secret-note";empty.textContent="No saved designs yet. Draft autosave is active; use Save Model Design / Save Data Pipeline when you want a named reusable version.";card.appendChild(empty);
+      }else{
+        const list=document.createElement("div");list.className="mlb-local-repository-list";
+        saved.forEach(item=>{
+          const row=document.createElement("div");row.className="mlb-local-repository-row";
+          const info=document.createElement("div");const strong=document.createElement("strong");strong.textContent=item.name||"Design";
+          const meta=document.createElement("span");meta.textContent=localRepositoryKindLabel(item.kind)+" · "+new Date(Number(item.updated_at||0)*1000).toLocaleString();info.append(strong,meta);
+          const rowActions=document.createElement("div");const open=btn("Open","mlb-cloud-check");open.addEventListener("click",()=>requestPersistenceCommand("persistence_load_item",{item_id:item.id}));
+          const del=btn("Remove","mlb-cloud-check danger");del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_item",{item_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
+        });
+        card.appendChild(list);
+      }
+      container.appendChild(card);
     }
 
     function renderCloudView(container,showHead=true){
@@ -4647,6 +4923,8 @@ function __MLB_STUDIO_FACTORY__(){
         head.innerHTML="<div><strong>CLOUD & REPOSITORIES</strong><span>Push and load Builder data, models and projects</span></div><span class='mlb-cloud-badge'>CLOUD</span>";
         container.appendChild(head);
       }
+
+      renderLocalPersistencePanel(container);
 
       const providerCard=document.createElement("section");providerCard.className="mlb-cloud-card mlb-cloud-provider-card";
       const providerTitle=document.createElement("div");providerTitle.className="mlb-cloud-section-title";providerTitle.innerHTML="<span>☁</span><strong>PROVIDER & CONNECTION</strong>";providerCard.appendChild(providerTitle);
@@ -4660,7 +4938,7 @@ function __MLB_STUDIO_FACTORY__(){
       const indicator=document.createElement("div");indicator.className="mlb-cloud-status "+(status.ok||status.authenticated?"ok":status.message?"warn":"idle");
       const connectionText=document.createElement("span");connectionText.textContent=status.message||providerLabel(cloudForm.provider)+" · not checked";
       indicator.appendChild(connectionText);connectionField.append(connectionLabel,indicator);
-      const check=btn("Check Connection","mlb-cloud-check");check.addEventListener("click",()=>requestCloudCommand("cloud_status",{provider:cloudForm.provider,credentials:currentCloudCredentials(),region:cloudForm.region}));
+      const check=btn("Check Connection","mlb-cloud-check");check.addEventListener("click",()=>requestCloudCommand("cloud_status",{provider:cloudForm.provider,credential_name:cloudCredentialSelection[cloudForm.provider]||"",credentials:currentCloudCredentials(),region:cloudForm.region}));
       providerBar.append(providerField,connectionField,check);providerCard.appendChild(providerBar);container.appendChild(providerCard);
 
       const credentials=document.createElement("section");credentials.className="mlb-cloud-card credentials";
@@ -6623,6 +6901,7 @@ function __MLB_STUDIO_FACTORY__(){
       runtimePanel=null;cloudWorkspace.open=false;bottomExpanded=false;galleryWorkspace={open:true,tab:"components"};outputDirectorySelection=null;selected=null;componentInsertPicker={open:false,afterNodeId:null};
       undoStack.length=0;redoStack.length=0;
       setStatus(savedMessage);draw();
+      setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"component",name:savedDef.name,definition_id:savedDef.id},true),180);
     }
     function deleteNode(id){
       if(!requireEditableLayout("delete components"))return;
@@ -7768,7 +8047,7 @@ function __MLB_STUDIO_FACTORY__(){
         });
         title.addEventListener("blur",()=>renameProjectInline(title.textContent));
       }
-      const saved=document.createElement("div");saved.className="mlb-save-state";saved.textContent="• Saved";
+      const saved=document.createElement("div");saved.className="mlb-save-state "+draftSaveState;saved.textContent="• "+draftSaveText;saved.title="MLBricks Studio autosaves lightweight design/configuration state locally. Model tensors and datasets are not stored in the draft database.";
       topLeft.append(logo,title,saved);
       top.appendChild(topLeft);
 
@@ -8738,6 +9017,7 @@ function __MLB_STUDIO_FACTORY__(){
         }
       });
       if(isPopout)schedulePopoutStateSync();
+      scheduleDraftPersist();
     }
 
     // Paint a lightweight shell before constructing the full Studio DOM. This
@@ -8753,6 +9033,7 @@ function __MLB_STUDIO_FACTORY__(){
       if(typeof requestIdleCallback==="function")requestIdleCallback(beginBackgroundBridge,{timeout:1500});
       else setTimeout(beginBackgroundBridge,750);
     });
+    try{(root.ownerDocument?.defaultView||window).addEventListener("beforeunload",persistBrowserDraftNow,{capture:false});}catch(_){}
   }
 
   window.MLBricksBuilder={mount};
