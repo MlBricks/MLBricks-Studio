@@ -355,13 +355,13 @@ The **Load** button restores the same design from JSON.
 Keep the normal Builder installation light. Install data features with:
 
 ```bash
-pip install "mlb-studio[data]"
+pip install -U mlb-studio
 ```
 
 or, when installing Builder from GitHub in Kaggle, install:
 
 ```bash
-pip install datasets kagglehub transformers pandas pyarrow
+# Data Processing dependencies are installed automatically with mlb-studio
 ```
 
 Authentication tokens/credentials are deliberately **not** stored in design

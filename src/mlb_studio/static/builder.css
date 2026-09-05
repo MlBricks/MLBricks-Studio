@@ -3587,12 +3587,15 @@
    toolbar. This avoids toolbar overflow and gives long row/step messages room.
    ------------------------------------------------------------------ */
 .mlb-data-canvas-progress{
-  position:sticky;left:0;z-index:26;
-  width:calc(100% - 4px);max-width:none;box-sizing:border-box;
-  margin:7px 0 3px;padding:8px 11px 9px;
-  border:1px solid #3c4d5f;border-radius:8px;
+  position:relative;z-index:26;
+  width:min(64%,680px);min-width:480px;box-sizing:border-box;
+  margin:10px auto 8px;padding:8px 11px 9px;
+  border:1px solid #6759a8;border-radius:8px;
   background:linear-gradient(180deg,#111b25,#0d161f);
   box-shadow:0 3px 12px rgba(0,0,0,.16);
+}
+@container studio (max-width:900px){
+  .mlb-data-canvas-progress{width:calc(100% - 24px);min-width:0}
 }
 .mlb-data-canvas-progress.idle{display:none}
 .mlb-data-canvas-progress-head{display:flex;align-items:center;justify-content:space-between;gap:14px;min-width:0}

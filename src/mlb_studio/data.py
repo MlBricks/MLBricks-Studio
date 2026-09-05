@@ -542,7 +542,7 @@ def tokenize_text_dataset(
         from transformers import AutoTokenizer
     except ImportError as exc:
         raise ImportError(
-            "Tokenization needs transformers. Install with: pip install transformers"
+            "Tokenization needs transformers. It is included with MLBricks Studio; reinstall/upgrade mlb-studio and restart the notebook kernel."
         ) from exc
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)

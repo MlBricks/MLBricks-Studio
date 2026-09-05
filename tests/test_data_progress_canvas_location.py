@@ -20,3 +20,11 @@ def test_data_progress_lives_above_canvas_cards_not_toolbar():
     toolbar_section = js[js.index('// Data runtime health/progress belongs only to the Data Processing workspace.'):js.index('const tsp=document.createElement("div");tsp.className="mlb-toolspacer"', js.index('// Data runtime health/progress belongs only to the Data Processing workspace.'))]
     assert 'toolbar.appendChild(kernel)' in toolbar_section
     assert 'toolbar.appendChild(live)' not in toolbar_section
+
+
+def test_data_progress_is_centered_compact_rail_above_cards():
+    css = _static("builder.css")
+    assert 'width:min(64%,680px)' in css
+    assert 'min-width:480px' in css
+    assert 'margin:10px auto 8px' in css
+    assert '@container studio (max-width:900px)' in css
