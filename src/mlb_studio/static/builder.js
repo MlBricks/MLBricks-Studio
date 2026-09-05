@@ -8849,22 +8849,19 @@ function __MLB_STUDIO_FACTORY__(){
       });crumbs.appendChild(b);if(i<state.breadcrumbs.length-1){const sep=document.createElement("span");sep.textContent="/";crumbs.appendChild(sep);}});
       ctop.appendChild(crumbs);canvas.appendChild(ctop);
 
-      // Keep Data Processing progress on the canvas rather than squeezing it into
-      // the toolbar. This rail sits directly above the component cards and stays
-      // left-anchored while a wide graph is horizontally scrolled. It is always
-      // present in the Data workspace so the first progress event can update it
-      // without forcing a full redraw.
+      // Data Processing uses a compact top HUD: live processing progress sits
+      // on the same horizontal row as the Data Blueprint. This keeps both status
+      // surfaces above the graph without consuming a full extra canvas row.
+      let dataProgress=null;
       if(state.active_workspace==="data" && current(state)?.kind!=="custom_edit") {
-        const dataProgress=document.createElement("div");
+        dataProgress=document.createElement("div");
         dataProgress.className="mlb-data-canvas-progress idle";
         dataProgress.innerHTML=
           '<div class="mlb-data-canvas-progress-head">'+
             '<div class="mlb-data-canvas-progress-copy"><strong>PROCESSING</strong><span>Ready</span></div>'+
-            '<b>0%</b>'+
-          '</div>'+
+            '<b>0%</b>'+ 
+          '</div>'+ 
           '<div class="mlb-data-canvas-progress-track"><i style="width:0%"></i></div>';
-        canvas.appendChild(dataProgress);
-        requestAnimationFrame(()=>updateDataCanvasProgress(execution));
       }
 
       const mini=document.createElement("div");mini.className="mlb-minimap";
@@ -8872,7 +8869,16 @@ function __MLB_STUDIO_FACTORY__(){
       const mg=document.createElement("div");mg.className="mlb-minimap-grid";
       current(state).nodes.forEach(()=>{const m=document.createElement("div");m.className="mlb-mini-node";mg.appendChild(m);});
       mini.append(miniTitle,mg);
-      canvas.appendChild(mini);
+
+      if(dataProgress){
+        const dataHud=document.createElement("div");
+        dataHud.className="mlb-data-canvas-hud";
+        dataHud.append(dataProgress,mini);
+        canvas.appendChild(dataHud);
+        requestAnimationFrame(()=>updateDataCanvasProgress(execution));
+      }else{
+        canvas.appendChild(mini);
+      }
 
       wrap=document.createElement("div");wrap.className="mlb-flow-wrap"+(isApiComposerView()?" mlb-api-composer-wrap":"");
       flow=document.createElement("div");flow.className="mlb-flow"+(isApiComposerView()?" mlb-api-composer-flow":"");
