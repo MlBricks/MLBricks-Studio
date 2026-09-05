@@ -1694,7 +1694,10 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function pumpComponentImportQueue(){
-      if(persistenceNavigationInFlight||componentImportBusy||!componentImportQueue.length||!bridgeReady())return;
+      // The hidden Python command textarea is shared by imports and explicit
+      // runtime actions. Never let a background component import overwrite the
+      // command selected by Fetch Data / Train / Generate / persistence actions.
+      if(persistenceNavigationInFlight||componentImportBusy||execution.status==="running"||!componentImportQueue.length||!bridgeReady())return;
       const type=componentImportQueue.shift();
       const api=mlapi[type];
       if(!api||api.loaded){pumpComponentImportQueue();return;}
@@ -1882,6 +1885,7 @@ function __MLB_STUDIO_FACTORY__(){
         return;
       }
 
+
       const runButton=bridgeControl(bridge.run,"button");
       if(!runButton){
         setStatus("Python Run control was not found. Re-run the Builder cell.");
@@ -1909,9 +1913,22 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(bridgeAwaitTimer)clearTimeout(bridgeAwaitTimer);
 
-      // Let the standard textarea comm flush first, then activate the standard
-      // ipywidgets button in whichever notebook document contains it.
+      // Let the state textarea comm flush first. Immediately before clicking the
+      // shared Python Run button, explicitly select the data command. The command
+      // widget is also used by Gallery persistence, cloud actions and background
+      // component imports; relying on its previous/default value made Fetch Data
+      // intermittently execute the wrong action after using another Studio area.
       setTimeout(()=>{
+        if(!setBridgeCommand({action:"data",ts:Date.now()})){
+          execution={
+            status:"error",runtime_kind:"data",overall:0,
+            message:"Could not select the Python data pipeline command.",
+            nodes:queued
+          };
+          applyExecutionProgress(execution);
+          setStatus(execution.message);
+          return;
+        }
         const ok=clickBridgeButton(runButton);
         if(!ok){
           execution={
