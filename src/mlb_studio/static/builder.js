@@ -1987,6 +1987,21 @@ function __MLB_STUDIO_FACTORY__(){
              s==="stopped"?"STOPPED":s==="queued"?"QUEUED":"";
     }
 
+    function updateDataCanvasProgress(next){
+      const panel=root.querySelector(".mlb-data-canvas-progress");
+      if(!panel)return;
+      const active=state.active_workspace==="data" && next?.runtime_kind==="data";
+      const status=active?String(next.status||"idle"):"idle";
+      const pct=active?Math.max(0,Math.min(100,Math.round(Number(next.overall||0)))):0;
+      panel.className="mlb-data-canvas-progress "+status;
+      const copy=panel.querySelector(".mlb-data-canvas-progress-copy span");
+      const value=panel.querySelector(".mlb-data-canvas-progress-head>b");
+      const bar=panel.querySelector(".mlb-data-canvas-progress-track i");
+      if(copy)copy.textContent=active?(next.message||"Processing data…"):"Ready";
+      if(value)value.textContent=pct+"%";
+      if(bar)bar.style.width=pct+"%";
+    }
+
     function applyExecutionProgress(next){
       if(!next||typeof next!=="object")return;
       if(next.runtime_kind==="import"){
@@ -2100,6 +2115,7 @@ function __MLB_STUDIO_FACTORY__(){
         return;
       }
       execution=next;
+      updateDataCanvasProgress(next);
       if(!isPopout)sendPopoutMessage({type:"progress",source:"host",payload:cp(next),state:next.state_replace?cp(state):null,ts:Date.now()});
 
       if(next.model_id && next.model_update){
@@ -8761,16 +8777,10 @@ function __MLB_STUDIO_FACTORY__(){
           toolbar.appendChild(kernel);
           requestAnimationFrame(updateKernelBadge);
 
-          // Keep data progress visible beside kernel health. The top Fetch button
-          // also carries the overall percentage, while this pill shows the active
-          // step / row message (for example 3,400 / 10,000 streamed rows).
-          const live=document.createElement("div");
-          live.className="mlb-run-live "+(execution.runtime_kind==="data"?(execution.status||"idle"):"idle");
-          const livePct=execution.runtime_kind==="data"
-            ?Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))
-            :0;
-          live.innerHTML="<strong>"+livePct+"%</strong><span>"+(execution.runtime_kind==="data"?(execution.message||"Ready"):"Ready")+"</span>";
-          toolbar.appendChild(live);
+          // Data progress no longer lives in the toolbar. On smaller notebook/full-window
+          // widths the message pill forced the entire toolbar to scroll horizontally.
+          // The live processing rail is rendered in the canvas above the component cards,
+          // where there is enough horizontal space for step and row-level messages.
         }
         const tsp=document.createElement("div");tsp.className="mlb-toolspacer";toolbar.appendChild(tsp);
         if(isGraphCustomEditor()){
@@ -8838,6 +8848,24 @@ function __MLB_STUDIO_FACTORY__(){
         state.view_component_id=c.id;state.breadcrumbs=state.breadcrumbs.slice(0,i+1);selected=null;draw();
       });crumbs.appendChild(b);if(i<state.breadcrumbs.length-1){const sep=document.createElement("span");sep.textContent="/";crumbs.appendChild(sep);}});
       ctop.appendChild(crumbs);canvas.appendChild(ctop);
+
+      // Keep Data Processing progress on the canvas rather than squeezing it into
+      // the toolbar. This rail sits directly above the component cards and stays
+      // left-anchored while a wide graph is horizontally scrolled. It is always
+      // present in the Data workspace so the first progress event can update it
+      // without forcing a full redraw.
+      if(state.active_workspace==="data" && current(state)?.kind!=="custom_edit") {
+        const dataProgress=document.createElement("div");
+        dataProgress.className="mlb-data-canvas-progress idle";
+        dataProgress.innerHTML=
+          '<div class="mlb-data-canvas-progress-head">'+
+            '<div class="mlb-data-canvas-progress-copy"><strong>PROCESSING</strong><span>Ready</span></div>'+
+            '<b>0%</b>'+
+          '</div>'+
+          '<div class="mlb-data-canvas-progress-track"><i style="width:0%"></i></div>';
+        canvas.appendChild(dataProgress);
+        requestAnimationFrame(()=>updateDataCanvasProgress(execution));
+      }
 
       const mini=document.createElement("div");mini.className="mlb-minimap";
       const miniTitle=document.createElement("div");miniTitle.className="mlb-minimap-title";miniTitle.textContent=state.active_workspace==="data"?"DATA BLUEPRINT":(isGraphCustomEditor()?"MODULE BLUEPRINT":(isApiComposerView()?"API BLUEPRINT":"MODEL BLUEPRINT"));

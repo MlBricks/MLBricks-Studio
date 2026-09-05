@@ -646,5 +646,6 @@ def test_data_gallery_presets_use_verified_upstreams_fast_streaming_and_visible_
     assert 'source.params.prefer_parquet_api="true";' in js
     assert 'source.params.mirror_dataset_id=preset.mirror_dataset_id' in js
     assert 'Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%"' in js
-    assert 'toolbar.appendChild(live);' in js
+    assert 'canvas.appendChild(dataProgress)' in js
+    assert 'updateDataCanvasProgress(next)' in js
     assert 'nodeState.percent' in js

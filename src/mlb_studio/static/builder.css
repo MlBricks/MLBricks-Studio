@@ -3579,3 +3579,37 @@
   animation:none!important;
   transition:width .18s ease;
 }
+
+
+/* ------------------------------------------------------------------
+   Data Processing progress rail
+   Live fetch/processing status belongs above the component cards, not in the
+   toolbar. This avoids toolbar overflow and gives long row/step messages room.
+   ------------------------------------------------------------------ */
+.mlb-data-canvas-progress{
+  position:sticky;left:0;z-index:26;
+  width:calc(100% - 4px);max-width:none;box-sizing:border-box;
+  margin:7px 0 3px;padding:8px 11px 9px;
+  border:1px solid #3c4d5f;border-radius:8px;
+  background:linear-gradient(180deg,#111b25,#0d161f);
+  box-shadow:0 3px 12px rgba(0,0,0,.16);
+}
+.mlb-data-canvas-progress.idle{display:none}
+.mlb-data-canvas-progress-head{display:flex;align-items:center;justify-content:space-between;gap:14px;min-width:0}
+.mlb-data-canvas-progress-copy{display:flex;align-items:center;gap:10px;min-width:0}
+.mlb-data-canvas-progress-copy strong{font-size:9.5px;letter-spacing:.08em;color:#91a1b2;flex:0 0 auto}
+.mlb-data-canvas-progress-copy span{font-size:11px;color:#c7d2de;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.mlb-data-canvas-progress-head>b{font-size:11px;color:#ded7ff;min-width:38px;text-align:right;flex:0 0 auto}
+.mlb-data-canvas-progress-track{height:5px;margin-top:7px;border-radius:999px;overflow:hidden;background:#202b36}
+.mlb-data-canvas-progress-track i{display:block;height:100%;width:0;border-radius:inherit;background:#8063ee;transition:width .18s ease}
+.mlb-data-canvas-progress.running{border-color:#6759a8}
+.mlb-data-canvas-progress.running .mlb-data-canvas-progress-track i{background:#8063ee}
+.mlb-data-canvas-progress.done{border-color:#2f7658}
+.mlb-data-canvas-progress.done .mlb-data-canvas-progress-copy strong,
+.mlb-data-canvas-progress.done .mlb-data-canvas-progress-head>b{color:#70d5a1}
+.mlb-data-canvas-progress.done .mlb-data-canvas-progress-track i{background:#48b982}
+.mlb-data-canvas-progress.error{border-color:#8c4852}
+.mlb-data-canvas-progress.error .mlb-data-canvas-progress-copy strong,
+.mlb-data-canvas-progress.error .mlb-data-canvas-progress-head>b{color:#f09aa5}
+.mlb-data-canvas-progress.error .mlb-data-canvas-progress-track i{background:#d7606b}
+.mlb-data-canvas-progress.stopped{border-color:#7a6442}
