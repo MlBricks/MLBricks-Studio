@@ -85,3 +85,116 @@ def test_draft_summary_reports_active_graph_progress(tmp_path):
     draft = store.list_drafts()[0]
     assert draft["node_count"] == 3
     assert draft["edge_count"] == 2
+
+
+def test_component_draft_uses_unique_component_id_and_is_removed_on_save(tmp_path):
+    from mlb_studio.builder import Builder
+
+    builder = Builder()
+    builder.persistence = StudioPersistence(tmp_path)
+
+    project_id = "project_demo"
+    component_local_id = "component_123456"
+    definition_id = "custom_demo"
+    view_id = "view_custom_demo"
+
+    builder.state.setdefault("project", {})["local_id"] = project_id
+    builder.state["project"]["name"] = "Demo Model"
+    builder.state.setdefault("custom_components", {})[definition_id] = {
+        "id": definition_id,
+        "local_id": component_local_id,
+        "name": "My Component",
+        "implementation": "graph",
+        "nodes": [{"id": "n1", "type": "linear"}],
+        "edges": [],
+    }
+    builder.state.setdefault("components", {})[view_id] = {
+        "id": view_id,
+        "name": "My Component",
+        "kind": "custom_edit",
+        "definition_id": definition_id,
+        "nodes": [{"id": "n1", "type": "linear"}],
+        "edges": [],
+    }
+    builder.state["view_component_id"] = view_id
+
+    # Normal project recovery state remains independent.
+    builder._execute_persistence_command({
+        "action": "persistence_save_draft",
+        "persistence": {
+            "draft_id": project_id,
+            "draft_name": "Demo Model",
+            "draft_kind": "project",
+            "workspace": "model",
+        },
+    })
+
+    component_draft_id = f"draft_{component_local_id}"
+    builder._execute_persistence_command({
+        "action": "persistence_save_draft",
+        "persistence": {
+            "draft_id": component_draft_id,
+            "draft_name": "My Component",
+            "draft_kind": "component",
+            "workspace": "component",
+            "component_local_id": component_local_id,
+            "definition_id": definition_id,
+        },
+    })
+
+    before = {item["id"] for item in builder.persistence.list_drafts()}
+    assert project_id in before
+    assert component_draft_id in before
+
+    result = builder._execute_persistence_command({
+        "action": "persistence_save_item",
+        "persistence": {
+            "kind": "component",
+            "name": "My Component",
+            "definition_id": definition_id,
+            "component_local_id": component_local_id,
+            "item_id": f"local_{component_local_id}",
+            "source_draft_id": component_draft_id,
+        },
+    })
+
+    after = {item["id"] for item in builder.persistence.list_drafts()}
+    assert project_id in after
+    assert component_draft_id not in after
+    assert result["id"] == f"local_{component_local_id}"
+    assert result["component_local_id"] == component_local_id
+    assert result["cleared_draft_id"] == component_draft_id
+
+    saved = builder.persistence.load_repository_item(result["id"])
+    assert saved["metadata"]["component_local_id"] == component_local_id
+    root_id = saved["payload"]["root_definition_id"]
+    assert saved["payload"]["definitions"][root_id]["local_id"] == component_local_id
+
+
+def test_component_draft_summary_counts_outer_component_editor(tmp_path):
+    store = StudioPersistence(tmp_path)
+    state = {
+        "project": {"name": "Demo", "local_id": "project_demo"},
+        "active_workspace": "model",
+        "custom_components": {
+            "outer": {"id": "outer", "local_id": "component_outer", "name": "Outer"},
+            "inner": {"id": "inner", "local_id": "component_inner", "name": "Inner"},
+        },
+        "components": {
+            "outer_view": {
+                "id": "outer_view", "kind": "custom_edit", "definition_id": "outer",
+                "nodes": [{"id": "a"}, {"id": "b"}], "edges": [{"id": "e"}],
+            },
+            "inner_view": {
+                "id": "inner_view", "kind": "custom_edit", "definition_id": "inner",
+                "nodes": [{"id": "x"}], "edges": [],
+                "parent_edit_return": {"view_id": "outer_view"},
+            },
+        },
+        "view_component_id": "inner_view",
+    }
+    store.save_draft("draft_component_outer", "Outer", state, workspace="component")
+    draft = store.list_drafts()[0]
+    assert draft["workspace"] == "component"
+    assert draft["node_count"] == 2
+    assert draft["edge_count"] == 1

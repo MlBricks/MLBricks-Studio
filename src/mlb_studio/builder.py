@@ -2150,14 +2150,28 @@ class Builder:
 
         if action == "persistence_save_draft":
             project = self.state.setdefault("project", {})
-            draft_id = str(project.get("local_id") or config.get("draft_id") or f"project_{uuid.uuid4().hex}")
-            project["local_id"] = draft_id
+            draft_kind = str(config.get("draft_kind") or "project").strip().lower() or "project"
+            requested_id = str(config.get("draft_id") or "").strip()
+            if draft_kind == "component":
+                component_local_id = str(config.get("component_local_id") or "").strip()
+                draft_id = requested_id or (f"draft_{component_local_id}" if component_local_id else f"draft_component_{uuid.uuid4().hex}")
+                draft_name = str(config.get("draft_name") or "Untitled Component").strip() or "Untitled Component"
+                workspace = "component"
+                # Never replace the owning project's stable ID with a component
+                # draft ID. Component drafts are independent recovery records.
+                project.setdefault("local_id", f"project_{uuid.uuid4().hex}")
+            else:
+                draft_id = requested_id or str(project.get("local_id") or f"project_{uuid.uuid4().hex}")
+                project["local_id"] = str(project.get("local_id") or draft_id)
+                draft_name = str(config.get("draft_name") or project.get("name") or "Untitled Model").strip() or "Untitled Model"
+                workspace = str(config.get("workspace") or self.state.get("active_workspace") or "model")
             result = self.persistence.save_draft(
                 draft_id,
-                project.get("name") or "Untitled Model",
+                draft_name,
                 self.state,
-                workspace=self.state.get("active_workspace") or "model",
+                workspace=workspace,
             )
+            result["draft_kind"] = draft_kind
             if config.get("sync_hash"):
                 result["sync_hash"] = str(config.get("sync_hash"))
             emit({
@@ -2205,18 +2219,51 @@ class Builder:
         if action == "persistence_save_item":
             kind = str(config.get("kind") or "project").lower()
             name = str(config.get("name") or (self.state.get("project") or {}).get("name") or "Untitled").strip()
+
+            component_local_id = ""
+            if kind == "component":
+                definition_id = str(config.get("definition_id") or "").strip()
+                definition = (self.state.get("custom_components") or {}).get(definition_id)
+                if not isinstance(definition, dict):
+                    raise ValueError("A saved Module/API Component definition is required.")
+                component_local_id = str(config.get("component_local_id") or definition.get("local_id") or "").strip()
+                if not component_local_id:
+                    component_local_id = f"component_{uuid.uuid4().hex}"
+                definition["local_id"] = component_local_id
+                config["component_local_id"] = component_local_id
+
             payload = self._persistence_repository_payload(kind, config)
+            metadata = {
+                "design_only": True,
+                "contains_model_parameters": False,
+                "source_project_id": (self.state.get("project") or {}).get("local_id"),
+            }
+            item_id = config.get("item_id") or None
+            if kind == "component":
+                metadata["component_local_id"] = component_local_id
+                # A logical component owns one Local Repository record. Saving it
+                # again updates that record instead of creating duplicates.
+                item_id = item_id or f"local_{component_local_id}"
+
             result = self.persistence.save_repository_item(
                 kind=kind,
                 name=name,
                 payload=payload,
-                item_id=config.get("item_id") or None,
-                metadata={
-                    "design_only": True,
-                    "contains_model_parameters": False,
-                    "source_project_id": (self.state.get("project") or {}).get("local_id"),
-                },
+                item_id=item_id,
+                metadata=metadata,
             )
+
+            if kind == "component":
+                # Component editor drafts exist only while the component is
+                # unsaved. Commit + draft removal happen in the same Python
+                # persistence command so the Gallery cannot briefly retain a
+                # saved component as a draft because of bridge timing.
+                source_draft_id = str(config.get("source_draft_id") or f"draft_{component_local_id}").strip()
+                if source_draft_id:
+                    self.persistence.delete_draft(source_draft_id)
+                    result["cleared_draft_id"] = source_draft_id
+                result["component_local_id"] = component_local_id
+
             emit({
                 "status": "done", "runtime_kind": "persistence", "phase": "save_item",
                 "overall": 100, "message": f'{name} saved to Local Repository (design only).',

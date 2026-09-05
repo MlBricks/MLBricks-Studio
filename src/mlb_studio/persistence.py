@@ -201,10 +201,25 @@ class StudioPersistence:
             try:
                 state = json.loads(row["payload"] or "{}")
                 workspace = str(item["workspace"] or state.get("active_workspace") or "model")
-                workspaces = state.get("workspaces") or {}
-                ws = workspaces.get(workspace) or {}
-                root_id = ws.get("root_component_id") or state.get("root_component_id")
-                component = (state.get("components") or {}).get(root_id) or {}
+                components = state.get("components") or {}
+                if workspace == "component":
+                    # Component drafts capture the focused outer Module/API editor.
+                    # The current view may be a nested editor, so walk back to the
+                    # outer transaction boundary before reporting progress counts.
+                    component = components.get(state.get("view_component_id")) or {}
+                    seen = set()
+                    while component.get("parent_edit_return") and component.get("id") not in seen:
+                        seen.add(component.get("id"))
+                        parent_id = (component.get("parent_edit_return") or {}).get("view_id")
+                        parent = components.get(parent_id)
+                        if not parent or parent.get("kind") != "custom_edit":
+                            break
+                        component = parent
+                else:
+                    workspaces = state.get("workspaces") or {}
+                    ws = workspaces.get(workspace) or {}
+                    root_id = ws.get("root_component_id") or state.get("root_component_id")
+                    component = components.get(root_id) or {}
                 item["node_count"] = len(component.get("nodes") or [])
                 item["edge_count"] = len(component.get("edges") or [])
             except Exception:

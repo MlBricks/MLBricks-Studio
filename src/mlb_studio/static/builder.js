@@ -42,6 +42,81 @@ function __MLB_STUDIO_FACTORY__(){
     root.dataset.mounted="1";
 
     let state=cp(payload.state);
+
+    // Stable local identities are separate from transient graph/view IDs.
+    // Project drafts and component drafts must never share an ID: otherwise
+    // editing a Module/API Component can overwrite the project draft and a
+    // component that has already been saved can keep appearing in Drafts.
+    function persistentUid(prefix){
+      try{
+        const cryptoObj=(root.ownerDocument?.defaultView||window)?.crypto;
+        if(cryptoObj&&typeof cryptoObj.randomUUID==="function")return prefix+"_"+cryptoObj.randomUUID();
+      }catch(_){}
+      return prefix+"_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,12);
+    }
+    function ensureComponentLocalId(def){
+      if(!def)return "";
+      if(!String(def.local_id||"").trim())def.local_id=persistentUid("component");
+      return String(def.local_id);
+    }
+    function ensurePersistentIds(){
+      if(!state.project||typeof state.project!=="object")state.project={};
+      if(!String(state.project.local_id||"").trim())state.project.local_id=persistentUid("project");
+      if(!state.custom_components||typeof state.custom_components!=="object")state.custom_components={};
+      Object.values(state.custom_components).forEach(def=>{if(def)ensureComponentLocalId(def);});
+    }
+    function componentDraftId(def){
+      const localId=ensureComponentLocalId(def);
+      return localId?"draft_"+localId:"";
+    }
+    function activeDraftContext(){
+      ensurePersistentIds();
+      let c=current(state);
+      if(c?.kind==="custom_edit"){
+        // Nested Module editors are part of the OUTER component transaction.
+        // They must not create extra Draft rows of their own.
+        let outer=c;
+        const seen=new Set();
+        while(outer?.parent_edit_return?.view_id&&!seen.has(outer.id)){
+          seen.add(outer.id);
+          const parent=state.components?.[outer.parent_edit_return.view_id];
+          if(!parent||parent.kind!=="custom_edit")break;
+          outer=parent;
+        }
+        const def=state.custom_components?.[outer.definition_id];
+        if(def){
+          const localId=ensureComponentLocalId(def);
+          return {
+            kind:"component",id:"draft_"+localId,name:String(def.name||outer.name||"Untitled Component"),
+            workspace:"component",component_local_id:localId,definition_id:String(def.id||outer.definition_id||"")
+          };
+        }
+      }
+      return {
+        kind:"project",id:String(state.project.local_id),name:String(state.project.name||"Untitled Model"),
+        workspace:String(state.active_workspace||"model"),component_local_id:"",definition_id:""
+      };
+    }
+    function componentPersistenceConfig(def,name){
+      const localId=ensureComponentLocalId(def);
+      return {
+        kind:"component",name:String(name||def?.name||"Component"),definition_id:String(def?.id||""),
+        component_local_id:localId,item_id:localId?("local_"+localId):"",source_draft_id:localId?("draft_"+localId):""
+      };
+    }
+    function clearBrowserDraftById(draftId){
+      if(!draftId)return;
+      try{
+        const store=(root.ownerDocument?.defaultView||window).localStorage;
+        store.removeItem("mlb-studio-draft-"+draftId);
+        // The global crash-recovery slot may still contain the same component
+        // editor snapshot. Remove only that matching snapshot; the model draft
+        // will be written again immediately after the save redraw.
+        const last=JSON.parse(store.getItem(browserDraftStorageKey)||"null");
+        if(String(last?.draft_id||"")===String(draftId))store.removeItem(browserDraftStorageKey);
+      }catch(_){}
+    }
+
     // Catalog/API registries are read-mostly shared payloads. Avoid two large
     // JSON stringify/parse clones during startup. Runtime import refreshes only
     // replace the affected entry in-place.
@@ -342,11 +417,15 @@ function __MLB_STUDIO_FACTORY__(){
       return (h>>>0).toString(16)+":"+raw.length;
     }
     function browserDraftPayload(){
+      const draft=activeDraftContext();
       return {
-        version:2,
+        version:3,
         saved_at:Date.now(),
         project_name:String(state.project?.name||"Untitled Model"),
         project_id:String(state.project?.local_id||""),
+        draft_id:draft.id,
+        draft_kind:draft.kind,
+        draft_name:draft.name,
         state:cp(state)
       };
     }
@@ -377,7 +456,7 @@ function __MLB_STUDIO_FACTORY__(){
         if(hash===lastBrowserDraftHash){draftSaveState="saved";draftSaveText="Draft autosaved locally";updateDraftIndicator();return hash;}
         const store=(root.ownerDocument?.defaultView||window).localStorage;
         store.setItem(browserDraftStorageKey,raw);
-        if(payloadDraft.project_id)store.setItem("mlb-studio-draft-"+payloadDraft.project_id,raw);
+        if(payloadDraft.draft_id)store.setItem("mlb-studio-draft-"+payloadDraft.draft_id,raw);
         lastBrowserDraftHash=hash;
         draftSaveState="saved";
         draftSaveText="Draft autosaved locally";
@@ -409,7 +488,11 @@ function __MLB_STUDIO_FACTORY__(){
         if(execution.status==="running"||draftSyncInFlight){schedulePythonDraftSync(hash);return;}
         if(!bridge){return;}
         draftSyncInFlight=true;
-        requestPersistenceCommand("persistence_save_draft",{},true,hash);
+        const draft=activeDraftContext();
+        requestPersistenceCommand("persistence_save_draft",{
+          draft_id:draft.id,draft_name:draft.name,draft_kind:draft.kind,workspace:draft.workspace,
+          component_local_id:draft.component_local_id,definition_id:draft.definition_id
+        },true,hash);
       },3500);
     }
 
@@ -433,6 +516,7 @@ function __MLB_STUDIO_FACTORY__(){
     if(state.auto_connect===undefined) state.auto_connect=true;
 
     function ensureWorkspaces(){
+      ensurePersistentIds();
       if(!Array.isArray(state.prepared_datasets))state.prepared_datasets=[];
       if(!Array.isArray(state.model_outputs))state.model_outputs=[];
       if(!Array.isArray(state.project_files))state.project_files=[];
@@ -868,11 +952,13 @@ function __MLB_STUDIO_FACTORY__(){
         if(!name)return;
         const snapshot=customGallerySnapshot(def,c);snapshot.name=name;
         state.gallery.components.push({
-          id:uid("gallery_component"),name,kind:"component",saved_at:new Date().toISOString(),
+          id:uid("gallery_component"),component_id:ensureComponentLocalId(def||snapshot),name,kind:"component",saved_at:new Date().toISOString(),
           source_definition_id:def?.id||snapshot.id,definition:snapshot
         });
         persistGallery();persistComponentCache();setStatus(name+" saved to Gallery with cached user source.");draw();
-        setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"component",name,definition_id:def?.id||snapshot.id},true),180);return;
+        const persistConfig=componentPersistenceConfig(def||snapshot,name);
+        clearBrowserDraftById(persistConfig.source_draft_id);
+        setTimeout(()=>requestPersistenceCommand("persistence_save_item",persistConfig,true),180);return;
       }
       if(state.active_workspace==="data"){
         const pipeline=current(state);if(!pipeline)return;
@@ -933,6 +1019,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       const root=cp(rootSource);
       const rootId=uid("custom");remap[oldRootId]=rootId;root.id=rootId;
+      root.local_id=String(root.local_id||entry.component_id||"").trim()||persistentUid("component");
       const requestedRootName=String(entry.name||root.name||"Module").trim().replace(/\s+/g," ")||"Module";
       root.name=allowNameConflictWith
         ?requestedRootName
@@ -4940,7 +5027,7 @@ function __MLB_STUDIO_FACTORY__(){
         drafts.forEach(item=>{
           const row=document.createElement("div");row.className="mlb-local-repository-row";
           const info=document.createElement("div");const strong=document.createElement("strong");strong.textContent=item.project_name||"Draft";
-          const currentDraft=String(item.id||"")===String(state.project?.local_id||"");
+          const currentDraft=String(item.id||"")===String(activeDraftContext().id||"");
           const progress=[];
           progress.push(String(item.workspace||"model"));
           if(Number(item.node_count||0)>0)progress.push(Number(item.node_count)+" components");
@@ -6086,7 +6173,7 @@ function __MLB_STUDIO_FACTORY__(){
       const id=uid("custom");
       const first=defaultAPIStep(0);
       state.custom_components[id]={
-        id,name,description:"Python/PyTorch API execution graph",revision:1,
+        id,local_id:persistentUid("component"),name,description:"Python/PyTorch API execution graph",revision:1,
         implementation:"api",api_binding:null,nodes:[cp(first)],edges:[],input_count:3,output_count:3,
         palette_hidden:true,palette_installed:false,gallery_entry_id:null
       };
@@ -6561,6 +6648,7 @@ function __MLB_STUDIO_FACTORY__(){
       // It never captures siblings or the current model canvas.
       state.custom_components[id]={
         id,
+        local_id:persistentUid("component"),
         name,
         description:"Reusable Module",
         revision:1,
@@ -6599,7 +6687,7 @@ function __MLB_STUDIO_FACTORY__(){
 
     function customDefinitionSnapshot(def,c=null){
       return {
-        id:def.id,name:def.name,description:def.description||"Reusable Module",
+        id:def.id,local_id:ensureComponentLocalId(def),name:def.name,description:def.description||"Reusable Module",
         revision:def.revision||1,implementation:def.implementation||"graph",
         api_binding:cp(def.api_binding||null),input_count:3,output_count:3,
         nodes:cp(c?.nodes||def.nodes||[]),edges:cp(c?.edges||def.edges||[])
@@ -6662,11 +6750,13 @@ function __MLB_STUDIO_FACTORY__(){
       if(entry){
         entry.name=uniqueGalleryComponentName(def.name,entry.id);
         entry.saved_at=new Date().toISOString();
+        entry.component_id=ensureComponentLocalId(def);
         entry.definition=customGallerySnapshot(def,c);
         entry.source_definition_id=def.id;
       }else{
         entry={
           id:uid("gallery_component"),
+          component_id:ensureComponentLocalId(def),
           name:uniqueGalleryComponentName(def.name),
           kind:"component",saved_at:new Date().toISOString(),
           source_definition_id:def.id,definition:customGallerySnapshot(def,c)
@@ -6795,6 +6885,7 @@ function __MLB_STUDIO_FACTORY__(){
       const id=uid("custom");
       state.custom_components[id]={
         id,
+        local_id:persistentUid("component"),
         name,
         description:"Nested Module",
         revision:1,
@@ -6891,6 +6982,7 @@ function __MLB_STUDIO_FACTORY__(){
 
     function saveCustom(asNew){
       const c=current(state),def=state.custom_components[c.definition_id];if(!def)return;
+      const sourceComponentDraftId=componentDraftId(def);
       const returnInfo=c.parent_edit_return||null;
 
       // Nested editors are draft scopes. "Done" commits the child definition in
@@ -6929,7 +7021,7 @@ function __MLB_STUDIO_FACTORY__(){
         if(!name){draw();return;}
         const id=uid("custom");
         savedDef={
-          id,name,description:def.description||"",revision:1,implementation:def.implementation||"graph",
+          id,local_id:persistentUid("component"),name,description:def.description||"",revision:1,implementation:def.implementation||"graph",
           api_binding:cp(def.api_binding||null),nodes:cp(c.nodes),edges:cp(c.edges||[]),input_count:3,output_count:3,
           palette_hidden:true,palette_installed:false,gallery_entry_id:null
         };
@@ -6954,8 +7046,19 @@ function __MLB_STUDIO_FACTORY__(){
       if(modelWs){state.active_workspace="model";state.view_component_id=modelWs.view_component_id||modelWs.root_component_id;state.breadcrumbs=cp(modelWs.breadcrumbs||[{id:modelWs.root_component_id,name:modelWs.name||"Model Builder"}]);}
       runtimePanel=null;cloudWorkspace.open=false;bottomExpanded=false;galleryWorkspace={open:true,tab:"components"};outputDirectorySelection=null;selected=null;componentInsertPicker={open:false,afterNodeId:null};
       undoStack.length=0;redoStack.length=0;
+      // The component draft existed only while this editor was unsaved. Once the
+      // outer component is committed, remove that draft and persist the component
+      // under its own stable component ID. The model/project draft remains separate.
+      if(browserDraftTimer){clearTimeout(browserDraftTimer);browserDraftTimer=null;}
+      if(pythonDraftTimer){clearTimeout(pythonDraftTimer);pythonDraftTimer=null;}
+      clearBrowserDraftById(sourceComponentDraftId);
+      lastBrowserDraftHash="";lastPythonDraftHash="";
+      const persistConfig=componentPersistenceConfig(savedDef,savedDef.name);
+      // Save As New has a new ID; the source editor draft still belongs to the
+      // original component and must also be cleared.
+      persistConfig.source_draft_id=sourceComponentDraftId||persistConfig.source_draft_id;
       setStatus(savedMessage);draw();
-      setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"component",name:savedDef.name,definition_id:savedDef.id},true),180);
+      setTimeout(()=>requestPersistenceCommand("persistence_save_item",persistConfig,true),180);
     }
     function deleteNode(id){
       if(!requireEditableLayout("delete components"))return;

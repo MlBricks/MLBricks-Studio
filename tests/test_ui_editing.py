@@ -614,3 +614,15 @@ def test_persistence_navigation_blocks_duplicate_open_and_stale_editor_transacti
     assert "if(persistenceNavigationInFlight){" in text
     assert "customEditorTransactions.length=0;" in text
     assert "if(persistenceNavigationInFlight||componentImportBusy" in text
+
+
+def test_component_drafts_use_stable_component_identity_and_clear_on_save():
+    text = _builder_js()
+    assert 'def.local_id=persistentUid("component")' in text
+    assert 'id:"draft_"+localId' in text
+    assert 'workspace:"component"' in text
+    assert 'item_id:localId?("local_"+localId):""' in text
+    assert 'source_draft_id:localId?("draft_"+localId):""' in text
+    assert 'clearBrowserDraftById(sourceComponentDraftId);' in text
+    assert 'requestPersistenceCommand("persistence_save_item",persistConfig,true)' in text
+    assert 'Nested Module editors are part of the OUTER component transaction.' in text
