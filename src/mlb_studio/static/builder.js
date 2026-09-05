@@ -143,6 +143,8 @@ function __MLB_STUDIO_FACTORY__(){
     let popoutMessageSerial=0;
     const seenPopoutMessageIds=new Map();
     let persistenceNavigationInFlight=false;
+    let persistencePreparingKey="";
+    const preparedPersistence={drafts:{},repository:{}};
     const runtimeCaps=cp(payload.runtime_capabilities||{devices:[{id:"auto",label:"Auto"},{id:"cpu",label:"CPU"}]});
     const localEnvironment=cp(payload.local_environment||{kind:"python",name:"Python / Jupyter Environment",roots:["."],default_root:"."});
     const localDefaultRoot=localEnvironment.workspace_root||localEnvironment.default_root||(localEnvironment.roots||[])[0]||".";
@@ -1762,16 +1764,19 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function requestPersistenceCommand(action,config={},silent=false,syncHash=""){
-      const navigationAction=action==="persistence_load_item"||action==="persistence_load_draft";
+      const navigationAction=action==="persistence_prepare_item"||action==="persistence_prepare_draft"||action==="persistence_load_item"||action==="persistence_load_draft";
       if(navigationAction){
         if(persistenceNavigationInFlight){
-          if(!silent)setStatus("A saved design is already opening. Please wait for it to finish.");
+          if(!silent)setStatus("A local item is already loading. Please wait for it to finish.");
           return;
         }
         persistenceNavigationInFlight=true;
+        if(action==="persistence_prepare_draft")persistencePreparingKey="draft:"+String(config.draft_id||"");
+        else if(action==="persistence_prepare_item")persistencePreparingKey="item:"+String(config.item_id||"");
+        else persistencePreparingKey="";
       }
       if(!ensureBridgeForAction()){
-        if(navigationAction)persistenceNavigationInFlight=false;
+        if(navigationAction){persistenceNavigationInFlight=false;persistencePreparingKey="";}
         if(action==="persistence_save_draft")draftSyncInFlight=false;
         if(!silent)setStatus("Local persistence needs the Python kernel bridge. Browser draft protection is still active.");
         return;
@@ -1787,7 +1792,7 @@ function __MLB_STUDIO_FACTORY__(){
       const stateReady=needsCurrentState?setBridgeState():true;
       if(!stateReady||!setBridgeCommand(command)){
         if(action==="persistence_save_draft")draftSyncInFlight=false;
-        if(navigationAction)persistenceNavigationInFlight=false;
+        if(navigationAction){persistenceNavigationInFlight=false;persistencePreparingKey="";}
         if(isPopout)pendingBroadcastSkipState=false;
         if(!silent)setStatus("Could not send local persistence command to Python.");
         return;
@@ -1795,12 +1800,14 @@ function __MLB_STUDIO_FACTORY__(){
       const button=bridgeControl(bridge.run,"button");
       if(!button){
         if(action==="persistence_save_draft")draftSyncInFlight=false;
-        if(navigationAction)persistenceNavigationInFlight=false;
+        if(navigationAction){persistenceNavigationInFlight=false;persistencePreparingKey="";}
         if(!silent)setStatus("Python local persistence control was not found.");
         return;
       }
       if(!silent){
         const label=action==="persistence_save_item"?"Saving design to Local Repository…":
+          action==="persistence_prepare_item"?"Loading saved design…":
+          action==="persistence_prepare_draft"?"Loading draft…":
           action==="persistence_load_item"?"Opening saved design…":
           action==="persistence_load_draft"?"Recovering draft…":
           action==="persistence_delete_draft"?"Removing draft…":
@@ -1989,9 +1996,18 @@ function __MLB_STUDIO_FACTORY__(){
       }
       if(next.runtime_kind==="persistence"){
         if(next.status==="error")draftSyncInFlight=false;
-        if((next.phase==="load_item"||next.phase==="load_draft")&&(next.status==="done"||next.status==="error")){
+        if((["prepare_item","prepare_draft","load_item","load_draft"].includes(next.phase))&&(next.status==="done"||next.status==="error")){
           persistenceNavigationInFlight=false;
+          persistencePreparingKey="";
           setTimeout(pumpComponentImportQueue,80);
+        }
+        if(next.status==="done"&&next.phase==="prepare_draft"&&next.prepared_draft?.draft_id&&next.prepared_draft?.state){
+          const prepared=cp(next.prepared_draft);
+          preparedPersistence.drafts[String(prepared.draft_id)]=prepared;
+        }
+        if(next.status==="done"&&next.phase==="prepare_item"&&next.prepared_item?.item_id){
+          const prepared=cp(next.prepared_item);
+          preparedPersistence.repository[String(prepared.item_id)]=prepared;
         }
         if(next.persistence_summary)localPersistence=cp(next.persistence_summary);
         if(next.phase==="save_draft"){
@@ -5046,6 +5062,64 @@ function __MLB_STUDIO_FACTORY__(){
       if(!name){setStatus("Local Repository name cannot be empty.");return;}
       requestPersistenceCommand("persistence_save_item",{kind,name});
     }
+    function persistenceVersionMatches(prepared,item){
+      if(!prepared||!item)return false;
+      const a=prepared.updated_at;
+      const b=item.updated_at;
+      if(a===undefined||a===null||b===undefined||b===null)return true;
+      return String(a)===String(b);
+    }
+
+    function preparedDraftFor(item){
+      const prepared=preparedPersistence.drafts[String(item?.id||"")];
+      return persistenceVersionMatches(prepared,item)?prepared:null;
+    }
+
+    function preparedRepositoryItemFor(item){
+      const prepared=preparedPersistence.repository[String(item?.id||"")];
+      return persistenceVersionMatches(prepared,item)?prepared:null;
+    }
+
+    function replaceStateFromPreparedPersistence(incoming,message){
+      if(!incoming||!incoming.components){setStatus("Loaded design is invalid. Load it again.");draw();return false;}
+      state=cp(incoming);
+      delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
+      customEditorTransactions.length=0;undoStack.length=0;redoStack.length=0;
+      selected=null;pendingPort=null;outputDirectorySelection=null;switchingWorkspace=true;
+      galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;
+      setStatus(message||"Loaded design opened.");draw();
+      return true;
+    }
+
+    function recoverPreparedDraft(item){
+      const prepared=preparedDraftFor(item);
+      if(!prepared?.state){setStatus("Load this draft first, then Recover will be available.");draw();return;}
+      replaceStateFromPreparedPersistence(prepared.state,(item.project_name||"Draft")+" recovered from loaded memory.");
+    }
+
+    function openPreparedRepositoryItem(item){
+      const prepared=preparedRepositoryItemFor(item);
+      if(!prepared){setStatus("Load this saved design first, then Open will be available.");draw();return;}
+      if(prepared.component_restore){
+        const restore=prepared.component_restore;
+        state.custom_components=state.custom_components||{};
+        state.component_cache=state.component_cache||{};
+        Object.entries(restore.custom_components||{}).forEach(([id,def])=>{state.custom_components[id]=cp(def);});
+        Object.entries(restore.component_cache||{}).forEach(([id,cached])=>{state.component_cache[id]=cp(cached);});
+        ensurePersistentIds();
+        customEditorTransactions.length=0;undoStack.length=0;redoStack.length=0;
+        selected=null;pendingPort=null;outputDirectorySelection=null;
+        galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;
+        const rootId=String(restore.root_definition_id||"");
+        const def=state.custom_components?.[rootId];
+        if(!def){setStatus("Loaded component is invalid. Load it again.");draw();return;}
+        setStatus((item.name||def.name||"Component")+" loaded. Opening component editor…");
+        editCustomDefinition(def);
+        return;
+      }
+      replaceStateFromPreparedPersistence(prepared.state,(item.name||"Design")+" opened from loaded memory.");
+    }
+
     function renderLocalPersistencePanel(container){
       const card=document.createElement("section");card.className="mlb-cloud-card mlb-local-persistence-card";
       const title=document.createElement("div");title.className="mlb-cloud-section-title";
@@ -5083,12 +5157,23 @@ function __MLB_STUDIO_FACTORY__(){
           if(Number(item.edge_count||0)>0)progress.push(Number(item.edge_count)+" connections");
           progress.push("autosaved "+new Date(Number(item.updated_at||0)*1000).toLocaleString());
           if(currentDraft)progress.unshift("CURRENT");
+          const prepared=preparedDraftFor(item);
+          if(prepared)progress.unshift("LOADED");
           const meta=document.createElement("span");meta.textContent=progress.join(" · ");info.append(strong,meta);
-          const rowActions=document.createElement("div");const open=btn(currentDraft?"Current":"Recover","mlb-cloud-check");open.disabled=currentDraft;open.addEventListener("click",()=>{
-            galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;
-            if(!recoverBrowserDraftById(item.id))requestPersistenceCommand("persistence_load_draft",{draft_id:item.id});
-          });
-          const del=btn("Remove","mlb-cloud-check danger");del.disabled=currentDraft;del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_draft",{draft_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
+          const rowActions=document.createElement("div");
+          if(currentDraft){
+            const currentBtn=btn("Current","mlb-cloud-check");currentBtn.disabled=true;rowActions.append(currentBtn);
+          }else{
+            const loading=persistencePreparingKey===("draft:"+String(item.id||""));
+            const load=btn(prepared?"Loaded ✓":loading?"Loading…":"Load","mlb-cloud-check");
+            load.disabled=!!prepared||loading||persistenceNavigationInFlight;
+            load.addEventListener("click",()=>requestPersistenceCommand("persistence_prepare_draft",{draft_id:item.id,updated_at:item.updated_at}));
+            const recover=btn("Recover","mlb-cloud-check");recover.disabled=!prepared;
+            recover.title=prepared?"Recover this already-loaded draft instantly":"Load this draft first";
+            recover.addEventListener("click",()=>recoverPreparedDraft(item));
+            rowActions.append(load,recover);
+          }
+          const del=btn("Remove","mlb-cloud-check danger");del.disabled=currentDraft;del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_draft",{draft_id:item.id}));rowActions.append(del);row.append(info,rowActions);list.appendChild(row);
         });
         card.appendChild(list);
       }
@@ -5102,9 +5187,17 @@ function __MLB_STUDIO_FACTORY__(){
         saved.forEach(item=>{
           const row=document.createElement("div");row.className="mlb-local-repository-row";
           const info=document.createElement("div");const strong=document.createElement("strong");strong.textContent=item.name||"Design";
-          const meta=document.createElement("span");meta.textContent=localRepositoryKindLabel(item.kind)+" · "+new Date(Number(item.updated_at||0)*1000).toLocaleString();info.append(strong,meta);
-          const rowActions=document.createElement("div");const open=btn("Open","mlb-cloud-check");open.addEventListener("click",()=>{galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;requestPersistenceCommand("persistence_load_item",{item_id:item.id});});
-          const del=btn("Remove","mlb-cloud-check danger");del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_item",{item_id:item.id}));rowActions.append(open,del);row.append(info,rowActions);list.appendChild(row);
+          const prepared=preparedRepositoryItemFor(item);
+          const metaParts=[localRepositoryKindLabel(item.kind),new Date(Number(item.updated_at||0)*1000).toLocaleString()];
+          if(prepared)metaParts.unshift("LOADED");
+          const meta=document.createElement("span");meta.textContent=metaParts.join(" · ");info.append(strong,meta);
+          const rowActions=document.createElement("div");
+          const loading=persistencePreparingKey===("item:"+String(item.id||""));
+          const load=btn(prepared?"Loaded ✓":loading?"Loading…":"Load","mlb-cloud-check");
+          load.disabled=!!prepared||loading||persistenceNavigationInFlight;
+          load.addEventListener("click",()=>requestPersistenceCommand("persistence_prepare_item",{item_id:item.id,updated_at:item.updated_at}));
+          const open=btn("Open","mlb-cloud-check");open.disabled=!prepared;open.title=prepared?"Open this already-loaded design instantly":"Load this design first";open.addEventListener("click",()=>openPreparedRepositoryItem(item));
+          const del=btn("Remove","mlb-cloud-check danger");del.addEventListener("click",()=>requestPersistenceCommand("persistence_delete_item",{item_id:item.id}));rowActions.append(load,open,del);row.append(info,rowActions);list.appendChild(row);
         });
         card.appendChild(list);
       }

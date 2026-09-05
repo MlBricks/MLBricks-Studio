@@ -2201,6 +2201,30 @@ class Builder:
             })
             return result
 
+        if action == "persistence_prepare_draft":
+            draft_id = str(config.get("draft_id") or "").strip()
+            incoming = self.persistence.load_draft(draft_id)
+            if not isinstance(incoming, dict) or not incoming.get("components"):
+                raise FileNotFoundError("Local draft was not found or is invalid.")
+            # Load is intentionally non-destructive. The browser keeps this
+            # prepared snapshot in memory and only applies it when the user
+            # explicitly presses Recover. This separates the slow DB/notebook
+            # transfer from the navigation action and makes Recover instant.
+            prepared = copy.deepcopy(incoming)
+            prepared.setdefault("project", {}).setdefault(
+                "local_id", draft_id or f"project_{uuid.uuid4().hex}"
+            )
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "prepare_draft",
+                "overall": 100, "message": f'Draft {(prepared.get("project") or {}).get("name") or "design"} loaded and ready to recover.',
+                "prepared_draft": {
+                    "draft_id": draft_id,
+                    "updated_at": config.get("updated_at"),
+                    "state": prepared,
+                },
+            })
+            return prepared
+
         if action == "persistence_load_draft":
             incoming = self.persistence.load_draft(config.get("draft_id"))
             if not isinstance(incoming, dict) or not incoming.get("components"):
@@ -2291,6 +2315,34 @@ class Builder:
                 "persistence_summary": self.persistence.summary(),
             })
             return result
+
+        if action == "persistence_prepare_item":
+            item_id = str(config.get("item_id") or "").strip()
+            item = self.persistence.load_repository_item(item_id)
+            if not item:
+                raise FileNotFoundError("Local Repository item was not found.")
+            payload = item.get("payload") or {}
+            prepared = {
+                "item_id": item_id,
+                "updated_at": item.get("updated_at"),
+                "kind": item.get("kind"),
+                "name": item.get("name"),
+            }
+            if item.get("kind") == "component":
+                prepared["component_restore"] = self._prepare_persistence_component_restore(payload)
+            else:
+                incoming = payload.get("state")
+                if not isinstance(incoming, dict) or not incoming.get("components"):
+                    raise RuntimeError("Saved Local Repository item does not contain a valid Builder design.")
+                loaded_state = copy.deepcopy(incoming)
+                loaded_state.setdefault("project", {}).setdefault("local_id", f"project_{uuid.uuid4().hex}")
+                prepared["state"] = loaded_state
+            emit({
+                "status": "done", "runtime_kind": "persistence", "phase": "prepare_item",
+                "overall": 100, "message": f'{item.get("name") or "Design"} loaded and ready to open.',
+                "prepared_item": prepared,
+            })
+            return prepared
 
         if action == "persistence_load_item":
             item = self.persistence.load_repository_item(config.get("item_id"))
@@ -2646,7 +2698,7 @@ class Builder:
 
     def _queue_bridge_widget_request(self, state_raw, command_raw):
         action, command = self._bridge_action_from_raw(command_raw)
-        navigation = {"persistence_load_draft", "persistence_load_item"}
+        navigation = {"persistence_prepare_draft", "persistence_prepare_item", "persistence_load_draft", "persistence_load_item"}
         background = {"persistence_save_draft", "ensure_component_import"}
         request = {
             "state_raw": state_raw or "{}",
@@ -2771,6 +2823,7 @@ class Builder:
         # current Builder graph. Skipping the often-large state textarea removes a
         # full JSON parse/copy from every Gallery Recover/Open operation.
         state_independent_actions = {
+            "persistence_prepare_draft", "persistence_prepare_item",
             "persistence_load_draft", "persistence_load_item",
             "persistence_list", "persistence_delete_draft", "persistence_delete_item",
             "persistence_save_credentials", "persistence_delete_credentials",
