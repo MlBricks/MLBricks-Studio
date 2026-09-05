@@ -119,3 +119,58 @@ def test_runner_maps_hf_row_progress_into_pipeline_overall(monkeypatch):
     # First source node is 1 of 5 pipeline steps, so half of it is 10% overall.
     assert row_event["overall"] == 10
     assert row_event["nodes"][source["id"]]["percent"] == 50
+
+class _FakeHttpResponse:
+    def __init__(self, payload):
+        import json
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def test_parquet_api_fast_path_selects_config_split_and_materializes_prefix(monkeypatch):
+    payload = {
+        "parquet_files": [
+            {"config": "20231101.en", "split": "train", "url": "https://hf.invalid/wiki-0.parquet"},
+            {"config": "20231101.en", "split": "train", "url": "https://hf.invalid/wiki-1.parquet"},
+            {"config": "20231101.fr", "split": "train", "url": "https://hf.invalid/fr-0.parquet"},
+        ]
+    }
+    monkeypatch.setattr(data_api, "urlopen", lambda request, timeout=20: _FakeHttpResponse(payload))
+
+    class ParquetFake(FakeDatasetsModule):
+        def load_dataset(self, dataset_id, config=None, **kwargs):
+            self.calls.append((dataset_id, config, kwargs))
+            assert dataset_id == "parquet"
+            assert kwargs["data_files"]["train"] == [
+                "https://hf.invalid/wiki-0.parquet",
+                "https://hf.invalid/wiki-1.parquet",
+            ]
+            assert kwargs["streaming"] is True
+            return FakeIterable([
+                {"text": "a"},
+                {"text": "b"},
+                {"text": "c"},
+            ])
+
+    fake = ParquetFake()
+    events = []
+    result = data_api._load_hf_parquet_api_prefix(
+        fake,
+        "wikimedia/wikipedia",
+        config="20231101.en",
+        split="train",
+        max_rows=2,
+        progress_callback=events.append,
+    )
+    assert [row["text"] for row in result.rows] == ["a", "b"]
+    assert fake.calls[0][0] == "parquet"
+    assert any(event.get("fast_path") == "parquet_api" for event in events)
+    assert any(event.get("rows_loaded") == 2 for event in events)

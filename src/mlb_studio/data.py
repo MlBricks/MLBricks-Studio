@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import unicodedata
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
+from urllib.request import Request, urlopen
+import json
 from typing import Any
 
 
@@ -62,6 +64,116 @@ def _emit_load_progress(callback, percent: float, message: str, **extra):
     callback(payload)
 
 
+def _load_hf_parquet_api_prefix(
+    ds_module,
+    dataset_id: str,
+    *,
+    config: str | None,
+    split: str,
+    max_rows: int | None,
+    token: str | None = None,
+    progress_callback=None,
+):
+    """Load a small Hub prefix through the Dataset Viewer Parquet API.
+
+    Gallery quickstarts use this fast path so Studio does not have to resolve
+    an entire multi-GB repository before reading the first few thousand rows.
+    The Dataset Viewer API returns resolved Parquet URLs grouped by
+    configuration and split. ``datasets`` then streams those URLs and stops
+    once ``max_rows`` has been materialized.
+
+    ``None`` means the fast path is not applicable. Network/API errors are
+    allowed to bubble to the caller, which falls back to normal load_dataset.
+    """
+    limit = int(max_rows or 0)
+    if limit <= 0:
+        return None
+
+    dataset_id = str(dataset_id or "").strip()
+    if not dataset_id:
+        return None
+
+    _emit_load_progress(
+        progress_callback,
+        1,
+        f"Resolving fast stream for {dataset_id}...",
+        dataset_id=dataset_id,
+        fast_path="parquet_api",
+    )
+    endpoint = (
+        "https://datasets-server.huggingface.co/parquet?dataset="
+        + quote(dataset_id, safe="")
+    )
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "MLBricks-Studio/1.0",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    request = Request(endpoint, headers=headers)
+    with urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    parquet_files = list(payload.get("parquet_files") or [])
+    if not parquet_files:
+        return None
+
+    requested_config = str(config or "").strip()
+    requested_split = str(split or "train").strip()
+    candidates = [
+        item
+        for item in parquet_files
+        if str(item.get("split") or "") == requested_split and item.get("url")
+    ]
+
+    if requested_config:
+        candidates = [
+            item
+            for item in candidates
+            if str(item.get("config") or "") == requested_config
+        ]
+    elif candidates:
+        configs = {str(item.get("config") or "") for item in candidates}
+        if "default" in configs:
+            candidates = [
+                item
+                for item in candidates
+                if str(item.get("config") or "") == "default"
+            ]
+        elif len(configs) == 1:
+            only = next(iter(configs))
+            candidates = [
+                item
+                for item in candidates
+                if str(item.get("config") or "") == only
+            ]
+        else:
+            return None
+
+    if not candidates:
+        return None
+
+    urls = [str(item["url"]) for item in candidates]
+    _emit_load_progress(
+        progress_callback,
+        3,
+        f"Fast stream ready ({len(urls)} parquet shard{'s' if len(urls) != 1 else ''}).",
+        dataset_id=dataset_id,
+        fast_path="parquet_api",
+        shard_count=len(urls),
+    )
+    stream = ds_module.load_dataset(
+        "parquet",
+        data_files={"train": urls},
+        split="train",
+        streaming=True,
+    )
+    return _materialize_streaming_dataset(
+        ds_module, stream, limit, progress_callback
+    )
+
+
 def _materialize_streaming_dataset(ds_module, dataset, max_rows: int, progress_callback=None):
     """Materialize only the requested prefix of an IterableDataset.
 
@@ -108,6 +220,7 @@ def load_huggingface_dataset(
     fallback_config: str | None = None,
     fallback_split: str | None = None,
     fallback_text_column: str | None = None,
+    prefer_parquet_api: bool = False,
     progress_callback=None,
 ):
     """Load a dataset from the Hugging Face Hub.
@@ -159,6 +272,28 @@ def load_huggingface_dataset(
         raise exc
 
     def load_target(target):
+        if prefer_parquet_api and max_rows and int(max_rows) > 0:
+            try:
+                fast = _load_hf_parquet_api_prefix(
+                    ds,
+                    target["dataset_id"],
+                    config=target["config"],
+                    split=target["split"],
+                    max_rows=int(max_rows),
+                    token=token or None,
+                    progress_callback=progress_callback,
+                )
+                if fast is not None:
+                    return fast
+            except Exception as fast_exc:
+                _emit_load_progress(
+                    progress_callback,
+                    2,
+                    f"Fast stream unavailable; retrying normal Hugging Face loader ({type(fast_exc).__name__}).",
+                    dataset_id=target["dataset_id"],
+                    fast_path_fallback=True,
+                )
+
         _emit_load_progress(progress_callback, 1, f"Connecting to {target['dataset_id']}…", dataset_id=target["dataset_id"])
         data = ds.load_dataset(
             target["dataset_id"],

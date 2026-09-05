@@ -326,6 +326,7 @@ def execute_data_pipeline(
                     fallback_config=(p.get("fallback_config") or None) if fallback_allowed else None,
                     fallback_split=(p.get("fallback_split") or None) if fallback_allowed else None,
                     fallback_text_column=(p.get("fallback_text_column") or None) if fallback_allowed else None,
+                    prefer_parquet_api=_bool(p.get("prefer_parquet_api", False)),
                     progress_callback=node_progress,
                 )
 

@@ -628,7 +628,7 @@ def test_component_drafts_use_stable_component_identity_and_clear_on_save():
     assert 'Nested Module editors are part of the OUTER component transaction.' in text
 
 
-def test_data_gallery_presets_have_upstream_fallbacks_streaming_and_visible_progress():
+def test_data_gallery_presets_use_verified_upstreams_fast_streaming_and_visible_progress():
     js = _builder_js()
     for upstream in (
         'roneneldan/TinyStories',
@@ -639,11 +639,12 @@ def test_data_gallery_presets_have_upstream_fallbacks_streaming_and_visible_prog
         'HuggingFaceH4/ultrachat_200k',
     ):
         assert upstream in js
-    assert 'fallback_config:"20231101.en"' in js
-    assert 'fallback_config:"sample-10BT"' in js
-    assert 'fallback_split:"train_sft"' in js
+    assert 'config:"20231101.en"' in js
+    assert 'config:"sample-10BT"' in js
+    assert 'split:"train_sft"' in js
     assert 'source.params.streaming="true";' in js
-    assert 'source.params.fallback_dataset_id=preset.fallback_dataset_id' in js
+    assert 'source.params.prefer_parquet_api="true";' in js
+    assert 'source.params.mirror_dataset_id=preset.mirror_dataset_id' in js
     assert 'Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%"' in js
     assert 'toolbar.appendChild(live);' in js
     assert 'nodeState.percent' in js

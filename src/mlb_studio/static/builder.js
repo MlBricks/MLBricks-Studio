@@ -691,34 +691,28 @@ function __MLB_STUDIO_FACTORY__(){
     }
     const mlbricksDataPresets=[
       {
-        id:"tinystories",name:"TinyStories",dataset_id:"MlBricks/tinystories",config:"",split:"train",text_column:"text",
-        fallback_dataset_id:"roneneldan/TinyStories",fallback_config:"",fallback_split:"train",fallback_text_column:"text",
-        license:"CDLA-Sharing-1.0",focus:"Stories · Small-model pretraining",edition:"MLBricks mirror · upstream fallback"
+        id:"tinystories",name:"TinyStories",dataset_id:"roneneldan/TinyStories",config:"",split:"train",text_column:"text",
+        mirror_dataset_id:"MlBricks/tinystories",license:"CDLA-Sharing-1.0",focus:"Stories · Small-model pretraining",edition:"Official upstream quickstart"
       },
       {
-        id:"wikipedia_en_1b",name:"Wikipedia EN 1B",dataset_id:"MlBricks/wikipedia-en-1b",config:"",split:"train",text_column:"text",
-        fallback_dataset_id:"wikimedia/wikipedia",fallback_config:"20231101.en",fallback_split:"train",fallback_text_column:"text",
-        license:"CC BY-SA 3.0 + GFDL",focus:"General knowledge · Encyclopedic text",edition:"MLBricks curated · upstream fallback"
+        id:"wikipedia_en_1b",name:"Wikipedia EN 1B",dataset_id:"wikimedia/wikipedia",config:"20231101.en",split:"train",text_column:"text",
+        mirror_dataset_id:"MlBricks/wikipedia-en-1b",license:"CC BY-SA 3.0 + GFDL",focus:"General knowledge · Encyclopedic text",edition:"Official Wikimedia upstream quickstart"
       },
       {
-        id:"cosmopedia",name:"Cosmopedia Education",dataset_id:"MlBricks/cosmopedia",config:"openstax",split:"train",text_column:"text",
-        fallback_dataset_id:"HuggingFaceTB/cosmopedia",fallback_config:"openstax",fallback_split:"train",fallback_text_column:"text",
-        license:"Apache-2.0",focus:"Science & education · Synthetic textbooks",edition:"OpenStax · upstream fallback"
+        id:"cosmopedia",name:"Cosmopedia Education",dataset_id:"HuggingFaceTB/cosmopedia",config:"openstax",split:"train",text_column:"text",
+        mirror_dataset_id:"MlBricks/cosmopedia",license:"Apache-2.0",focus:"Science & education · Synthetic textbooks",edition:"Official OpenStax subset quickstart"
       },
       {
-        id:"fineweb_edu_1b",name:"FineWeb-Edu 1B",dataset_id:"MlBricks/fineweb-edu-1b",config:"",split:"train",text_column:"text",
-        fallback_dataset_id:"HuggingFaceFW/fineweb-edu",fallback_config:"sample-10BT",fallback_split:"train",fallback_text_column:"text",
-        license:"ODC-By 1.0",focus:"Educational web · General pretraining",edition:"MLBricks curated · upstream fallback"
+        id:"fineweb_edu_1b",name:"FineWeb-Edu 1B",dataset_id:"HuggingFaceFW/fineweb-edu",config:"sample-10BT",split:"train",text_column:"text",
+        mirror_dataset_id:"MlBricks/fineweb-edu-1b",license:"ODC-By 1.0",focus:"Educational web · General pretraining",edition:"Official sample-10BT quickstart"
       },
       {
-        id:"openwebmath_1b",name:"OpenWebMath 1B",dataset_id:"MlBricks/openwebmath-1b",config:"",split:"train",text_column:"text",
-        fallback_dataset_id:"open-web-math/open-web-math",fallback_config:"",fallback_split:"train",fallback_text_column:"text",
-        license:"ODC-By 1.0",focus:"Mathematics · Reasoning pretraining",edition:"MLBricks curated · upstream fallback"
+        id:"openwebmath_1b",name:"OpenWebMath 1B",dataset_id:"open-web-math/open-web-math",config:"",split:"train",text_column:"text",
+        mirror_dataset_id:"MlBricks/openwebmath-1b",license:"ODC-By 1.0",focus:"Mathematics · Reasoning pretraining",edition:"Official upstream quickstart"
       },
       {
-        id:"ultrachat_200k",name:"UltraChat 200K",dataset_id:"MlBricks/ultrachat-200k",config:"",split:"train",text_column:"text",
-        fallback_dataset_id:"HuggingFaceH4/ultrachat_200k",fallback_config:"",fallback_split:"train_sft",fallback_text_column:"prompt",
-        license:"MIT",focus:"Chat · Instruction/SFT",edition:"MLBricks normalized · upstream fallback"
+        id:"ultrachat_200k",name:"UltraChat 200K",dataset_id:"HuggingFaceH4/ultrachat_200k",config:"",split:"train_sft",text_column:"prompt",
+        mirror_dataset_id:"MlBricks/ultrachat-200k",license:"MIT",focus:"Chat · Instruction/SFT",edition:"Official upstream quickstart"
       }
     ];
 
@@ -740,13 +734,12 @@ function __MLB_STUDIO_FACTORY__(){
       // materialize it into a normal Dataset for splitting/tokenization. This
       // avoids downloading entire multi-GB Hub repositories for 10k rows.
       source.params.streaming="true";
-      source.params.fallback_for_dataset_id=preset.dataset_id||"";
-      source.params.fallback_for_config=preset.config||"";
-      source.params.fallback_for_split=preset.split||"train";
-      source.params.fallback_dataset_id=preset.fallback_dataset_id||"";
-      source.params.fallback_config=preset.fallback_config||"";
-      source.params.fallback_split=preset.fallback_split||preset.split||"train";
-      source.params.fallback_text_column=preset.fallback_text_column||preset.text_column||"text";
+      // Gallery quickstarts fetch the verified public upstream directly.
+      // Keep the MLBricks mirror as metadata until that mirror contains data.
+      // For the 10k quickstart, prefer the Dataset Viewer Parquet API so the
+      // kernel can stream rows without resolving the full repository first.
+      source.params.prefer_parquet_api="true";
+      source.params.mirror_dataset_id=preset.mirror_dataset_id||"";
       // Gallery presets are intentionally safe quickstarts. Users can set 0
       // explicitly when they want to process the entire maintained edition.
       source.params.max_rows=10000;
