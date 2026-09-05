@@ -626,3 +626,24 @@ def test_component_drafts_use_stable_component_identity_and_clear_on_save():
     assert 'clearBrowserDraftById(sourceComponentDraftId);' in text
     assert 'requestPersistenceCommand("persistence_save_item",persistConfig,true)' in text
     assert 'Nested Module editors are part of the OUTER component transaction.' in text
+
+
+def test_data_gallery_presets_have_upstream_fallbacks_streaming_and_visible_progress():
+    js = _builder_js()
+    for upstream in (
+        'roneneldan/TinyStories',
+        'wikimedia/wikipedia',
+        'HuggingFaceTB/cosmopedia',
+        'HuggingFaceFW/fineweb-edu',
+        'open-web-math/open-web-math',
+        'HuggingFaceH4/ultrachat_200k',
+    ):
+        assert upstream in js
+    assert 'fallback_config:"20231101.en"' in js
+    assert 'fallback_config:"sample-10BT"' in js
+    assert 'fallback_split:"train_sft"' in js
+    assert 'source.params.streaming="true";' in js
+    assert 'source.params.fallback_dataset_id=preset.fallback_dataset_id' in js
+    assert 'Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%"' in js
+    assert 'toolbar.appendChild(live);' in js
+    assert 'nodeState.percent' in js

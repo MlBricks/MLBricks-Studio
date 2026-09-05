@@ -692,27 +692,33 @@ function __MLB_STUDIO_FACTORY__(){
     const mlbricksDataPresets=[
       {
         id:"tinystories",name:"TinyStories",dataset_id:"MlBricks/tinystories",config:"",split:"train",text_column:"text",
-        license:"CDLA-Sharing-1.0",focus:"Stories · Small-model pretraining",edition:"Full MLBricks mirror"
+        fallback_dataset_id:"roneneldan/TinyStories",fallback_config:"",fallback_split:"train",fallback_text_column:"text",
+        license:"CDLA-Sharing-1.0",focus:"Stories · Small-model pretraining",edition:"MLBricks mirror · upstream fallback"
       },
       {
         id:"wikipedia_en_1b",name:"Wikipedia EN 1B",dataset_id:"MlBricks/wikipedia-en-1b",config:"",split:"train",text_column:"text",
-        license:"CC BY-SA 3.0 + GFDL",focus:"General knowledge · Encyclopedic text",edition:"MLBricks curated · ~1B GPT-2 tokens"
+        fallback_dataset_id:"wikimedia/wikipedia",fallback_config:"20231101.en",fallback_split:"train",fallback_text_column:"text",
+        license:"CC BY-SA 3.0 + GFDL",focus:"General knowledge · Encyclopedic text",edition:"MLBricks curated · upstream fallback"
       },
       {
         id:"cosmopedia",name:"Cosmopedia Education",dataset_id:"MlBricks/cosmopedia",config:"openstax",split:"train",text_column:"text",
-        license:"Apache-2.0",focus:"Science & education · Synthetic textbooks",edition:"Full MLBricks mirror · OpenStax config"
+        fallback_dataset_id:"HuggingFaceTB/cosmopedia",fallback_config:"openstax",fallback_split:"train",fallback_text_column:"text",
+        license:"Apache-2.0",focus:"Science & education · Synthetic textbooks",edition:"OpenStax · upstream fallback"
       },
       {
         id:"fineweb_edu_1b",name:"FineWeb-Edu 1B",dataset_id:"MlBricks/fineweb-edu-1b",config:"",split:"train",text_column:"text",
-        license:"ODC-By 1.0",focus:"Educational web · General pretraining",edition:"MLBricks curated · ~1B GPT-2 tokens"
+        fallback_dataset_id:"HuggingFaceFW/fineweb-edu",fallback_config:"sample-10BT",fallback_split:"train",fallback_text_column:"text",
+        license:"ODC-By 1.0",focus:"Educational web · General pretraining",edition:"MLBricks curated · upstream fallback"
       },
       {
         id:"openwebmath_1b",name:"OpenWebMath 1B",dataset_id:"MlBricks/openwebmath-1b",config:"",split:"train",text_column:"text",
-        license:"ODC-By 1.0",focus:"Mathematics · Reasoning pretraining",edition:"MLBricks curated · ~1B GPT-2 tokens"
+        fallback_dataset_id:"open-web-math/open-web-math",fallback_config:"",fallback_split:"train",fallback_text_column:"text",
+        license:"ODC-By 1.0",focus:"Mathematics · Reasoning pretraining",edition:"MLBricks curated · upstream fallback"
       },
       {
         id:"ultrachat_200k",name:"UltraChat 200K",dataset_id:"MlBricks/ultrachat-200k",config:"",split:"train",text_column:"text",
-        license:"MIT",focus:"Chat · Instruction/SFT",edition:"MLBricks normalized mirror"
+        fallback_dataset_id:"HuggingFaceH4/ultrachat_200k",fallback_config:"",fallback_split:"train_sft",fallback_text_column:"prompt",
+        license:"MIT",focus:"Chat · Instruction/SFT",edition:"MLBricks normalized · upstream fallback"
       }
     ];
 
@@ -730,7 +736,17 @@ function __MLB_STUDIO_FACTORY__(){
       source.params.config=preset.config||"";
       source.params.split=preset.split||"train";
       source.params.text_column=preset.text_column||"text";
-      source.params.streaming="false";
+      // Gallery presets stream only the requested quickstart prefix, then
+      // materialize it into a normal Dataset for splitting/tokenization. This
+      // avoids downloading entire multi-GB Hub repositories for 10k rows.
+      source.params.streaming="true";
+      source.params.fallback_for_dataset_id=preset.dataset_id||"";
+      source.params.fallback_for_config=preset.config||"";
+      source.params.fallback_for_split=preset.split||"train";
+      source.params.fallback_dataset_id=preset.fallback_dataset_id||"";
+      source.params.fallback_config=preset.fallback_config||"";
+      source.params.fallback_split=preset.fallback_split||preset.split||"train";
+      source.params.fallback_text_column=preset.fallback_text_column||preset.text_column||"text";
       // Gallery presets are intentionally safe quickstarts. Users can set 0
       // explicitly when they want to process the entire maintained edition.
       source.params.max_rows=10000;
@@ -2192,13 +2208,21 @@ function __MLB_STUDIO_FACTORY__(){
 
         card.classList.add("run-"+nodeState.status);
         const badge=document.createElement("div");badge.className="mlb-run-badge";
-        badge.textContent=runLabel(nodeState.status);
+        const nodePct=Number(nodeState.percent);
+        badge.textContent=nodeState.status==="running"&&Number.isFinite(nodePct)
+          ?Math.max(0,Math.min(100,Math.round(nodePct)))+"%"
+          :runLabel(nodeState.status);
         badge.title=nodeState.message||"";
         card.appendChild(badge);
 
         if(nodeState.status==="running"){
-          const track=document.createElement("div");track.className="mlb-run-track";
-          track.innerHTML="<i></i>";card.appendChild(track);
+          const track=document.createElement("div");
+          const determinate=Number.isFinite(nodePct);
+          track.className="mlb-run-track"+(determinate?" determinate":"");
+          track.innerHTML=determinate
+            ?"<i style='width:"+Math.max(0,Math.min(100,nodePct))+"%'></i>"
+            :"<i></i>";
+          card.appendChild(track);
         }
       });
 
@@ -2214,7 +2238,11 @@ function __MLB_STUDIO_FACTORY__(){
         if(selectedState){
           selectedLive.style.display="block";
           selectedLive.className="mlb-ins-run-live "+selectedState.status;
-          selectedLive.innerHTML="<strong>"+runLabel(selectedState.status)+"</strong><span>"+(selectedState.message||"")+"</span>";
+          const selectedPct=Number(selectedState.percent);
+          const selectedLabel=selectedState.status==="running"&&Number.isFinite(selectedPct)
+            ?runLabel(selectedState.status)+" · "+Math.round(selectedPct)+"%"
+            :runLabel(selectedState.status);
+          selectedLive.innerHTML="<strong>"+selectedLabel+"</strong><span>"+(selectedState.message||"")+"</span>";
         }else{
           selectedLive.style.display="none";
         }
@@ -2238,7 +2266,8 @@ function __MLB_STUDIO_FACTORY__(){
           setActionButtonContent(run,runtimeBusy?"activity":"build",label);
         }else{
           const dataBusy=execution.status==="running"&&execution.runtime_kind==="data";
-          setActionButtonContent(run,dataBusy?"activity":"fetch",dataBusy?"Fetching":"Fetch Data");
+          const dataPct=Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))));
+          setActionButtonContent(run,dataBusy?"activity":"fetch",dataBusy?("Fetching "+dataPct+"%"):"Fetch Data");
           run.disabled=dataBusy;
         }
       }
@@ -8380,7 +8409,7 @@ function __MLB_STUDIO_FACTORY__(){
                 modelRuntimeBusy?"activity":"build"
               )
             :actionBtn(
-                dataFetchBusy?"Fetching":"Fetch Data",
+                dataFetchBusy?("Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%"):"Fetch Data",
                 "mlb-run mlb-build mlb-top-build-tab"+(dataFetchBusy?" runtime-busy data":""),
                 dataFetchBusy?"activity":"fetch"
               );
@@ -8718,12 +8747,20 @@ function __MLB_STUDIO_FACTORY__(){
         // Module/API Component editors may be opened while Data is the active parent
         // workspace, but they are reusable component editors and should stay clean.
         if(state.active_workspace==="data" && current(state)?.kind!=="custom_edit"){
-          // Data Processing only needs the notebook/kernel connectivity indicator here.
-          // Progress percentage and prepared-validation summary are shown in their
-          // relevant execution/output views instead of occupying the canvas toolbar.
           const kernel=document.createElement("div");kernel.className="mlb-kernel-badge";
           toolbar.appendChild(kernel);
           requestAnimationFrame(updateKernelBadge);
+
+          // Keep data progress visible beside kernel health. The top Fetch button
+          // also carries the overall percentage, while this pill shows the active
+          // step / row message (for example 3,400 / 10,000 streamed rows).
+          const live=document.createElement("div");
+          live.className="mlb-run-live "+(execution.runtime_kind==="data"?(execution.status||"idle"):"idle");
+          const livePct=execution.runtime_kind==="data"
+            ?Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))
+            :0;
+          live.innerHTML="<strong>"+livePct+"%</strong><span>"+(execution.runtime_kind==="data"?(execution.message||"Ready"):"Ready")+"</span>";
+          toolbar.appendChild(live);
         }
         const tsp=document.createElement("div");tsp.className="mlb-toolspacer";toolbar.appendChild(tsp);
         if(isGraphCustomEditor()){

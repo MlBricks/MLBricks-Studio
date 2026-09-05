@@ -54,6 +54,47 @@ def _loader_for(name: str, format: str = "auto") -> str:
     )
 
 
+def _emit_load_progress(callback, percent: float, message: str, **extra):
+    if not callback:
+        return
+    payload = {"percent": max(0.0, min(100.0, float(percent))), "message": str(message)}
+    payload.update(extra)
+    callback(payload)
+
+
+def _materialize_streaming_dataset(ds_module, dataset, max_rows: int, progress_callback=None):
+    """Materialize only the requested prefix of an IterableDataset.
+
+    Gallery quickstarts use streaming so large Hub repositories do not download
+    their complete parquet corpus just to select the first few thousand rows.
+    The returned object is a normal Dataset so downstream cleaning/splitting and
+    tokenization continue to work unchanged.
+    """
+    limit = max(0, int(max_rows or 0))
+    if limit <= 0:
+        return dataset
+
+    rows = []
+    _emit_load_progress(progress_callback, 2, f"Streaming first {limit:,} rows…", rows_loaded=0, rows_total=limit)
+    report_every = max(25, min(250, limit // 100 if limit >= 100 else 1))
+    for index, row in enumerate(dataset.take(limit), start=1):
+        rows.append(row)
+        if index == 1 or index == limit or index % report_every == 0:
+            pct = 5 + (index / max(limit, 1)) * 90
+            _emit_load_progress(
+                progress_callback,
+                pct,
+                f"Loading rows {index:,} / {limit:,}…",
+                rows_loaded=index,
+                rows_total=limit,
+            )
+    _emit_load_progress(progress_callback, 97, f"Preparing {len(rows):,} rows for Studio…", rows_loaded=len(rows), rows_total=limit)
+    if not rows:
+        # Dataset.from_list([]) cannot infer useful features on some versions.
+        return ds_module.Dataset.from_dict({})
+    return ds_module.Dataset.from_list(rows)
+
+
 def load_huggingface_dataset(
     dataset_id: str,
     *,
@@ -63,50 +104,117 @@ def load_huggingface_dataset(
     streaming: bool = False,
     max_rows: int | None = None,
     token: str | None = None,
+    fallback_dataset_id: str | None = None,
+    fallback_config: str | None = None,
+    fallback_split: str | None = None,
+    fallback_text_column: str | None = None,
+    progress_callback=None,
 ):
     """Load a dataset from the Hugging Face Hub.
 
-    Authentication, when required, is read by the datasets library from the
-    normal Hugging Face environment/login. Tokens are intentionally not stored
-    in Builder design files.
+    Gallery presets may include a public upstream fallback. This lets Studio keep
+    using an MLBricks-maintained mirror when it is populated while still working
+    if that mirror exists but has not uploaded data files yet. Authentication,
+    when required, is read from the saved credential profile / normal HF login.
+
+    When ``streaming`` and ``max_rows`` are both enabled, only that prefix is
+    materialized into a normal Dataset. This prevents a 10k-row quickstart from
+    downloading an entire multi-GB repository before ``select()`` can run.
     """
     ds = _datasets()
-    config = (config or "").strip() or None
-    try:
-        data = ds.load_dataset(
-            dataset_id,
-            config,
-            split=split or "train",
-            streaming=bool(streaming),
-            token=token or None,
-        )
-    except Exception as exc:
+
+    primary = {
+        "dataset_id": str(dataset_id or "").strip(),
+        "config": (config or "").strip() or None,
+        "split": split or "train",
+        "text_column": text_column or "text",
+    }
+    fallback = None
+    if str(fallback_dataset_id or "").strip():
+        fallback = {
+            "dataset_id": str(fallback_dataset_id).strip(),
+            "config": (fallback_config or "").strip() or None,
+            "split": fallback_split or primary["split"],
+            "text_column": fallback_text_column or primary["text_column"],
+        }
+
+    def classify_and_raise(exc, target_id):
         text = f"{type(exc).__name__}: {exc}"
         lowered = text.lower()
         if "gatedrepo" in lowered or "gated repo" in lowered or ("403" in lowered and "access" in lowered):
             raise PermissionError(
-                f"Hugging Face access approval is required for {dataset_id!r}. "
+                f"Hugging Face access approval is required for {target_id!r}. "
                 "Your account may be authenticated but not approved for this gated dataset. "
                 "Accept/request access on the dataset page, then retry with the saved credential profile."
             ) from exc
         if any(marker in lowered for marker in ("401", "unauthorized", "authentication", "invalid token", "token is required")):
             raise PermissionError(
-                f"Hugging Face authentication is required for {dataset_id!r}. "
+                f"Hugging Face authentication is required for {target_id!r}. "
                 "Open Cloud & Repositories, save a Hugging Face credential, and select its Credential Profile on this source node."
             ) from exc
         if "403" in lowered or "forbidden" in lowered:
             raise PermissionError(
-                f"Hugging Face denied access to {dataset_id!r}. Verify that the saved token has permission to this private/gated repository."
+                f"Hugging Face denied access to {target_id!r}. Verify that the saved token has permission to this private/gated repository."
             ) from exc
-        raise
-    if not streaming:
-        data = _limit_rows(data, max_rows)
-    if text_column and hasattr(data, "column_names") and text_column not in data.column_names:
-        raise KeyError(
-            f"Text column {text_column!r} not found. Available columns: {data.column_names}"
-        )
-    return data
+        raise exc
 
+    def load_target(target):
+        _emit_load_progress(progress_callback, 1, f"Connecting to {target['dataset_id']}…", dataset_id=target["dataset_id"])
+        data = ds.load_dataset(
+            target["dataset_id"],
+            target["config"],
+            split=target["split"],
+            streaming=bool(streaming),
+            token=token or None,
+        )
+        if streaming and max_rows and int(max_rows) > 0:
+            data = _materialize_streaming_dataset(ds, data, int(max_rows), progress_callback)
+        elif not streaming:
+            data = _limit_rows(data, max_rows)
+        return data
+
+    active = primary
+    try:
+        data = load_target(primary)
+    except Exception as primary_exc:
+        # Permission failures must remain explicit. For Gallery mirrors, missing
+        # or empty repositories are safe to replace with the declared upstream.
+        lowered = f"{type(primary_exc).__name__}: {primary_exc}".lower()
+        permission_like = any(x in lowered for x in ("401", "403", "unauthorized", "forbidden", "gatedrepo", "gated repo", "invalid token"))
+        if fallback and not permission_like:
+            _emit_load_progress(
+                progress_callback,
+                2,
+                f"MLBricks mirror unavailable; using upstream {fallback['dataset_id']}…",
+                dataset_id=fallback["dataset_id"],
+                fallback=True,
+            )
+            active = fallback
+            try:
+                data = load_target(fallback)
+            except Exception as fallback_exc:
+                classify_and_raise(fallback_exc, fallback["dataset_id"])
+        else:
+            classify_and_raise(primary_exc, primary["dataset_id"])
+
+    # A normalized MLBricks mirror can expose ``text`` while its upstream uses a
+    # different text field (for example UltraChat's ``prompt``). Normalize the
+    # fallback column back to the node's requested column so every downstream
+    # component keeps the same API contract.
+    requested_column = primary["text_column"]
+    active_column = active["text_column"]
+    columns = getattr(data, "column_names", None)
+    if requested_column and columns is not None and requested_column not in columns:
+        if active_column and active_column in columns and hasattr(data, "rename_column"):
+            data = data.rename_column(active_column, requested_column)
+            columns = getattr(data, "column_names", columns)
+        else:
+            raise KeyError(
+                f"Text column {requested_column!r} not found. Available columns: {columns}"
+            )
+
+    _emit_load_progress(progress_callback, 100, f"Loaded {active['dataset_id']}.", dataset_id=active["dataset_id"], fallback=(active is fallback))
+    return data
 
 def load_url_dataset(
     url: str,

@@ -3571,3 +3571,11 @@
   max-height:none!important;
   overflow:visible!important;
 }
+
+/* Determinate data-source progress. Streaming Gallery quickstarts report rows
+   loaded so the active source card does not look frozen on large Hub datasets. */
+.mlb-run-track.determinate i{
+  transform:none!important;
+  animation:none!important;
+  transition:width .18s ease;
+}

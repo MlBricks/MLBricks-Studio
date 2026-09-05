@@ -219,7 +219,7 @@ def execute_data_pipeline(
     order, errors = validate_data_pipeline(state)
 
     statuses = {
-        n["id"]: {"status": "queued", "message": "Waiting"}
+        n["id"]: {"status": "queued", "message": "Waiting", "percent": 0}
         for n in get_data_component(state).get("nodes", [])
     }
 
@@ -255,16 +255,40 @@ def execute_data_pipeline(
 
         nid = node["id"]
         p = node.get("params") or {}
-        statuses[nid] = {"status": "running", "message": f'Running {node["name"]}…'}
+        statuses[nid] = {"status": "running", "message": f'Running {node["name"]}…', "percent": 0}
         _emit(progress_callback, {
             "status": "running",
+            "runtime_kind": "data",
             "overall": round(index / max(total, 1) * 100),
             "step": index + 1,
             "total_steps": total,
             "current_node_id": nid,
+            "node_percent": 0,
             "message": f'Running {node["name"]}…',
             "nodes": statuses,
         })
+
+        def node_progress(update):
+            update = dict(update or {})
+            node_pct = max(0.0, min(100.0, float(update.get("percent", 0) or 0)))
+            message = str(update.get("message") or f'Running {node["name"]}…')
+            statuses[nid] = {"status": "running", "message": message, "percent": round(node_pct)}
+            overall = ((index + (node_pct / 100.0)) / max(total, 1)) * 100.0
+            payload = {
+                "status": "running",
+                "runtime_kind": "data",
+                "overall": round(overall),
+                "step": index + 1,
+                "total_steps": total,
+                "current_node_id": nid,
+                "node_percent": round(node_pct),
+                "message": message,
+                "nodes": statuses,
+            }
+            for key in ("rows_loaded", "rows_total", "dataset_id", "fallback"):
+                if key in update:
+                    payload[key] = update[key]
+            _emit(progress_callback, payload)
 
         try:
             typ = node["type"]
@@ -279,14 +303,30 @@ def execute_data_pipeline(
             elif typ == "hf_dataset":
                 credential_name = str(p.get("credential_profile") or "Default").strip()
                 credentials = credential_resolver("huggingface", credential_name) if credential_resolver and credential_name else {}
+                current_dataset_id = str(p.get("dataset_id", "roneneldan/TinyStories") or "").strip()
+                current_config = str(p.get("config") or "").strip()
+                current_split = str(p.get("split") or "train").strip()
+                fallback_guard_id = str(p.get("fallback_for_dataset_id") or "").strip()
+                fallback_guard_config = str(p.get("fallback_for_config") or "").strip()
+                fallback_guard_split = str(p.get("fallback_for_split") or "").strip()
+                fallback_allowed = bool(p.get("fallback_dataset_id")) and (
+                    (not fallback_guard_id or current_dataset_id == fallback_guard_id)
+                    and (not fallback_guard_config or current_config == fallback_guard_config)
+                    and (not fallback_guard_split or current_split == fallback_guard_split)
+                )
                 result = data_api.load_huggingface_dataset(
-                    p.get("dataset_id", "roneneldan/TinyStories"),
-                    config=(p.get("config") or None),
-                    split=p.get("split", "train"),
+                    current_dataset_id,
+                    config=(current_config or None),
+                    split=current_split,
                     text_column=p.get("text_column", "text"),
                     streaming=_bool(p.get("streaming", False)),
                     max_rows=_optional_positive(p.get("max_rows")),
                     token=(credentials or {}).get("token"),
+                    fallback_dataset_id=(p.get("fallback_dataset_id") or None) if fallback_allowed else None,
+                    fallback_config=(p.get("fallback_config") or None) if fallback_allowed else None,
+                    fallback_split=(p.get("fallback_split") or None) if fallback_allowed else None,
+                    fallback_text_column=(p.get("fallback_text_column") or None) if fallback_allowed else None,
+                    progress_callback=node_progress,
                 )
 
             elif typ == "kaggle_dataset":
@@ -388,7 +428,7 @@ def execute_data_pipeline(
                 raise ValueError(f"Unsupported data node type: {typ}")
 
         except Exception as exc:
-            statuses[nid] = {"status": "error", "message": str(exc)}
+            statuses[nid] = {"status": "error", "message": str(exc), "percent": statuses.get(nid, {}).get("percent", 0)}
             _emit(progress_callback, {
                 "status": "error",
                 "overall": round(index / max(total, 1) * 100),
@@ -400,7 +440,7 @@ def execute_data_pipeline(
             })
             raise
 
-        statuses[nid] = {"status": "done", "message": "Done"}
+        statuses[nid] = {"status": "done", "message": "Done", "percent": 100}
         _emit(progress_callback, {
             "status": "running" if index + 1 < total else "done",
             "overall": round((index + 1) / max(total, 1) * 100),
