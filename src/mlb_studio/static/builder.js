@@ -216,39 +216,15 @@ function __MLB_STUDIO_FACTORY__(){
     },true);
     root.addEventListener("pointercancel",releasePointerInteraction,true);
 
-    // Global action acknowledgement. Every real Studio button gets immediate
-    // pressed feedback, and a short acknowledgement survives synchronous redraws.
-    // Connection ports are excluded because their own armed/edge state is the
-    // visual acknowledgement and moving them would disturb graph geometry.
-    let buttonAckTimer=null;
+    // Every real Studio button gets immediate pressed feedback. Do not show a
+    // generic "✓ <button label>" toast: actions such as Recover/Open must report
+    // their real result (or error), not merely echo the control that was clicked.
+    // Connection ports are excluded because their armed/edge state is already
+    // the visual acknowledgement and animating them would disturb graph geometry.
     function actionButton(target){
       const b=target?.closest?.("button");
       if(!b || !root.contains(b) || b.disabled || b.classList.contains("mlb-port"))return null;
       return b;
-    }
-    function actionLabel(button){
-      const raw=String(button?.getAttribute("aria-label")||button?.title||button?.textContent||"Action")
-        .replace(/\s+/g," ").trim();
-      return raw.length>42?raw.slice(0,39)+"…":raw||"Action";
-    }
-    function showActionAck(button){
-      if(!button)return;
-      let ack=root.querySelector(":scope > .mlb-action-ack");
-      if(!ack){
-        ack=document.createElement("div");
-        ack.className="mlb-action-ack";
-        ack.setAttribute("role","status");
-        ack.setAttribute("aria-live","polite");
-        root.appendChild(ack);
-      }
-      ack.textContent="✓ "+actionLabel(button);
-      ack.classList.remove("show");
-      void ack.offsetWidth;
-      ack.classList.add("show");
-      if(buttonAckTimer)clearTimeout(buttonAckTimer);
-      buttonAckTimer=setTimeout(()=>{
-        ack?.classList.remove("show");
-      },720);
     }
     function releasePressedButton(button){
       if(!button)return;
@@ -269,14 +245,7 @@ function __MLB_STUDIO_FACTORY__(){
       if(ev.key!=="Enter"&&ev.key!==" ")return;
       releasePressedButton(actionButton(ev.target));
     },true);
-    root.addEventListener("click",ev=>{
-      const button=actionButton(ev.target);
-      if(!button)return;
-      releasePressedButton(button);
-      // Run after the clicked control's own handler. If it redraws the app, the
-      // acknowledgement is appended to the persistent root after that redraw.
-      queueMicrotask(()=>showActionAck(button));
-    });
+    root.addEventListener("click",ev=>releasePressedButton(actionButton(ev.target)));
 
     function snapshot(){ return cp(state); }
     function checkpoint(label,beforeState=null){
@@ -1671,7 +1640,11 @@ function __MLB_STUDIO_FACTORY__(){
       }
       if(!silent){
         const label=action==="persistence_save_item"?"Saving design to Local Repository…":
-          action==="persistence_load_item"?"Loading design from Local Repository…":
+          action==="persistence_load_item"?"Opening saved design…":
+          action==="persistence_load_draft"?"Recovering draft…":
+          action==="persistence_delete_draft"?"Removing draft…":
+          action==="persistence_delete_item"?"Removing saved design…":
+          action==="persistence_list"?"Refreshing local storage…":
           action==="persistence_save_credentials"?"Saving credential securely…":"Updating local storage…";
         setStatus(label);
       }
@@ -1873,6 +1846,34 @@ function __MLB_STUDIO_FACTORY__(){
           state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
           selected=null;pendingPort=null;outputDirectorySelection=null;switchingWorkspace=true;
         }
+
+        // Persistence commands can originate from the detached Full Window. The
+        // host notebook is the Python bridge proxy, so it must forward the
+        // completion payload/state back to that window. Previously this branch
+        // returned before the generic progress relay and Recover/Open appeared to
+        // do nothing in about:blank. Silent autosaves stay local to avoid redraws.
+        if(!isPopout && next.phase!=="save_draft"){
+          sendPopoutMessage({
+            type:"progress",source:"host",payload:cp(next),
+            state:next.state_replace?cp(state):null,ts:Date.now()
+          });
+        }
+
+        // A Local Repository component's Open action should actually open its
+        // Module/API Component editor. Only the active UI performs this navigation
+        // so host + Full Window do not create different random editor view IDs.
+        const restoredDefinitionId=String(next.persistence_result?.root_definition_id||"");
+        const shouldOpenRestoredComponent=
+          next.status==="done" && next.phase==="load_item" && restoredDefinitionId &&
+          (isPopout || !popoutPeerConnected);
+        if(shouldOpenRestoredComponent){
+          const restoredDefinition=state.custom_components?.[restoredDefinitionId];
+          if(restoredDefinition){
+            editCustomDefinition(restoredDefinition);
+            return;
+          }
+        }
+
         if(next.message&&next.phase!=="save_draft")setStatus(next.message);
         if(next.status==="done"||next.status==="error")setTimeout(draw,60);
         return;

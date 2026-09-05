@@ -226,16 +226,15 @@ def test_imported_or_searched_artifacts_stay_visible_after_completion():
     assert 'else if(contentType==="model")revealArtifactWorkspace("model",restored.model?.id||null);' in text
 
 
-def test_all_buttons_have_global_press_and_acknowledgement_feedback():
+def test_all_buttons_have_press_feedback_without_label_only_ack_toast():
     js = _builder_js()
     css = _builder_css()
     assert 'function actionButton(target)' in js
     assert 'button.classList.add("mlb-button-pressed")' in js
-    assert 'queueMicrotask(()=>showActionAck(button))' in js
-    assert 'ack.textContent="✓ "+actionLabel(button);' in js
+    assert 'queueMicrotask(()=>showActionAck(button))' not in js
+    assert 'ack.textContent="✓ "+actionLabel(button);' not in js
     assert '.mlb-root button:not(:disabled):not(.mlb-port):active' in css
     assert '.mlb-root button.mlb-button-pressed:not(:disabled):not(.mlb-port)' in css
-    assert '.mlb-action-ack.show' in css
 
 
 def test_connection_ports_are_excluded_from_generic_button_animation():
@@ -587,3 +586,17 @@ def test_local_studio_storage_is_in_gallery_not_cloud():
     assert 'Drafts are automatic.' in js[local_start:cloud_view_start]
     assert 'const drafts=(localPersistence.drafts||[]);' in js
     assert 'const saved=(localPersistence.repository||[]);' in js
+
+
+def test_full_window_persistence_results_are_relayed_back_to_popout():
+    js = _builder_js()
+    assert 'if(!isPopout && next.phase!=="save_draft")' in js
+    assert 'type:"progress",source:"host",payload:cp(next)' in js
+    assert 'state:next.state_replace?cp(state):null' in js
+
+
+def test_local_repository_component_open_enters_component_editor():
+    js = _builder_js()
+    assert 'next.phase==="load_item" && restoredDefinitionId' in js
+    assert 'editCustomDefinition(restoredDefinition);' in js
+    assert 'action==="persistence_load_draft"?"Recovering draft…"' in js
