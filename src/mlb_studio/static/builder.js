@@ -2317,7 +2317,7 @@ function __MLB_STUDIO_FACTORY__(){
         const memNow=next.memory_allocated_gb==null?"—":Number(next.memory_allocated_gb).toFixed(2)+" GB";
         html+="<div class='mlb-runtime-live-stats'>"+
           "<div><span>Step</span><strong>"+(next.step??"—")+(next.max_steps?" / "+next.max_steps:"")+"</strong></div>"+
-          "<div><span>GPU Tok/s</span><strong>"+(next.tokens_per_sec==null?"—":Math.round(Number(next.tokens_per_sec)).toLocaleString())+"</strong></div>"+
+          "<div><span>Tok/s</span><strong>"+(next.tokens_per_sec==null?"—":Math.round(Number(next.tokens_per_sec)).toLocaleString())+"</strong></div>"+
           "<div><span>E2E Tok/s</span><strong>"+(next.end_to_end_tokens_per_sec==null?"—":Math.round(Number(next.end_to_end_tokens_per_sec)).toLocaleString())+"</strong></div>"+
           "<div><span>Loss</span><strong>"+(next.loss==null?"—":Number(next.loss).toFixed(4))+"</strong></div>"+
           "<div><span>PPL</span><strong>"+(next.ppl==null?"—":Number(next.ppl).toFixed(2))+"</strong></div>"+
@@ -3756,7 +3756,7 @@ function __MLB_STUDIO_FACTORY__(){
         const row=document.createElement("div");row.className="mlb-log-row "+(ev.status||"");
         const meta=[];if(ev.step!==null)meta.push("step "+ev.step);if(ev.generated_tokens!==null)meta.push(ev.generated_tokens+" tokens");if(ev.phase)meta.push(ev.phase);
         const extra=[];
-        if(ev.tokens_per_sec!==null)extra.push("GPU "+Math.round(Number(ev.tokens_per_sec)).toLocaleString()+" tok/s");
+        if(ev.tokens_per_sec!==null)extra.push(Math.round(Number(ev.tokens_per_sec)).toLocaleString()+" tok/s");
         if(ev.end_to_end_tokens_per_sec!==null)extra.push("E2E "+Math.round(Number(ev.end_to_end_tokens_per_sec)).toLocaleString()+" tok/s");
         if(ev.memory_allocated_gb!==null)extra.push("mem "+Number(ev.memory_allocated_gb).toFixed(2)+" GB");
         if(ev.loss!==null)extra.push("loss "+Number(ev.loss).toFixed(4));
@@ -3798,7 +3798,7 @@ function __MLB_STUDIO_FACTORY__(){
       const valPplNow=pick(live.val_ppl,entry.last_val_ppl);
       const tokensNow=pick(live.tokens_seen,entry.tokens_seen);
       metrics.append(statusMetric("Step",(stepNow??0)+(live.max_steps?" / "+live.max_steps:"")),
-        statusMetric("GPU Tok/s",tokNow==null?"—":Math.round(Number(tokNow)).toLocaleString()),
+        statusMetric("Tok/s",tokNow==null?"—":Math.round(Number(tokNow)).toLocaleString()),
         statusMetric("E2E Tok/s",e2eTokNow==null?"—":Math.round(Number(e2eTokNow)).toLocaleString()),
         statusMetric("Loss",lossNow==null?"—":Number(lossNow).toFixed(4)),
         statusMetric("PPL",pplNow==null?"—":Number(pplNow).toFixed(2)),
@@ -3831,6 +3831,10 @@ function __MLB_STUDIO_FACTORY__(){
       summary.innerHTML="<h3>Training Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Backend</span><strong>"+config.backend+"</strong></div><div><span>Execution</span><strong>"+config.execution_mode+"</strong></div><div><span>Precision</span><strong>"+config.precision+"</strong></div>";side.appendChild(summary);
       const statusValid=trainingConfigValid(entry,config);
       side.appendChild(trainingActionButton(entry,statusValid));
+      const cleanVram=btn("Clean GPU VRAM","mlb-vram-clean-btn");
+      cleanVram.disabled=execution.status==="running";
+      cleanVram.title=cleanVram.disabled?"Stop the active runtime before cleaning GPU memory":"Release cached model runtimes and empty the CUDA allocator cache";
+      cleanVram.addEventListener("click",requestGpuVramCleanup);side.appendChild(cleanVram);
       const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=trainingIsRunning()?"Stop training and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
       if(entry.weights_ready){const gen=btn("Open Generation","mlb-generate-btn");gen.addEventListener("click",()=>openRuntimePanel("generate",entry));side.appendChild(gen);}
     }
@@ -4172,6 +4176,10 @@ function __MLB_STUDIO_FACTORY__(){
         side.appendChild(compatibilityCard(valid.compat));
         if(!valid.ok){const errors=document.createElement("div");errors.className="mlb-runtime-errors";errors.innerHTML=valid.errors.map(x=>"<div>✕ "+x+"</div>").join("");side.appendChild(errors);}
         side.appendChild(trainingActionButton(entry,valid));
+        const cleanVram=btn("Clean GPU VRAM","mlb-vram-clean-btn");
+        cleanVram.disabled=execution.status==="running";
+        cleanVram.title=cleanVram.disabled?"Stop the active runtime before cleaning GPU memory":"Release cached model runtimes and empty the CUDA allocator cache";
+        cleanVram.addEventListener("click",requestGpuVramCleanup);side.appendChild(cleanVram);
         const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=trainingIsRunning()?"Stop training and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
       }else{
         const weights=document.createElement("div");weights.className="mlb-weight-status "+(entry.weights_ready?"ready":"missing");
@@ -4357,6 +4365,9 @@ function __MLB_STUDIO_FACTORY__(){
         serve.addEventListener("click",()=>requestModelServing(entry));
         actions.appendChild(serve);
       }
+      const delModel=btn("Delete Model","mlb-danger-btn");
+      delModel.addEventListener("click",()=>deleteBuiltModel(entry));
+      actions.appendChild(delModel);
       body.appendChild(actions);
 
       const note=document.createElement("div");note.className="mlb-runtime-note";
@@ -4384,6 +4395,74 @@ function __MLB_STUDIO_FACTORY__(){
       autoBindDatasetToModel(meta);
       setStatus(meta.name+" selected for Model Builder Text Input.");
       draw();
+    }
+
+    function requestMaintenanceCommand(action,config={},message="Running maintenance…"){
+      if(!ensureBridgeForAction()){
+        execution={status:"error",runtime_kind:"maintenance",overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
+        applyExecutionProgress(execution);setStatus(execution.message);return false;
+      }
+      const command={action,...cp(config||{}),ts:Date.now()};
+      if(!setBridgeState()||!setBridgeCommand(command)){setStatus("Could not send maintenance command to Python.");return false;}
+      const button=bridgeControl(bridge.run,"button");
+      if(!button){setStatus("Python maintenance control was not found.");return false;}
+      const progressInput=bridgeControl(bridge.progress,"textarea");lastProgressRaw=progressInput?.value||lastProgressRaw;
+      execution={status:"running",runtime_kind:"maintenance",phase:action,overall:0,message,nodes:{}};
+      applyExecutionProgress(execution);setStatus(message);
+      setTimeout(()=>{clickBridgeButton(button);},120);
+      return true;
+    }
+
+    function deletePreparedDataset(meta){
+      if(!meta)return;
+      const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
+      const ok=!win||typeof win.confirm!=="function"||win.confirm(
+        'Delete "'+meta.name+'" from the Studio Data Repository?\n\n'+
+        'This removes the Studio registry entry and in-memory dataset. Files already saved on disk or in cloud storage are not deleted.'
+      );
+      if(!ok)return;
+      checkpoint("Delete Dataset "+meta.name);
+      const datasetId=meta.id;
+      state.prepared_datasets=availablePreparedDatasets().filter(item=>item.id!==datasetId);
+      Object.values(state.components||{}).forEach(comp=>{
+        (comp.nodes||[]).forEach(node=>{
+          if(node.type==="text_input"&&node.params?.dataset_id===datasetId){
+            node.params.input_mode="prompt";node.params.dataset_id="";node.params.dataset_split="train";
+          }
+        });
+      });
+      (state.model_outputs||[]).forEach(entry=>{
+        if(entry.selected_dataset_id===datasetId){entry.selected_dataset_id=null;entry.dataset=null;}
+      });
+      if(state.project?.dataset===meta.name)state.project.dataset=null;
+      if(outputDirectorySelection===datasetId)outputDirectorySelection=null;
+      selected=null;
+      requestMaintenanceCommand("delete_dataset",{dataset_id:datasetId},"Deleting "+meta.name+" from Studio…");
+      draw();
+    }
+
+    function deleteBuiltModel(entry){
+      entry=liveBuiltModel(entry);
+      if(!entry)return;
+      const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
+      const ok=!win||typeof win.confirm!=="function"||win.confirm(
+        'Delete "'+entry.name+'" from the Studio Model Repository?\n\n'+
+        'This removes the Studio registry entry, stops its API server if running, and releases its in-memory runtime cache. Saved model/checkpoint files on disk or in cloud storage are not deleted.'
+      );
+      if(!ok)return;
+      checkpoint("Delete Model "+entry.name);
+      const modelId=entry.id;
+      state.model_outputs=(state.model_outputs||[]).filter(item=>item.id!==modelId);
+      if(runtimePanel?.modelId===modelId)runtimePanel=null;
+      if(outputDirectorySelection===modelId)outputDirectorySelection=null;
+      selected=null;
+      requestMaintenanceCommand("delete_model",{model_id:modelId},"Deleting "+entry.name+" from Studio…");
+      draw();
+    }
+
+    function requestGpuVramCleanup(){
+      if(execution.status==="running"){setStatus("Stop the active runtime before cleaning GPU VRAM.");return;}
+      requestMaintenanceCommand("runtime_clear_memory",{},"Cleaning runtime memory and GPU VRAM cache…");
     }
 
     function renderDataOutputDirectory(container){
@@ -5397,7 +5476,10 @@ function __MLB_STUDIO_FACTORY__(){
       if(Object.keys(process).length)detailSection(body,"TEXT PROCESSING",[["Text Column",process.text_column],["Lowercase",prettyBool(process.lowercase)],["Trim Spaces",prettyBool(process.strip)],["Normalize Whitespace",prettyBool(process.normalize_whitespace)],["Normalize Unicode",prettyBool(process.unicode_nfkc)],["Remove Empty",prettyBool(process.remove_empty)],["Min Characters",process.min_chars],["Max Characters",!process.max_chars||Number(process.max_chars)===0?"All":process.max_chars]]);
       if(Object.keys(tok).length)detailSection(body,"TOKENIZER",[["Tokenizer",tok.tokenizer_name],["Text Column",tok.text_column],["Tokenizer Max Length",tok.context_length],["Truncation",prettyBool(tok.truncation)],["Padding",tok.padding],["Special Tokens",prettyBool(tok.add_special_tokens)]]);
       detailSection(body,"STORAGE",[["Storage",dataStorageLabel(meta)],["Total Rows",meta.total_rows??"—"],["Save To Disk",output.save_to_disk!==undefined?prettyBool(output.save_to_disk):(meta.path?"Yes":"No")],["Path",meta.path||"Python memory"],["Created",meta.created_at||"—"]]);
-      const actions=document.createElement("div");actions.className="mlb-action-grid";const use=btn("Use in Model","mlb-dark-btn");use.addEventListener("click",()=>useDatasetInModel(meta));actions.appendChild(use);body.appendChild(actions);
+      const actions=document.createElement("div");actions.className="mlb-action-grid";
+      const use=btn("Use in Model","mlb-dark-btn");use.addEventListener("click",()=>useDatasetInModel(meta));
+      const del=btn("Delete Dataset","mlb-danger-btn");del.addEventListener("click",()=>deletePreparedDataset(meta));
+      actions.append(use,del);body.appendChild(actions);
     }
     function selectedOutputDataset(){if(state.active_workspace!=="data"||bottomView!=="outputs"||!outputDirectorySelection)return null;return preparedDatasetById(outputDirectorySelection);}
 

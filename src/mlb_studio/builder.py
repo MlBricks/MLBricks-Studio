@@ -783,6 +783,163 @@ class Builder:
                 return item
         raise KeyError(f"Prepared dataset metadata not found: {dataset_id!r}")
 
+    def _release_cached_runtime_models(self, *, preserve_server_models=True, reset_compiler=False):
+        """Release cached compiled model objects and return memory cleanup details.
+
+        Saved model artifacts/checkpoints are left untouched. Live API servers keep
+        their model references unless the caller explicitly stops/deletes them.
+        """
+        import gc
+
+        torch = None
+        cuda_available = False
+        before_allocated = before_reserved = None
+        try:
+            import torch as _torch
+            torch = _torch
+            cuda_available = bool(torch.cuda.is_available())
+            if cuda_available:
+                before_allocated = float(torch.cuda.memory_allocated()) / (1024 ** 3)
+                before_reserved = float(torch.cuda.memory_reserved()) / (1024 ** 3)
+        except Exception:
+            torch = None
+
+        preserved = set(self._model_servers) if preserve_server_models else set()
+        removed = []
+        for cached_id in list(self.trained_models):
+            if cached_id in preserved:
+                continue
+            self.trained_models.pop(cached_id, None)
+            removed.append(cached_id)
+
+        gc.collect()
+
+        compiler_reset = False
+        if torch is not None and reset_compiler:
+            try:
+                dynamo = getattr(torch, "_dynamo", None)
+                reset = getattr(dynamo, "reset", None)
+                if callable(reset):
+                    reset()
+                    compiler_reset = True
+            except Exception:
+                pass
+
+        after_allocated = after_reserved = None
+        if torch is not None and cuda_available:
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            try:
+                ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+                if callable(ipc_collect):
+                    ipc_collect()
+            except Exception:
+                pass
+            gc.collect()
+            try:
+                after_allocated = float(torch.cuda.memory_allocated()) / (1024 ** 3)
+                after_reserved = float(torch.cuda.memory_reserved()) / (1024 ** 3)
+            except Exception:
+                pass
+
+        return {
+            "cuda_available": cuda_available,
+            "released_model_caches": len(removed),
+            "released_model_ids": removed,
+            "preserved_server_models": sorted(preserved),
+            "before_allocated_gb": before_allocated,
+            "before_reserved_gb": before_reserved,
+            "after_allocated_gb": after_allocated,
+            "after_reserved_gb": after_reserved,
+            "compiler_cache_reset": compiler_reset,
+        }
+
+    def clear_runtime_memory(self):
+        """Release inactive model runtimes and empty CUDA allocator/compiler caches."""
+        return self._release_cached_runtime_models(
+            preserve_server_models=True, reset_compiler=True
+        )
+
+    def delete_prepared_dataset(self, dataset_id):
+        """Remove a prepared dataset from Studio without deleting external files."""
+        import gc
+
+        dataset_id = str(dataset_id or "").strip()
+        if not dataset_id:
+            raise ValueError("Dataset id is required.")
+        metadata = None
+        for item in self.state.get("prepared_datasets") or []:
+            if str(item.get("id")) == dataset_id:
+                metadata = item
+                break
+        self.state["prepared_datasets"] = [
+            item for item in (self.state.get("prepared_datasets") or [])
+            if str(item.get("id")) != dataset_id
+        ]
+        removed_object = self.prepared_datasets.pop(dataset_id, None) is not None
+
+        for component in (self.state.get("components") or {}).values():
+            for node in component.get("nodes") or []:
+                params = node.get("params") or {}
+                if node.get("type") == "text_input" and str(params.get("dataset_id") or "") == dataset_id:
+                    params["input_mode"] = "prompt"
+                    params["dataset_id"] = ""
+                    params["dataset_split"] = "train"
+        for entry in self.state.get("model_outputs") or []:
+            if str(entry.get("selected_dataset_id") or "") == dataset_id:
+                entry["selected_dataset_id"] = None
+                entry["dataset"] = None
+
+        project = self.state.setdefault("project", {})
+        if metadata and project.get("dataset") == metadata.get("name"):
+            project["dataset"] = None
+        gc.collect()
+        return {
+            "dataset_id": dataset_id,
+            "name": (metadata or {}).get("name") or dataset_id,
+            "removed_from_memory": removed_object,
+        }
+
+    def delete_model_output(self, model_id):
+        """Remove a model registry entry and its live/cache references, not disk files."""
+        import gc
+
+        model_id = str(model_id or "").strip()
+        if not model_id:
+            raise ValueError("Model id is required.")
+        metadata = None
+        for item in self.state.get("model_outputs") or []:
+            if str(item.get("id")) == model_id:
+                metadata = item
+                break
+
+        server = self._model_servers.pop(model_id, None)
+        if server is not None:
+            try:
+                server.stop()
+            except Exception:
+                pass
+        had_cache = self.trained_models.pop(model_id, None) is not None
+        self.state["model_outputs"] = [
+            item for item in (self.state.get("model_outputs") or [])
+            if str(item.get("id")) != model_id
+        ]
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        return {
+            "model_id": model_id,
+            "name": (metadata or {}).get("name") or model_id,
+            "stopped_server": server is not None,
+            "released_runtime_cache": had_cache,
+        }
+
     def train_model(self, model_id, *, progress_callback=None):
         """Compile and really train a supported Builder language model."""
         from .model_runtime import train_builder_model
@@ -793,6 +950,12 @@ class Builder:
         meta = self._dataset_meta(dataset_id)
         dataset = self.get_prepared_dataset(dataset_id)
         config = self._runtime_with_project_trust(entry.get("training_config") or {})
+        if model_id in self._model_servers:
+            raise RuntimeError("Stop this model's API server before starting training.")
+        # A previous completed training run can keep a compiled model alive on the
+        # accelerator. Release inactive runtime caches before compiling the next
+        # training model so a second run does not inherit stale VRAM pressure.
+        self._release_cached_runtime_models(preserve_server_models=True, reset_compiler=True)
         self._stop_event.clear()
         def emit(payload):
             if progress_callback:
@@ -2827,6 +2990,7 @@ class Builder:
             "persistence_load_draft", "persistence_load_item",
             "persistence_list", "persistence_delete_draft", "persistence_delete_item",
             "persistence_save_credentials", "persistence_delete_credentials",
+            "runtime_clear_memory",
         }
         if state_widget is not None and action not in state_independent_actions:
             try:
@@ -2908,6 +3072,33 @@ class Builder:
                         "user_class_validation": result,
                         "definition_id": command.get("definition_id"),
                     })
+                elif action == "delete_dataset":
+                    result = self.delete_prepared_dataset(command.get("dataset_id"))
+                    self._publish_bridge_progress({
+                        "status":"done","runtime_kind":"maintenance","phase":"delete_dataset","overall":100,
+                        "message":f'Deleted {result.get("name") or "dataset"} from the Studio Data Repository.',
+                        "maintenance_result":result,
+                    })
+                elif action == "delete_model":
+                    result = self.delete_model_output(command.get("model_id"))
+                    self._publish_bridge_progress({
+                        "status":"done","runtime_kind":"maintenance","phase":"delete_model","overall":100,
+                        "message":f'Deleted {result.get("name") or "model"} from the Studio Model Repository.',
+                        "maintenance_result":result,
+                    })
+                elif action == "runtime_clear_memory":
+                    result = self.clear_runtime_memory()
+                    if result.get("cuda_available"):
+                        before = result.get("before_reserved_gb")
+                        after = result.get("after_reserved_gb")
+                        detail = "" if before is None or after is None else f" Reserved VRAM {before:.2f} → {after:.2f} GB."
+                        message = f'GPU VRAM cache cleaned. Released {result.get("released_model_caches", 0)} cached model runtime(s).{detail}'
+                    else:
+                        message = f'Runtime memory cleaned. No CUDA GPU is active; released {result.get("released_model_caches", 0)} cached model runtime(s).'
+                    self._publish_bridge_progress({
+                        "status":"done","runtime_kind":"maintenance","phase":"runtime_clear_memory","overall":100,
+                        "message":message,"maintenance_result":result,
+                    })
                 elif action == "train":
                     self.train_model(model_id, progress_callback=self._publish_bridge_progress)
                 elif action == "generate":
@@ -2966,6 +3157,8 @@ class Builder:
                     runtime_kind = "local"
                 elif str(action).startswith("persistence_"):
                     runtime_kind = "persistence"
+                elif action in {"delete_dataset", "delete_model", "runtime_clear_memory"}:
+                    runtime_kind = "maintenance"
                 error_payload = {
                     "status":"error","runtime_kind":runtime_kind,"overall":0,
                     "message":f"{type(exc).__name__}: {exc}"

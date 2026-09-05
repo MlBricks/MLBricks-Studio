@@ -3628,3 +3628,16 @@
 .mlb-data-canvas-progress.error .mlb-data-canvas-progress-head>b{color:#f09aa5}
 .mlb-data-canvas-progress.error .mlb-data-canvas-progress-track i{background:#d7606b}
 .mlb-data-canvas-progress.stopped{border-color:#7a6442}
+
+/* Repository deletion and runtime-memory maintenance controls. */
+.mlb-danger-btn{
+  border:1px solid #6f3a43!important;background:#26171b!important;color:#ef9aa4!important;
+  border-radius:6px!important;padding:7px 10px!important;font-weight:800!important;cursor:pointer!important
+}
+.mlb-danger-btn:hover{background:#321b20!important;border-color:#a24d5a!important;color:#ffb2ba!important}
+.mlb-vram-clean-btn{
+  width:100%!important;height:36px!important;min-height:36px!important;margin-top:6px!important;border-radius:6px!important;
+  border:1px solid #35546d!important;background:#132230!important;color:#9ccbf0!important;font-weight:800!important;cursor:pointer!important
+}
+.mlb-vram-clean-btn:hover:not(:disabled){background:#183047!important;border-color:#4f7da1!important;color:#bfe2ff!important}
+.mlb-vram-clean-btn:disabled{opacity:.35!important;cursor:not-allowed!important}
