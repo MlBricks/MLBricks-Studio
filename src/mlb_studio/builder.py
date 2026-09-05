@@ -113,6 +113,13 @@ class Builder:
         self._run_thread = None
         self._stop_event = threading.Event()
         self._bridge_widgets = None
+        # The notebook bridge has one Run button shared by imports, autosaves,
+        # persistence navigation and runtime actions. Keep quick requests queued
+        # instead of dropping a click when another bridge worker is finishing.
+        self._bridge_pending_requests = []
+        self._bridge_queue_lock = threading.Lock()
+        self._bridge_drain_scheduled = False
+        self._active_bridge_action = None
         self.last_data_result = None
         self.last_run_error = None
         self.trained_models = {}
@@ -2551,19 +2558,124 @@ class Builder:
         except Exception:
             pass
 
-    def _start_bridge_run(self):
-        if self._run_thread is not None and self._run_thread.is_alive():
-            self._publish_bridge_progress({
-                "status": "running",
-                "message": "A pipeline run is already active.",
-                "overall": 0,
-                "nodes": {},
-            })
-            return
+    @staticmethod
+    def _bridge_action_from_raw(command_raw):
+        try:
+            command = json.loads(command_raw or "{}")
+        except Exception:
+            command = {}
+        if not isinstance(command, dict):
+            command = {}
+        return str(command.get("action") or "data").lower(), command
 
+    def _queue_bridge_widget_request(self, state_raw, command_raw):
+        action, command = self._bridge_action_from_raw(command_raw)
+        navigation = {"persistence_load_draft", "persistence_load_item"}
+        background = {"persistence_save_draft", "ensure_component_import"}
+        request = {
+            "state_raw": state_raw or "{}",
+            "command_raw": command_raw or "{}",
+            "action": action,
+            "component_type": str(command.get("component_type") or ""),
+        }
+        with self._bridge_queue_lock:
+            queued_actions = {item.get("action") for item in self._bridge_pending_requests}
+            # Never let an old autosave/import run after a requested Recover/Open;
+            # its captured state may predate the recovered design.
+            if action in background and (self._active_bridge_action in navigation or queued_actions & navigation):
+                return False
+            if action in navigation:
+                self._bridge_pending_requests = [
+                    item for item in self._bridge_pending_requests
+                    if item.get("action") not in background | navigation
+                ]
+                self._bridge_pending_requests.insert(0, request)
+                return True
+            if action == "persistence_save_draft":
+                self._bridge_pending_requests = [
+                    item for item in self._bridge_pending_requests
+                    if item.get("action") != "persistence_save_draft"
+                ]
+                self._bridge_pending_requests.append(request)
+                return True
+            if action == "ensure_component_import":
+                ctype = request["component_type"]
+                if any(
+                    item.get("action") == action and item.get("component_type") == ctype
+                    for item in self._bridge_pending_requests
+                ):
+                    return False
+            self._bridge_pending_requests.append(request)
+            return True
+
+    def _schedule_bridge_queue_drain(self, delay=0.04):
+        with self._bridge_queue_lock:
+            if self._bridge_drain_scheduled or not self._bridge_pending_requests:
+                return
+            self._bridge_drain_scheduled = True
+
+        def drain_later():
+            try:
+                self._drain_bridge_queue()
+            finally:
+                pass
+
+        timer = threading.Timer(delay, drain_later)
+        timer.daemon = True
+        timer.start()
+
+    def _drain_bridge_queue(self):
+        with self._bridge_queue_lock:
+            self._bridge_drain_scheduled = False
+            if self._run_thread is not None and self._run_thread.is_alive():
+                needs_retry = bool(self._bridge_pending_requests)
+                request = None
+            else:
+                needs_retry = False
+                request = self._bridge_pending_requests.pop(0) if self._bridge_pending_requests else None
+        if needs_retry:
+            self._schedule_bridge_queue_drain(0.05)
+            return
+        if not request:
+            return
         widgets = self._bridge_widgets or {}
         state_widget = widgets.get("state")
         command_widget = widgets.get("command")
+        if state_widget is None:
+            return
+        try:
+            state_widget.value = request.get("state_raw") or "{}"
+            if command_widget is not None:
+                command_widget.value = request.get("command_raw") or "{}"
+        except Exception as exc:
+            self._publish_bridge_progress({
+                "status": "error", "runtime_kind": "bridge", "overall": 0,
+                "message": f"Could not restore queued Studio action: {exc}",
+            })
+            self._schedule_bridge_queue_drain()
+            return
+        self._start_bridge_run()
+
+    def _start_bridge_run(self):
+        widgets = self._bridge_widgets or {}
+        state_widget = widgets.get("state")
+        command_widget = widgets.get("command")
+
+        if self._run_thread is not None and self._run_thread.is_alive():
+            # Capture the exact command/state now. The previous implementation
+            # discarded the click while a background import/autosave was active,
+            # which made Gallery Recover/Open feel random in Full Window mode.
+            state_raw = getattr(state_widget, "value", "{}") if state_widget is not None else "{}"
+            command_raw = getattr(command_widget, "value", "{}") if command_widget is not None else "{}"
+            if command_widget is not None:
+                try:
+                    command_widget.value = "{}"
+                except Exception:
+                    pass
+            self._queue_bridge_widget_request(state_raw, command_raw)
+            self._schedule_bridge_queue_drain()
+            return
+
         command = {}
 
         # v0.7.6: runtime actions use a dedicated tiny command widget instead of
@@ -2601,6 +2713,7 @@ class Builder:
 
         action = str(command.get("action") or "data").lower()
         model_id = command.get("model_id")
+        self._active_bridge_action = action
 
         def worker():
             try:
@@ -2727,6 +2840,9 @@ class Builder:
                         "model_update": {"serve_status":"error"},
                     })
                 self._publish_bridge_progress(error_payload)
+            finally:
+                self._active_bridge_action = None
+                self._schedule_bridge_queue_drain()
 
         self._run_thread = threading.Thread(
             target=worker,

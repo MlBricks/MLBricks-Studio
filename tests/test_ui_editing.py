@@ -600,3 +600,17 @@ def test_local_repository_component_open_enters_component_editor():
     assert 'next.phase==="load_item" && restoredDefinitionId' in js
     assert 'editCustomDefinition(restoredDefinition);' in js
     assert 'action==="persistence_load_draft"?"Recovering draft…"' in js
+
+def test_popout_transport_deduplicates_multi_channel_packets():
+    text = _builder_js()
+    assert "message_id=nextPopoutMessageId()" in text
+    assert "function acceptPopoutPacket(message)" in text
+    assert "if(!acceptPopoutPacket(msg))return;" in text
+
+
+def test_persistence_navigation_blocks_duplicate_open_and_stale_editor_transactions():
+    text = _builder_js()
+    assert "let persistenceNavigationInFlight=false;" in text
+    assert "if(persistenceNavigationInFlight){" in text
+    assert "customEditorTransactions.length=0;" in text
+    assert "if(persistenceNavigationInFlight||componentImportBusy" in text

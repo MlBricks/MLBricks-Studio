@@ -64,6 +64,9 @@ function __MLB_STUDIO_FACTORY__(){
     let pendingBroadcastState=null;
     let pendingBroadcastCommand=null;
     let popoutSyncTimer=null;
+    let popoutMessageSerial=0;
+    const seenPopoutMessageIds=new Map();
+    let persistenceNavigationInFlight=false;
     const runtimeCaps=cp(payload.runtime_capabilities||{devices:[{id:"auto",label:"Auto"},{id:"cpu",label:"CPU"}]});
     const localEnvironment=cp(payload.local_environment||{kind:"python",name:"Python / Jupyter Environment",roots:["."],default_root:"."});
     const localDefaultRoot=localEnvironment.workspace_root||localEnvironment.default_root||(localEnvironment.roots||[])[0]||".";
@@ -1276,8 +1279,30 @@ function __MLB_STUDIO_FACTORY__(){
       }
     }
 
+    function nextPopoutMessageId(){
+      popoutMessageSerial+=1;
+      return (isPopout?"popout":"host")+":"+String(payload.instance_id||root.id||"studio")+":"+Date.now()+":"+popoutMessageSerial;
+    }
+
     function popoutPacket(message){
-      return Object.assign({__mlb_studio_popout__:true,channel:popoutChannelName},message||{});
+      const packet=Object.assign({__mlb_studio_popout__:true,channel:popoutChannelName},message||{});
+      if(!packet.message_id)packet.message_id=nextPopoutMessageId();
+      return packet;
+    }
+
+    function acceptPopoutPacket(message){
+      const id=String(message?.message_id||"");
+      if(!id)return true;
+      if(seenPopoutMessageIds.has(id))return false;
+      const now=Date.now();
+      seenPopoutMessageIds.set(id,now);
+      if(seenPopoutMessageIds.size>256){
+        for(const [key,ts] of seenPopoutMessageIds){
+          if(now-ts>30000 || seenPopoutMessageIds.size>192)seenPopoutMessageIds.delete(key);
+          if(seenPopoutMessageIds.size<=192)break;
+        }
+      }
+      return true;
     }
 
     function attachPopoutMessagePort(port){
@@ -1299,8 +1324,8 @@ function __MLB_STUDIO_FACTORY__(){
       const packet=popoutPacket(message);
       let sent=false;
       // Prefer the dedicated transferred MessagePort, but also send through the
-      // browser-window fallbacks. Duplicates are harmless and this prevents a
-      // stale port from hiding a working opener/BroadcastChannel route.
+      // browser-window fallbacks. Every logical packet carries one message_id,
+      // so receivers process it once even when several transports deliver it.
       try{if(popoutMessagePort){popoutMessagePort.postMessage(packet);sent=true;}}catch(_){popoutMessagePort=null;}
 
       if(isPopout){
@@ -1541,7 +1566,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function pumpComponentImportQueue(){
-      if(componentImportBusy||!componentImportQueue.length||!bridgeReady())return;
+      if(persistenceNavigationInFlight||componentImportBusy||!componentImportQueue.length||!bridgeReady())return;
       const type=componentImportQueue.shift();
       const api=mlapi[type];
       if(!api||api.loaded){pumpComponentImportQueue();return;}
@@ -1620,7 +1645,16 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function requestPersistenceCommand(action,config={},silent=false,syncHash=""){
+      const navigationAction=action==="persistence_load_item"||action==="persistence_load_draft";
+      if(navigationAction){
+        if(persistenceNavigationInFlight){
+          if(!silent)setStatus("A saved design is already opening. Please wait for it to finish.");
+          return;
+        }
+        persistenceNavigationInFlight=true;
+      }
       if(!ensureBridgeForAction()){
+        if(navigationAction)persistenceNavigationInFlight=false;
         if(action==="persistence_save_draft")draftSyncInFlight=false;
         if(!silent)setStatus("Local persistence needs the Python kernel bridge. Browser draft protection is still active.");
         return;
@@ -1629,12 +1663,14 @@ function __MLB_STUDIO_FACTORY__(){
       if(syncHash)command.persistence.sync_hash=syncHash;
       if(!setBridgeState()||!setBridgeCommand(command)){
         if(action==="persistence_save_draft")draftSyncInFlight=false;
+        if(navigationAction)persistenceNavigationInFlight=false;
         if(!silent)setStatus("Could not send local persistence command to Python.");
         return;
       }
       const button=bridgeControl(bridge.run,"button");
       if(!button){
         if(action==="persistence_save_draft")draftSyncInFlight=false;
+        if(navigationAction)persistenceNavigationInFlight=false;
         if(!silent)setStatus("Python local persistence control was not found.");
         return;
       }
@@ -1828,6 +1864,10 @@ function __MLB_STUDIO_FACTORY__(){
       }
       if(next.runtime_kind==="persistence"){
         if(next.status==="error")draftSyncInFlight=false;
+        if((next.phase==="load_item"||next.phase==="load_draft")&&(next.status==="done"||next.status==="error")){
+          persistenceNavigationInFlight=false;
+          setTimeout(pumpComponentImportQueue,80);
+        }
         if(next.persistence_summary)localPersistence=cp(next.persistence_summary);
         if(next.phase==="save_draft"){
           draftSyncInFlight=false;
@@ -1844,6 +1884,10 @@ function __MLB_STUDIO_FACTORY__(){
         }
         if(next.state_replace){
           state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
+          // A recovered/saved design is a new editor root. Never retain stale
+          // transaction frames from a component that was open before recovery.
+          customEditorTransactions.length=0;
+          undoStack.length=0;redoStack.length=0;
           selected=null;pendingPort=null;outputDirectorySelection=null;switchingWorkspace=true;
         }
 
@@ -2126,6 +2170,7 @@ function __MLB_STUDIO_FACTORY__(){
     function handlePopoutMessage(raw,sourceWindow=null){
       const msg=raw||{};
       if(msg.__mlb_studio_popout__!==true || msg.channel!==popoutChannelName)return;
+      if(!acceptPopoutPacket(msg))return;
 
       if(isPopout){
         if(msg.source!=="host")return;
