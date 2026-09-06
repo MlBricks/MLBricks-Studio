@@ -3510,8 +3510,11 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>MLB Studio</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="shortcut icon" href="/favicon.svg">
+  <link rel="icon" href="/favicon.ico?v=2" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2">
+  <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png?v=2">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2">
+  <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=2">
   <style>
     html,body{{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1118}}
     body{{padding:0}}
@@ -3609,7 +3612,10 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
 
         bridge = self._setup_local_app_bridge()
         builder = self
-        favicon_path = _STATIC / "favicon.svg"
+        favicon_svg_path = _STATIC / "favicon.svg"
+        favicon_png_path = _STATIC / "favicon.png"
+        favicon_32_path = _STATIC / "favicon-32.png"
+        favicon_ico_path = _STATIC / "favicon.ico"
         page_html = self._local_app_html(bridge).encode("utf-8")
 
         class LocalStudioHandler(http.server.BaseHTTPRequestHandler):
@@ -3647,9 +3653,27 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
                 if path in {"/", "/index.html"}:
                     self._send(200, page_html, "text/html; charset=utf-8")
                     return
+                if path == "/favicon.ico":
+                    if favicon_ico_path.exists():
+                        self._send(200, favicon_ico_path.read_bytes(), "image/x-icon")
+                    else:
+                        self._send(404, "Not found")
+                    return
+                if path == "/favicon-32.png":
+                    if favicon_32_path.exists():
+                        self._send(200, favicon_32_path.read_bytes(), "image/png")
+                    else:
+                        self._send(404, "Not found")
+                    return
+                if path == "/favicon.png":
+                    if favicon_png_path.exists():
+                        self._send(200, favicon_png_path.read_bytes(), "image/png")
+                    else:
+                        self._send(404, "Not found")
+                    return
                 if path == "/favicon.svg":
-                    if favicon_path.exists():
-                        self._send(200, favicon_path.read_bytes(), "image/svg+xml")
+                    if favicon_svg_path.exists():
+                        self._send(200, favicon_svg_path.read_bytes(), "image/svg+xml")
                     else:
                         self._send(404, "Not found")
                     return
