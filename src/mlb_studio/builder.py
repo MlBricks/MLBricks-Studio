@@ -54,6 +54,14 @@ def _compressed_frontend_bundle():
         )
     return _FRONTEND_BUNDLE_CACHE
 
+
+class _LocalBridgeValue:
+    """Tiny value holder used by Builder.app() in place of ipywidgets."""
+
+    def __init__(self, value=""):
+        self.value = value
+
+
 class Builder:
     """
     Kaggle/Jupyter-safe Builder.
@@ -113,6 +121,9 @@ class Builder:
         self._run_thread = None
         self._stop_event = threading.Event()
         self._bridge_widgets = None
+        self._app_server = None
+        self._app_thread = None
+        self._app_url = None
         # The notebook bridge has one Run button shared by imports, autosaves,
         # persistence navigation and runtime actions. Keep quick requests queued
         # instead of dropping a click when another bridge worker is finishing.
@@ -3356,7 +3367,7 @@ class Builder:
     def mlbricks_info(self):
         return get_mlbricks_info()
 
-    def _html(self, bridge=None, *, include_assets=True):
+    def _html(self, bridge=None, *, include_assets=True, allow_full_window=True):
         css_gzip_b64, js_gzip_b64 = _compressed_frontend_bundle() if include_assets else ("", "")
         trust = self.project_trust_info()
 
@@ -3378,6 +3389,7 @@ class Builder:
             "runtime_capabilities": self.runtime_capabilities,
             "local_environment": self.local_environment,
             "instance_id": self._instance_id,
+            "allow_full_window": bool(allow_full_window),
             "project_trust": trust,
             "local_persistence": self.persistence.summary(),
         }, separators=(",", ":")).replace("</", "<\\/")
@@ -3450,6 +3462,276 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
 }})();
 </script>
 """
+
+    def web(self):
+        """Launch MLB Studio inside Jupyter, Colab, Kaggle, or another IPython notebook.
+
+        This is the explicit notebook/web entry point. It uses the same standard
+        ipywidgets bridge as normal notebook display so Build, Data, Cloud,
+        training, serving, and persistence actions continue to execute in Python.
+        """
+        try:
+            self._ipython_display_()
+        except ImportError as exc:
+            raise RuntimeError(
+                "Builder.web() requires an IPython/Jupyter environment. "
+                "Use Builder.app() when running MLB Studio directly on a local system."
+            ) from exc
+        return None
+
+    def _local_app_bridge_classes(self):
+        suffix = self._instance_id.replace("-", "_")
+        return {
+            "state": f"mlb-local-state-bridge-{suffix}",
+            "command": f"mlb-local-command-bridge-{suffix}",
+            "run": f"mlb-local-run-bridge-{suffix}",
+            "stop": f"mlb-local-stop-bridge-{suffix}",
+            "progress": f"mlb-local-progress-bridge-{suffix}",
+        }
+
+    def _setup_local_app_bridge(self):
+        bridge = self._local_app_bridge_classes()
+        self._bridge_widgets = {
+            "state": _LocalBridgeValue(json.dumps(self.state)),
+            "command": _LocalBridgeValue("{}"),
+            "progress": _LocalBridgeValue(json.dumps({
+                "status": "idle", "message": "Ready", "overall": 0, "nodes": {}
+            })),
+        }
+        return bridge
+
+    def _local_app_html(self, bridge):
+        """Return the full standalone localhost page used by Builder.app()."""
+        fragment = self._html(bridge=bridge, include_assets=True, allow_full_window=False)
+        bridge_json = json.dumps(bridge)
+        return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MLB Studio</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="shortcut icon" href="/favicon.svg">
+  <style>
+    html,body{{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1118}}
+    body{{padding:0}}
+    .mlb-root{{width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;min-width:0!important;border-radius:0!important;border:0!important;box-shadow:none!important}}
+    .mlb-local-bridge{{position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}}
+  </style>
+</head>
+<body>
+  <div class="mlb-local-bridge" aria-hidden="true">
+    <textarea class="{bridge['state']}"></textarea>
+    <textarea class="{bridge['command']}"></textarea>
+    <button type="button" class="{bridge['run']}"></button>
+    <button type="button" class="{bridge['stop']}"></button>
+    <textarea class="{bridge['progress']}"></textarea>
+  </div>
+  {fragment}
+  <script>
+  (function() {{
+    const bridge = {bridge_json};
+    const state = document.querySelector('.'+bridge.state);
+    const command = document.querySelector('.'+bridge.command);
+    const run = document.querySelector('.'+bridge.run);
+    const stop = document.querySelector('.'+bridge.stop);
+    const progress = document.querySelector('.'+bridge.progress);
+    let progressBusy = false;
+
+    async function postJson(url, payload) {{
+      const response = await fetch(url, {{
+        method: 'POST',
+        headers: {{'Content-Type':'application/json'}},
+        body: JSON.stringify(payload || {{}}),
+        cache: 'no-store'
+      }});
+      if (!response.ok) throw new Error(await response.text() || ('HTTP '+response.status));
+      return response;
+    }}
+
+    run.addEventListener('click', function() {{
+      postJson('/api/run', {{
+        state_raw: state.value || '{{}}',
+        command_raw: command.value || '{{}}'
+      }}).then(function() {{ command.value='{{}}'; }}).catch(function(error) {{
+        progress.value = JSON.stringify({{status:'error',runtime_kind:'bridge',overall:0,message:'Local app bridge error: '+String(error)}});
+      }});
+    }});
+
+    stop.addEventListener('click', function() {{
+      postJson('/api/stop', {{}}).catch(function(error) {{
+        progress.value = JSON.stringify({{status:'error',runtime_kind:'bridge',overall:0,message:'Local app stop error: '+String(error)}});
+      }});
+    }});
+
+    async function pollProgress() {{
+      if (progressBusy) return;
+      progressBusy = true;
+      try {{
+        const response = await fetch('/api/progress?ts='+Date.now(), {{cache:'no-store'}});
+        if (response.ok) {{
+          const raw = await response.text();
+          if (raw) progress.value = raw;
+        }}
+      }} catch (_) {{}}
+      finally {{ progressBusy = false; }}
+    }}
+    pollProgress();
+    setInterval(pollProgress, 300);
+  }})();
+  </script>
+</body>
+</html>"""
+
+    def app(self, host="127.0.0.1", port=0, *, open_browser=True, block=True):
+        """Run MLB Studio as a standalone local application in the system browser.
+
+        Unlike :meth:`web`, this mode does not require Jupyter/IPython and does
+        not show the ``Full Window`` action because the Studio itself already
+        occupies the local browser window. The server binds to localhost by
+        default and uses a small local bridge for Python runtime actions.
+        """
+        import http.server
+        import socketserver
+        import webbrowser
+        from urllib.parse import urlparse
+
+        if self._app_server is not None:
+            if self._app_url and open_browser:
+                webbrowser.open(self._app_url, new=1)
+            if block:
+                try:
+                    while self._app_server is not None:
+                        time.sleep(0.25)
+                except KeyboardInterrupt:
+                    self.stop_app()
+            return self._app_url
+
+        bridge = self._setup_local_app_bridge()
+        builder = self
+        favicon_path = _STATIC / "favicon.svg"
+        page_html = self._local_app_html(bridge).encode("utf-8")
+
+        class LocalStudioHandler(http.server.BaseHTTPRequestHandler):
+            server_version = "MLBStudioLocal/1.0"
+
+            def log_message(self, format, *args):
+                return
+
+            def _send(self, status, body=b"", content_type="text/plain; charset=utf-8"):
+                if isinstance(body, str):
+                    body = body.encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _read_json(self):
+                try:
+                    size = int(self.headers.get("Content-Length") or "0")
+                except Exception:
+                    size = 0
+                if size < 0 or size > 64 * 1024 * 1024:
+                    raise ValueError("Request body is too large.")
+                raw = self.rfile.read(size) if size else b"{}"
+                value = json.loads(raw.decode("utf-8") or "{}")
+                if not isinstance(value, dict):
+                    raise ValueError("Request JSON must be an object.")
+                return value
+
+            def do_GET(self):
+                path = urlparse(self.path).path
+                if path in {"/", "/index.html"}:
+                    self._send(200, page_html, "text/html; charset=utf-8")
+                    return
+                if path == "/favicon.svg":
+                    if favicon_path.exists():
+                        self._send(200, favicon_path.read_bytes(), "image/svg+xml")
+                    else:
+                        self._send(404, "Not found")
+                    return
+                if path == "/api/progress":
+                    progress = (builder._bridge_widgets or {}).get("progress")
+                    self._send(200, getattr(progress, "value", "{}"), "application/json; charset=utf-8")
+                    return
+                self._send(404, "Not found")
+
+            def do_POST(self):
+                path = urlparse(self.path).path
+                try:
+                    payload = self._read_json()
+                    if path == "/api/run":
+                        widgets = builder._bridge_widgets or {}
+                        state_widget = widgets.get("state")
+                        command_widget = widgets.get("command")
+                        if state_widget is None or command_widget is None:
+                            raise RuntimeError("Local Studio bridge is not initialized.")
+                        state_widget.value = str(payload.get("state_raw") or "{}")
+                        command_widget.value = str(payload.get("command_raw") or "{}")
+                        builder._start_bridge_run()
+                        self._send(202, json.dumps({"ok": True}), "application/json; charset=utf-8")
+                        return
+                    if path == "/api/stop":
+                        builder.stop()
+                        self._send(200, json.dumps({"ok": True}), "application/json; charset=utf-8")
+                        return
+                    self._send(404, "Not found")
+                except Exception as exc:
+                    self._send(400, json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), "application/json; charset=utf-8")
+
+        class LocalThreadingServer(socketserver.ThreadingTCPServer):
+            allow_reuse_address = True
+            daemon_threads = True
+
+        server = LocalThreadingServer((host, int(port)), LocalStudioHandler)
+        actual_host, actual_port = server.server_address[:2]
+        public_host = "127.0.0.1" if actual_host in {"0.0.0.0", "::"} else actual_host
+        self._app_url = f"http://{public_host}:{actual_port}/"
+        self._app_server = server
+
+        if open_browser:
+            threading.Timer(0.15, lambda: webbrowser.open(self._app_url, new=1)).start()
+
+        if block:
+            print(f"MLB Studio running at {self._app_url}")
+            print("Press Ctrl+C to stop the local app.")
+            try:
+                server.serve_forever(poll_interval=0.25)
+            except KeyboardInterrupt:
+                pass
+            finally:
+                self.stop_app()
+        else:
+            thread = threading.Thread(
+                target=server.serve_forever,
+                kwargs={"poll_interval": 0.25},
+                daemon=True,
+                name=f"mlb-studio-app-{self._instance_id}",
+            )
+            self._app_thread = thread
+            thread.start()
+        return self._app_url
+
+    def stop_app(self):
+        """Stop a local server previously started by :meth:`app`."""
+        server = self._app_server
+        self._app_server = None
+        self._app_url = None
+        if server is not None:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+            try:
+                server.server_close()
+            except Exception:
+                pass
+        self._app_thread = None
+        return None
+
 
     def _repr_html_(self):
         # Plain-HTML fallback. Editing works; Python execution uses

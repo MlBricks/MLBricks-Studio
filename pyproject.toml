@@ -40,10 +40,10 @@ License = "https://polyformproject.org/licenses/noncommercial/1.0.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["mlb_studio*"]
+include = ["mlb_studio*", "mlbstudio*"]
 
 [tool.setuptools.package-data]
-mlb_studio = ["static/*.js", "static/*.css", "*.json"]
+mlb_studio = ["static/*.js", "static/*.css", "static/*.svg", "*.json"]
 
 
 [project.optional-dependencies]

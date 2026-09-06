@@ -2,7 +2,7 @@
 
 Visual model studio for building, training, generating, serving, and managing MLBricks models.
 
-> **MLB Studio V1.0 package:** use the `mlb_studio` Python module and install from the `MLBricks-Studio` GitHub repository.
+> **MLB Studio V1.0 package:** use the `mlbstudio` Python module (`mlb_studio` remains supported for compatibility) and install from the `MLBricks-Studio` GitHub repository.
 
 ## Install on Kaggle
 
@@ -10,13 +10,32 @@ Visual model studio for building, training, generating, serving, and managing ML
 %pip install -U "git+https://github.com/MlBricks/MLBricks-Studio.git"
 ```
 
-Then:
+Then launch the notebook/web version:
+
+```python
+from mlbstudio import Builder
+
+builder = Builder()
+builder.web()
+```
+
+Use `web()` in Jupyter, Colab, Kaggle, and other notebook environments. It keeps the notebook Python bridge and includes the **Full Window** launcher.
+
+For a normal local Python installation, launch the standalone local app instead:
+
+```python
+from mlbstudio import Builder
+
+builder = Builder()
+builder.app()
+```
+
+`app()` opens MLB Studio on localhost in the system browser, talks directly to the local Python process, and does not show the **Full Window** control because the app is already running as the local full application. Press `Ctrl+C` in the terminal to stop it.
+
+The legacy import remains valid:
 
 ```python
 from mlb_studio import Builder
-
-builder = Builder()
-builder
 ```
 
 MLB Studio V1.0 uses Jupyter's standard HTML representation protocol instead of `anywidget`, so Kaggle does not need a custom frontend widget module.
