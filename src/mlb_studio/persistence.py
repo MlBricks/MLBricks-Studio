@@ -35,6 +35,10 @@ _HEAVY_FIELD_NAMES = {
     "tensor_data",
 }
 
+_KEYRING_UNSET = object()
+_KEYRING_BACKEND_CACHE: Any = _KEYRING_UNSET
+_KEYRING_CACHE_LOCK = threading.Lock()
+
 
 def default_studio_home() -> Path:
     override = str(os.environ.get("MLBRICKS_STUDIO_HOME") or "").strip()
@@ -319,16 +323,36 @@ class StudioPersistence:
 
     @staticmethod
     def _keyring_backend():
-        try:
-            import keyring
-            backend = keyring.get_keyring()
-            # keyring.backends.fail.Keyring has priority <= 0 and throws on use.
-            priority = getattr(backend, "priority", 0)
-            if priority is None or float(priority) <= 0:
+        """Return a usable keyring module without stalling notebook sessions.
+
+        Linux notebook/container environments (Kaggle/Colab/Jupyter kernels)
+        commonly expose a keyring package but no desktop secret-service session.
+        Probing that backend can block for several seconds. In that headless case
+        Studio intentionally uses its existing session-secret fallback and stores
+        only masked metadata in SQLite. Backend detection is cached per process.
+        """
+        global _KEYRING_BACKEND_CACHE
+        if _KEYRING_BACKEND_CACHE is not _KEYRING_UNSET:
+            return _KEYRING_BACKEND_CACHE
+        with _KEYRING_CACHE_LOCK:
+            if _KEYRING_BACKEND_CACHE is not _KEYRING_UNSET:
+                return _KEYRING_BACKEND_CACHE
+            if os.name != "nt" and not os.environ.get("DBUS_SESSION_BUS_ADDRESS") and not os.environ.get("DISPLAY"):
+                _KEYRING_BACKEND_CACHE = None
                 return None
-            return keyring
-        except Exception:
-            return None
+            try:
+                import keyring
+                backend = keyring.get_keyring()
+                # keyring.backends.fail.Keyring has priority <= 0 and throws on use.
+                priority = getattr(backend, "priority", 0)
+                if priority is None or float(priority) <= 0:
+                    _KEYRING_BACKEND_CACHE = None
+                    return None
+                _KEYRING_BACKEND_CACHE = keyring
+                return keyring
+            except Exception:
+                _KEYRING_BACKEND_CACHE = None
+                return None
 
     def save_credentials(self, provider: str, name: str, credentials: dict[str, Any]) -> dict[str, Any]:
         provider = str(provider or "").strip().lower()

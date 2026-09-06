@@ -1890,7 +1890,8 @@ function __MLB_STUDIO_FACTORY__(){
           action==="persistence_save_credentials"?"Saving credential securely…":"Updating local storage…";
         setStatus(label);
       }
-      setTimeout(()=>{clickBridgeButton(button);},120);
+      const dispatchDelay=(action==="persistence_save_credentials"||action==="persistence_delete_credentials")?10:120;
+      setTimeout(()=>{clickBridgeButton(button);},dispatchDelay);
     }
 
     function requestHubCommand(action,config={}){
@@ -2212,6 +2213,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(next.runtime_kind==="cloud"){
         const cloudTerminal=next.status==="done"||next.status==="error"||next.status==="stopped";
+        const previousCloudInspectorTab=inspectorTab;
         inspectorTab=cloudTerminal?"info":"settings";
         if(next.cloud_status){cloudStatus[next.cloud_status.provider]=cp(next.cloud_status);setTimeout(draw,20);}
         const keepPct=(next.status==="error"||next.status==="stopped")?Math.max(Number(cloudActivity.overall||0),Number(next.overall||0)):Number(next.overall||0);
@@ -2236,6 +2238,12 @@ function __MLB_STUDIO_FACTORY__(){
           cloudActivity.target={...(cloudActivity.target||{}),path:cloudForm.object_path};
         }
         updateCloudInspectorLive(cloudActivity);
+        // Running progress used to update only the existing DOM. If an older
+        // terminal event had just drawn Info, the purple Info tab could remain
+        // visible while live Connection / Transfer Activity was being updated.
+        // Redraw whenever routing changes so live telemetry is physically under
+        // Cloud and terminal results are physically under Info.
+        if(previousCloudInspectorTab!==inspectorTab)setTimeout(draw,0);
         if(next.state_replace){
           state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
           selected=null;pendingPort=null;outputDirectorySelection=null;
@@ -5070,7 +5078,17 @@ function __MLB_STUDIO_FACTORY__(){
       input.value=value||"";
       input.placeholder=placeholder||"";
       input.autocomplete="off";
-      input.addEventListener("input",()=>onChange(input.value));
+      input.addEventListener("input",()=>{
+        onChange(input.value);
+        // Secret fields should enable/disable Save Credential immediately while
+        // the user types. Re-rendering the full Cloud view here would destroy
+        // focus and made the button appear disabled until another action forced
+        // a draw (for example Check Connection).
+        if(secret){
+          const save=root.querySelector(".mlb-cloud-credential-save");
+          if(save)save.disabled=!currentCredentialHasInput(cloudForm.provider);
+        }
+      });
       field.appendChild(input);
       return field;
     }
@@ -5176,7 +5194,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       const actions=document.createElement("div");actions.className="mlb-cloud-credential-actions";
-      const saveCredential=btn("Save Credential","mlb-cloud-check");
+      const saveCredential=btn("Save Credential","mlb-cloud-check mlb-cloud-credential-save");
       saveCredential.disabled=!currentCredentialHasInput(p);
       saveCredential.title="Store the real secret in the OS credential store when available; Studio DB keeps only the masked reference.";
       saveCredential.addEventListener("click",()=>{
@@ -5525,7 +5543,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function renderCloudInfoInspector(body){
-      body.classList.add("mlb-cloud-info-panel");
+      body.classList.add("mlb-cloud-info-panel","mlb-cloud-tab-info");
       const provider=String(cloudActivity.provider||cloudForm.provider||"huggingface");
       const finalState=cloudFinalState();
       const hasResult=cloudActivity.status==="done"||cloudActivity.status==="error"||cloudActivity.status==="stopped";
@@ -5581,6 +5599,7 @@ function __MLB_STUDIO_FACTORY__(){
 
     function renderCloudSettingsInspector(body){
       // Cloud tab is dedicated to live connection identity and transfer activity.
+      body.classList.add("mlb-cloud-tab-live");
       renderCloudInspector(body);
     }
 
