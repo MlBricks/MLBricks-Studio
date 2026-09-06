@@ -1803,10 +1803,11 @@ function __MLB_STUDIO_FACTORY__(){
     function requestCloudCommand(action,config={}){
       const cleanConfig=cp(config||{});
       const provider=String(cleanConfig.provider||cloudForm.provider||"huggingface");
+      inspectorTab="info";
       if(!ensureBridgeForAction()){
         execution={status:"error",runtime_kind:"cloud",phase:action,overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
         cloudActivity={...cloudActivity,status:"error",action,provider,phase:action,overall:0,message:execution.message,error:execution.message,finished_at:Date.now(),target:cloudTargetFromConfig(cleanConfig)};
-        applyExecutionProgress(execution);setStatus(execution.message);draw();return;
+        applyExecutionProgress(execution);draw();return;
       }
       lastCloudRequest={action,config:cp(cleanConfig)};
       const command={action,cloud:cleanConfig,ts:Date.now()};
@@ -1819,17 +1820,17 @@ function __MLB_STUDIO_FACTORY__(){
       };
       if(!setBridgeState()||!setBridgeCommand(command)){
         cloudActivity.status="error";cloudActivity.message="Could not send cloud command to Python.";cloudActivity.error=cloudActivity.message;cloudActivity.finished_at=Date.now();
-        setStatus(cloudActivity.message);draw();return;
+        draw();return;
       }
       const button=bridgeControl(bridge.run,"button");
       if(!button){
         cloudActivity.status="error";cloudActivity.message="Python cloud control was not found.";cloudActivity.error=cloudActivity.message;cloudActivity.finished_at=Date.now();
-        setStatus(cloudActivity.message);draw();return;
+        draw();return;
       }
       const progressInput=bridgeControl(bridge.progress,"textarea");
       lastProgressRaw=progressInput?.value||lastProgressRaw;
       execution={status:"running",runtime_kind:"cloud",phase:action,overall:0,message:cloudActivity.message,nodes:{}};
-      applyExecutionProgress(execution);setStatus(execution.message);draw();
+      applyExecutionProgress(execution);draw();
       setTimeout(()=>{clickBridgeButton(button);},250);
     }
 
@@ -2207,6 +2208,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       if(next.runtime_kind==="cloud"){
+        inspectorTab="info";
         if(next.cloud_status){cloudStatus[next.cloud_status.provider]=cp(next.cloud_status);setTimeout(draw,20);}
         const keepPct=(next.status==="error"||next.status==="stopped")?Math.max(Number(cloudActivity.overall||0),Number(next.overall||0)):Number(next.overall||0);
         cloudActivity={
@@ -2235,7 +2237,6 @@ function __MLB_STUDIO_FACTORY__(){
           else if(contentType==="model")revealArtifactWorkspace("model",restored.model?.id||null);
           else if(next.phase==="cloud_load")collapseArtifactWorkspace();
         }
-        if(next.message)setStatus(next.message);
         if(next.status==="done"||next.status==="error"||next.status==="stopped")setTimeout(draw,80);
       }
 
@@ -5442,6 +5443,7 @@ function __MLB_STUDIO_FACTORY__(){
       appendCloudInspectorRow(connection,"Provider",providerLabel(provider));
       const identity=status.username||status.account||status.account_name||status.project||status.arn||"";
       appendCloudInspectorRow(connection,"User / Account",identity||"—");
+      if(Array.isArray(status.organizations)&&status.organizations.length)appendCloudInspectorRow(connection,"Organizations",status.organizations.join(", "));
       appendCloudInspectorRow(connection,"Credential",cloudCredentialSelection[provider]|| (currentCredentialHasInput(provider)?"Session credential":"None"));
       const cmsg=document.createElement("div");cmsg.className="mlb-cloud-inspector-message "+conn.cls;cmsg.textContent=status.message||"Connection has not been checked yet.";connection.appendChild(cmsg);
       const check=btn("Check Connection","mlb-cloud-inspector-action");
@@ -5460,6 +5462,7 @@ function __MLB_STUDIO_FACTORY__(){
       }else{
         appendCloudInspectorRow(activity,"Operation",cloudActionLabel(cloudActivity.action));
         appendCloudInspectorRow(activity,"Provider",providerLabel(cloudActivity.provider||provider));
+        appendCloudInspectorRow(activity,"Phase",String(cloudActivity.phase||"—").replace(/_/g," "));
         appendCloudInspectorRow(activity,"Content",cloudActivity.content_type?cloudActivity.content_type.replace(/_/g," "):"—");
         const target=cloudActivity.target||{};
         appendCloudInspectorRow(activity,"Repository",target.repository);
@@ -5484,6 +5487,11 @@ function __MLB_STUDIO_FACTORY__(){
         if(cloudActivity.started_at)appendCloudInspectorRow(activity,"Started",new Date(cloudActivity.started_at).toLocaleTimeString());
         if(cloudActivity.finished_at)appendCloudInspectorRow(activity,"Finished",new Date(cloudActivity.finished_at).toLocaleTimeString());
         if(cloudActivity.result?.url)appendCloudInspectorRow(activity,"Remote",cloudActivity.result.url);
+        if(cloudActivity.error){
+          const err=document.createElement("div");err.className="mlb-cloud-inspector-message error";err.textContent=cloudActivity.error;activity.appendChild(err);
+        }else if(cloudActivity.status==="done"){
+          const done=document.createElement("div");done.className="mlb-cloud-inspector-message ok";done.textContent=cloudActivity.message||"Cloud task completed successfully.";activity.appendChild(done);
+        }
 
         const actions=document.createElement("div");actions.className="mlb-cloud-inspector-actions";
         if(cloudActivity.status==="running"){
@@ -5510,7 +5518,16 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function renderCloudInfoInspector(body){
-      body.innerHTML='<div class="mlb-section-title">CLOUD ACTIVITY</div><div class="mlb-api-path">Connection identity, upload/download target, progress, completion state and failures are shown in the Cloud tab. Cancel requests stop supported transfers at the next safe provider boundary; Retry repeats the last failed or cancelled command.</div>';
+      renderCloudInspector(body);
+    }
+
+    function renderCloudSettingsInspector(body){
+      const provider=String(cloudForm.provider||"huggingface");
+      const status=cloudStatus[provider]||{};
+      body.innerHTML='<div class="mlb-section-title">CLOUD</div>';
+      const note=document.createElement("div");note.className="mlb-api-path";note.textContent="Configure credentials and transfer targets in the Cloud & Repositories workspace. Live connection, push/load progress, success, cancellation and failure details appear automatically in the Info tab.";body.appendChild(note);
+      appendCloudInspectorRow(body,"Provider",providerLabel(provider));
+      appendCloudInspectorRow(body,"Connection",status.message||"Not checked");
     }
 
     function updateCloudInspectorLive(activity=cloudActivity){
@@ -9423,7 +9440,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(cloudWorkspace.open){
         if(inspectorTab==="info")renderCloudInfoInspector(body);
-        else renderCloudInspector(body);
+        else renderCloudSettingsInspector(body);
       }else if(runtimeInspectorEntry){
         renderRuntimeContextInspector(body,runtimeInspectorEntry,runtimePanel?.mode||"train");
       }else if(outputDataset){

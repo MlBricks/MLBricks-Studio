@@ -2810,10 +2810,18 @@ class Builder:
         if provider == "huggingface":
             credentials = self._resolve_cloud_credentials(provider, cloud)
             token = credentials.get("token")
-            repo_id = str(cloud.get("repo") or "").strip()
+            requested_repo_id = str(cloud.get("repo") or "").strip()
+            from .hub import resolve_repo_id
+            repo_id = resolve_repo_id(requested_repo_id, token=token)
             revision = str(cloud.get("revision") or "main").strip() or "main"
             private = bool(cloud.get("private", True))
             artifact_id = cloud.get("artifact_id")
+            target = {"repository": repo_id, "revision": revision}
+            if repo_id and repo_id != requested_repo_id:
+                emit(
+                    "running", "namespace", 16,
+                    f"Resolved Hugging Face namespace to {repo_id.split('/', 1)[0]}.",
+                )
             if action == "cloud_push":
                 emit("running", "upload", 22, f"Uploading {content_type} to {repo_id}…")
                 if content_type == "dataset":
@@ -3254,6 +3262,15 @@ class Builder:
                     "status":"error","runtime_kind":runtime_kind,"phase":action,"overall":0,
                     "message":f"{type(exc).__name__}: {exc}"
                 }
+                if str(action).startswith("cloud_"):
+                    cloud_cfg = command.get("cloud") or {}
+                    cloud_provider = str(cloud_cfg.get("provider") or "huggingface").lower()
+                    error_payload.update({
+                        "cloud_action": action,
+                        "cloud_provider": cloud_provider,
+                        "cloud_content_type": str(cloud_cfg.get("content_type") or "project"),
+                        "cloud_target": self._cloud_target(cloud_provider, cloud_cfg),
+                    })
                 if runtime_kind == "serve":
                     error_payload.update({
                         "phase": action,

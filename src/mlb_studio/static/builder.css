@@ -3665,6 +3665,7 @@
 .mlb-cloud-inspector-message{margin:9px 0;padding:8px;border:1px solid #30404d;border-radius:6px;background:#101a22;color:#9fb0bf;font-size:10.5px;line-height:1.4}
 .mlb-cloud-inspector-message.ok{border-color:#2b6e4d;background:#0f2118;color:#72d7a2}
 .mlb-cloud-inspector-message.warn{border-color:#6d5830;background:#211b10;color:#d2b167}
+.mlb-cloud-inspector-message.error{border-color:#78404a;background:#28151a;color:#ff9ca8;overflow-wrap:anywhere}
 .mlb-cloud-inspector-empty{padding:10px;border:1px dashed #334655;border-radius:6px;color:#7d8e9e;font-size:10.5px;line-height:1.45}
 .mlb-cloud-transfer-progress{margin-top:10px;padding-top:3px}
 .mlb-cloud-transfer-progress>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}

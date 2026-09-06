@@ -13,6 +13,10 @@ def test_cloud_workspace_uses_right_sidebar_for_connection_and_transfer_activity
     assert 'data-cloud-role="bar"' in js
     assert '.mlb-cloud-transfer-track' in css
     assert 'cloudWorkspace.open?"Cloud"' in js
+    assert 'inspectorTab="info";' in js
+    assert 'if(inspectorTab==="info")renderCloudInfoInspector(body);' in js
+    assert 'renderCloudInspector(body);' in js
+    assert 'mlb-cloud-inspector-message error' in js
 
 
 def test_cloud_backend_emits_staged_progress_and_target_metadata():
@@ -28,8 +32,10 @@ def test_cloud_backend_emits_staged_progress_and_target_metadata():
 
 def test_huggingface_cloud_push_emits_connection_identity_and_progress(monkeypatch):
     from mlb_studio.builder import Builder
+    from mlb_studio import hub
 
     builder = Builder()
+    monkeypatch.setattr(hub, "resolve_repo_id", lambda repo_id, token=None: "DemoOrg/repo" if repo_id == "demo/repo" else repo_id)
     events = []
     monkeypatch.setattr(
         builder,
@@ -64,7 +70,9 @@ def test_huggingface_cloud_push_emits_connection_identity_and_progress(monkeypat
         events.append,
     )
 
-    assert [event["overall"] for event in events] == [4, 10, 22, 94, 100]
+    assert [event["overall"] for event in events] == [4, 10, 16, 22, 94, 100]
     assert events[1]["cloud_status"]["username"] == "demo-user"
-    assert events[2]["cloud_target"]["repository"] == "demo/repo"
+    assert events[2]["phase"] == "namespace"
+    assert events[2]["cloud_target"]["repository"] == "DemoOrg/repo"
+    assert events[3]["cloud_target"]["repository"] == "DemoOrg/repo"
     assert events[-1]["status"] == "done"

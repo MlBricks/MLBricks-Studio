@@ -67,6 +67,47 @@ def auth_status(token: str | None = None) -> dict[str, Any]:
     return result
 
 
+
+
+def resolve_repo_id(repo_id: str, *, token: str | None = None) -> str:
+    """Return the canonical Hugging Face namespace casing for a repo id.
+
+    Hugging Face organization/user namespace checks can be case-sensitive during
+    repository creation. Studio accepts user-entered ids case-insensitively for
+    known authenticated namespaces, then preserves the canonical casing returned
+    by ``whoami``. If the token is unavailable or the namespace is unknown, the
+    original id is returned unchanged.
+    """
+    repo_id = str(repo_id or "").strip()
+    if "/" not in repo_id:
+        return repo_id
+    token = hub_token(required=False, token=token)
+    if not token:
+        return repo_id
+    namespace, name = repo_id.split("/", 1)
+    if not namespace or not name:
+        return repo_id
+    HfApi, _, _, _ = _hub()
+    try:
+        info = HfApi(token=token).whoami(token=token) or {}
+    except Exception:
+        return repo_id
+    candidates = []
+    username = info.get("name") or info.get("fullname")
+    if username:
+        candidates.append(str(username))
+    for org in info.get("orgs") or []:
+        if isinstance(org, dict):
+            org_name = org.get("name") or org.get("username") or org.get("org_name")
+        else:
+            org_name = org
+        if org_name:
+            candidates.append(str(org_name))
+    for candidate in candidates:
+        if candidate.casefold() == namespace.casefold():
+            return f"{candidate}/{name}"
+    return repo_id
+
 def _repo_url(repo_id: str, repo_type: str) -> str:
     if repo_type == "dataset":
         return f"https://huggingface.co/datasets/{repo_id}"
@@ -79,7 +120,7 @@ def _write_json(path: Path, payload: Any) -> None:
 
 def push_dataset(dataset, *, repo_id: str, metadata: dict, private: bool = True, token: str | None = None) -> dict:
     token = hub_token(required=True, token=token)
-    repo_id = str(repo_id or "").strip()
+    repo_id = resolve_repo_id(str(repo_id or "").strip(), token=token)
     if "/" not in repo_id:
         raise ValueError("Dataset Repo ID must be in `username-or-org/repo-name` format.")
 
@@ -118,7 +159,7 @@ def push_dataset(dataset, *, repo_id: str, metadata: dict, private: bool = True,
 
 def load_dataset(repo_id: str, *, revision: str | None = None, token: str | None = None):
     token = hub_token(required=False, token=token)
-    repo_id = str(repo_id or "").strip()
+    repo_id = resolve_repo_id(str(repo_id or "").strip(), token=token)
     if not repo_id:
         raise ValueError("Dataset Repo ID is required.")
     try:
@@ -191,7 +232,7 @@ def push_model(
     token: str | None = None,
 ) -> dict:
     token = hub_token(required=True, token=token)
-    repo_id = str(repo_id or "").strip()
+    repo_id = resolve_repo_id(str(repo_id or "").strip(), token=token)
     if "/" not in repo_id:
         raise ValueError("Model Repo ID must be in `username-or-org/repo-name` format.")
 
@@ -264,7 +305,7 @@ def push_model(
 
 def load_model(repo_id: str, *, revision: str | None = None, token: str | None = None) -> tuple[dict, Path, dict]:
     token = hub_token(required=False, token=token)
-    repo_id = str(repo_id or "").strip()
+    repo_id = resolve_repo_id(str(repo_id or "").strip(), token=token)
     if not repo_id:
         raise ValueError("Model Repo ID is required.")
 
@@ -292,7 +333,7 @@ def load_model(repo_id: str, *, revision: str | None = None, token: str | None =
 
 def push_project(*, repo_id: str, state: dict, private: bool = True, token: str | None = None) -> dict:
     token = hub_token(required=True, token=token)
-    repo_id = str(repo_id or "").strip()
+    repo_id = resolve_repo_id(str(repo_id or "").strip(), token=token)
     if "/" not in repo_id:
         raise ValueError("Project Repo ID must be in `username-or-org/repo-name` format.")
 
@@ -337,7 +378,7 @@ def push_project(*, repo_id: str, state: dict, private: bool = True, token: str 
 
 def load_project(repo_id: str, *, revision: str | None = None, token: str | None = None) -> tuple[dict, dict]:
     token = hub_token(required=False, token=token)
-    repo_id = str(repo_id or "").strip()
+    repo_id = resolve_repo_id(str(repo_id or "").strip(), token=token)
     if not repo_id:
         raise ValueError("Project Repo ID is required.")
     _, _, hf_hub_download, _ = _hub()
