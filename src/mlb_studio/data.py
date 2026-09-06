@@ -16,7 +16,7 @@ def _datasets():
     except ImportError as exc:
         raise ImportError(
             "Text/data features need Hugging Face datasets. "
-            "Install with: pip install 'mlb-studio[data]' "
+            "Install with: pip install 'mlbricks-studio[data]' "
             "or pip install datasets kagglehub transformers pandas pyarrow"
         ) from exc
 
@@ -76,7 +76,7 @@ def _load_hf_parquet_api_prefix(
 ):
     """Load a small Hub prefix through the Dataset Viewer Parquet API.
 
-    Gallery quickstarts use this fast path so Studio does not have to resolve
+    Workshop quickstarts use this fast path so Studio does not have to resolve
     an entire multi-GB repository before reading the first few thousand rows.
     The Dataset Viewer API returns resolved Parquet URLs grouped by
     configuration and split. ``datasets`` then streams those URLs and stops
@@ -177,7 +177,7 @@ def _load_hf_parquet_api_prefix(
 def _materialize_streaming_dataset(ds_module, dataset, max_rows: int, progress_callback=None):
     """Materialize only the requested prefix of an IterableDataset.
 
-    Gallery quickstarts use streaming so large Hub repositories do not download
+    Workshop quickstarts use streaming so large Hub repositories do not download
     their complete parquet corpus just to select the first few thousand rows.
     The returned object is a normal Dataset so downstream cleaning/splitting and
     tokenization continue to work unchanged.
@@ -225,7 +225,7 @@ def load_huggingface_dataset(
 ):
     """Load a dataset from the Hugging Face Hub.
 
-    Gallery presets may include a public upstream fallback. This lets Studio keep
+    Workshop presets may include a public upstream fallback. This lets Studio keep
     using an MLBricks-maintained mirror when it is populated while still working
     if that mirror exists but has not uploaded data files yet. Authentication,
     when required, is read from the saved credential profile / normal HF login.
@@ -312,7 +312,7 @@ def load_huggingface_dataset(
     try:
         data = load_target(primary)
     except Exception as primary_exc:
-        # Permission failures must remain explicit. For Gallery mirrors, missing
+        # Permission failures must remain explicit. For Workshop mirrors, missing
         # or empty repositories are safe to replace with the declared upstream.
         lowered = f"{type(primary_exc).__name__}: {primary_exc}".lower()
         permission_like = any(x in lowered for x in ("401", "403", "unauthorized", "forbidden", "gatedrepo", "gated repo", "invalid token"))
@@ -542,7 +542,7 @@ def tokenize_text_dataset(
         from transformers import AutoTokenizer
     except ImportError as exc:
         raise ImportError(
-            "Tokenization needs transformers. It is included with MLBricks Studio; reinstall/upgrade mlb-studio and restart the notebook kernel."
+            "Tokenization needs transformers. It is included with MLBricks Studio; reinstall/upgrade mlbricks-studio and restart the notebook kernel."
         ) from exc
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)

@@ -30,3 +30,14 @@ def test_data_processing_dependencies_are_installed_by_default():
     ):
         assert dep in project_deps
     assert '"ipython>=7.34,<10"' in project_deps
+
+
+def test_primary_and_alias_distribution_metadata():
+    root = Path(__file__).resolve().parents[1]
+    primary = (root / "pyproject.toml").read_text(encoding="utf-8")
+    alias = (root / "aliases" / "mlb-studio" / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'name = "mlbricks-studio"' in primary
+    assert 'version = "1.0.0b1"' in primary
+    assert 'name = "mlb-studio"' in alias
+    assert 'version = "1.0.0b1"' in alias
+    assert '"mlbricks-studio==1.0.0b1"' in alias

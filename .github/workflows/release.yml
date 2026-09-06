@@ -1,4 +1,4 @@
-name: Publish MLB Studio to PyPI
+name: Publish MLBricks Studio to PyPI
 
 on:
   workflow_dispatch:
@@ -11,35 +11,55 @@ on:
 jobs:
   build:
     if: ${{ github.event.inputs.confirm == 'PUBLISH' }}
-    name: Build distributions
+    name: Test and build distributions
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install release tools
         run: python -m pip install --upgrade pip build twine pytest
-      - name: Install project
+
+      - name: Install primary project
         run: python -m pip install -e .
+
       - name: Run tests
         run: python -m pytest -q
-      - name: Build package
-        run: python -m build
-      - name: Validate distributions
-        run: python -m twine check dist/*
-      - name: Upload distributions
+
+      - name: Build primary package (mlbricks-studio)
+        run: python -m build --outdir dist/primary .
+
+      - name: Build alias package (mlb-studio)
+        run: python -m build --outdir ../../dist/alias .
+        working-directory: aliases/mlb-studio
+
+      - name: Validate primary distributions
+        run: python -m twine check dist/primary/*
+
+      - name: Validate alias distributions
+        run: python -m twine check dist/alias/*
+
+      - name: Upload primary distributions
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
-          path: dist/
+          name: mlbricks-studio-distributions
+          path: dist/primary/
 
-  publish:
-    name: Publish to PyPI
+      - name: Upload alias distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-studio-alias-distributions
+          path: dist/alias/
+
+  publish-primary:
+    name: Publish mlbricks-studio to PyPI
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -47,10 +67,33 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Download distributions
+      - name: Download primary distributions
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          name: mlbricks-studio-distributions
           path: dist/
-      - name: Publish to PyPI
+
+      - name: Publish mlbricks-studio
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  publish-alias:
+    name: Publish mlb-studio alias to PyPI
+    needs: publish-primary
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download alias distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-studio-alias-distributions
+          path: dist/
+
+      - name: Publish mlb-studio alias
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

@@ -73,13 +73,13 @@ class Builder:
     def __init__(self, project=None, preset=None):
         if project is not None:
             self.state = project
-        elif preset in {"tinystories", "tinystories-30m", "demo"}:
+        elif preset in {"tinystories", "tinystories-30m", "tinystories-50m", "50m", "50m-slm", "slm-50m", "demo"}:
             self.state = tinystories_30m_project()
-        elif preset in {"esa-200m", "stateaware-esa-200m", "stateaware_esa_200m"}:
+        elif preset in {"esa-200m", "stateaware-esa-200m", "stateaware_esa_200m", "200m", "200m-slm", "slm-200m"}:
             self.state = stateaware_esa_200m_project()
-        elif preset in {"soup-200m", "soup_200m"}:
+        elif preset in {"soup-200m", "soup-200m-3l", "soup_200m"}:
             self.state = soup_200m_project()
-        elif preset in {"soup-30m", "soup-30m-1l", "soup_30m_1l"}:
+        elif preset in {"soup-30m", "soup-30m-1l", "soup_30m_1l", "soup-50m", "soup-50m-2l", "soup_50m_2l"}:
             self.state = soup_30m_1l_project()
         else:
             self.state = new_project()
@@ -2410,7 +2410,7 @@ class Builder:
                 "status": "done", "runtime_kind": "persistence", "phase": "load_draft",
                 "overall": 100, "message": f'Draft {(self.state.get("project") or {}).get("name") or "design"} recovered.',
                 # Loading does not change repository metadata, so avoid rebuilding
-                # the Gallery summary (which parses every saved draft payload).
+                # the Workshop summary (which parses every saved draft payload).
                 "state_replace": self.to_dict(),
             })
             return self.state
@@ -2474,7 +2474,7 @@ class Builder:
             if kind == "component":
                 # Component editor drafts exist only while the component is
                 # unsaved. Commit + draft removal happen in the same Python
-                # persistence command so the Gallery cannot briefly retain a
+                # persistence command so the Workshop cannot briefly retain a
                 # saved component as a draft because of bridge timing.
                 source_draft_id = str(config.get("source_draft_id") or f"draft_{component_local_id}").strip()
                 if source_draft_id:
@@ -3063,7 +3063,7 @@ class Builder:
         if self._run_thread is not None and self._run_thread.is_alive():
             # Capture the exact command/state now. The previous implementation
             # discarded the click while a background import/autosave was active,
-            # which made Gallery Recover/Open feel random in Full Window mode.
+            # which made Workshop Recover/Open feel random in Full Window mode.
             state_raw = getattr(state_widget, "value", "{}") if state_widget is not None else "{}"
             command_raw = getattr(command_widget, "value", "{}") if command_widget is not None else "{}"
             if command_widget is not None:
@@ -3092,7 +3092,7 @@ class Builder:
         action = str(command.get("action") or "data").lower()
         # These operations are fully DB/credential backed and do not consume the
         # current Builder graph. Skipping the often-large state textarea removes a
-        # full JSON parse/copy from every Gallery Recover/Open operation.
+        # full JSON parse/copy from every Workshop Recover/Open operation.
         state_independent_actions = {
             "persistence_prepare_draft", "persistence_prepare_item",
             "persistence_load_draft", "persistence_load_item",

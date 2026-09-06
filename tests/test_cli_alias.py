@@ -6,6 +6,8 @@ from pathlib import Path
 def test_console_script_is_declared():
     text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     assert '[project.scripts]' in text
+    assert 'name = "mlbricks-studio"' in text
+    assert 'mlbricks-studio = "mlbstudio.cli:main"' in text
     assert 'mlb-studio = "mlbstudio.cli:main"' in text
 
 

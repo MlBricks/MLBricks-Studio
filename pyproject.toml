@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mlb-studio"
+name = "mlbricks-studio"
 version = "1.0.0b1"
 description = "MLB Studio V1.0 Beta — visual model studio for MLBricks across local Python, Jupyter, Kaggle and Colab."
 readme = "README.md"
@@ -33,6 +33,7 @@ dependencies = [
 ]
 
 [project.scripts]
+mlbricks-studio = "mlbstudio.cli:main"
 mlb-studio = "mlbstudio.cli:main"
 
 [project.urls]
@@ -52,7 +53,7 @@ mlb_studio = ["static/*.js", "static/*.css", "static/*.svg", "static/*.png", "st
 
 [project.optional-dependencies]
 # Backward-compatible extra. Data Processing dependencies are now installed
-# by default so Tokenize Text and Gallery data pipelines work after a normal install.
+# by default so Tokenize Text and Workshop data pipelines work after a normal install.
 data = [
   "datasets>=2.18,<5",
   "kagglehub>=0.3,<1",

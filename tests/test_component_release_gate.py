@@ -205,3 +205,26 @@ def test_catalog_json_roundtrip_preserves_all_component_defaults():
     catalog = primitive_catalog()
     restored = json.loads(json.dumps(catalog))
     assert restored == catalog
+
+
+def test_release_slm_presets_have_requested_depths_and_names():
+    slm50 = tinystories_30m_project()
+    assert slm50["project"]["name"] == "50M SLM"
+    assert slm50["project"]["estimated_parameters"] == "~50M"
+    model50 = slm50["components"][slm50["root_component_id"]]
+    assert len([n for n in model50["nodes"] if n.get("type") == "custom"]) == 10
+
+    soup50 = soup_30m_1l_project()
+    assert soup50["project"]["name"] == "50M SLM · SOUP"
+    soup50_node = next(n for n in soup50["components"][soup50["root_component_id"]]["nodes"] if n.get("type") == "soup")
+    assert soup50_node["params"]["depth"] == 2
+
+    slm200 = stateaware_esa_200m_project()
+    assert slm200["project"]["name"] == "200M SLM"
+    esa200_node = next(n for n in slm200["components"][slm200["root_component_id"]]["nodes"] if n.get("type") == "stateaware_esa_stack")
+    assert esa200_node["params"]["layers"] == 12
+
+    soup200 = soup_200m_project()
+    assert soup200["project"]["name"] == "200M SLM · SOUP"
+    soup200_node = next(n for n in soup200["components"][soup200["root_component_id"]]["nodes"] if n.get("type") == "soup")
+    assert soup200_node["params"]["depth"] == 3

@@ -188,8 +188,8 @@ def test_blueprints_and_loaded_designs_start_with_workspace_collapsed():
     assert 'function collapseArtifactWorkspace()' in text
     assert 'bottomView="outputs";' in text
     assert 'bottomExpanded=false;' in text
-    assert 'collapseArtifactWorkspace();setStatus(entry.name+" loaded from Gallery.")' in text
-    assert 'collapseArtifactWorkspace();setStatus("TinyStories starter loaded.")' in text
+    assert 'collapseArtifactWorkspace();setStatus(entry.name+" loaded from Workshop.")' in text
+    assert 'collapseArtifactWorkspace();setStatus("50M SLM starter loaded.")' in text
     assert 'collapseArtifactWorkspace();setStatus(spec.name+" loaded.")' in text
     assert 'selected=null;pendingPort=null;collapseArtifactWorkspace();switchingWorkspace=true;' in text
 
@@ -650,3 +650,20 @@ def test_data_gallery_presets_use_verified_upstreams_fast_streaming_and_visible_
     assert 'canvas.appendChild(dataHud)' in js
     assert 'updateDataCanvasProgress(next)' in js
     assert 'nodeState.percent' in js
+
+
+def test_workshop_name_and_slm_presets_are_release_configured():
+    js = _builder_js()
+    assert 'actionBtn("Workshop"' in js
+    assert 'actionBtn("Gallery"' not in js
+    assert 'card("50M SLM","Parameters ~50M · Batch 16 · Block 512 · 10 layers"' in js
+    assert 'card("50M SLM · SOUP","Parameters ~50M · Batch 16 · Block 512 · 2 SOUP layers"' in js
+    assert 'card("200M SLM","Parameters ~200M · Batch 16 · Block 256 · 12 layers"' in js
+    assert 'card("200M SLM · SOUP","Parameters 199,916,160 · Batch 16 · Block 256 · 3 SOUP layers"' in js
+    assert 'for(let i=1;i<=10;i++)' in js
+    assert 'coreName:"StateAware ESA ×12"' in js
+    assert 'layers:12' in js
+    assert 'coreName:"SOUP ×2"' in js
+    assert 'depth:2' in js
+    assert 'coreName:"SOUP ×3"' in js
+    assert 'depth:3' in js

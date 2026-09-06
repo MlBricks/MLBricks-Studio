@@ -452,7 +452,7 @@ class ModelHTTPRuntime:
         try:
             from pyngrok import ngrok
         except ImportError as exc:
-            raise RuntimeError("Public ngrok links need pyngrok. Install: pip install 'mlb-studio[serve]'") from exc
+            raise RuntimeError("Public ngrok links need pyngrok. Install: pip install 'mlbricks-studio[serve]'") from exc
         if auth_token: ngrok.set_auth_token(auth_token)
         self.tunnel = ngrok.connect(addr=self.port, proto="http", bind_tls=True)
         self.public_url = str(self.tunnel.public_url)

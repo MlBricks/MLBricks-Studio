@@ -1320,7 +1320,7 @@
 .mlb-ins-tabs button{white-space:nowrap}
 
 
-/* v0.7.12 — Edit/Lock layout, unique names, Gallery */
+/* v0.7.12 — Edit/Lock layout, unique names, Workshop */
 .mlb-layout-toggle.editing{border-color:#456e59;background:#12251c;color:#8bd7aa}
 .mlb-layout-toggle.locked{border-color:#745b32;background:#251e12;color:#e2c37d}
 .mlb-palette button:disabled,.mlb-custom-card:disabled{opacity:.42;cursor:not-allowed;filter:saturate(.55)}
@@ -1417,7 +1417,7 @@
 .mlb-toolbar .mlb-tool,.mlb-workspace-badge{white-space:nowrap}
 
 
-/* v0.7.24 — samples belong in Gallery, not the canvas toolbar */
+/* v0.7.24 — samples belong in Workshop, not the canvas toolbar */
 .mlb-gallery-section.sample{border-color:#51438d;background:linear-gradient(180deg,#151529 0%,#111820 100%)}
 .mlb-gallery-sample-card{border-color:#4f4384;background:#17172a}
 .mlb-gallery-action.sample{border-color:#6653c5;background:#241f49;color:#d9d1ff;font-weight:700}
@@ -1462,7 +1462,7 @@
 
 
 /* ------------------------------------------------------------------
-   v0.7.28 — center Gallery + Cloud workspaces
+   v0.7.28 — center Workshop + Cloud workspaces
    ------------------------------------------------------------------ */
 .mlb-top-gallery-btn{border-color:#5747a5;background:#18152b;color:#d9d0ff;font-weight:800}
 .mlb-top-gallery-btn:hover,.mlb-top-gallery-btn.active{border-color:#8063ee;background:#29204a;color:#fff}
@@ -1485,7 +1485,7 @@
 
 
 
-/* v0.7.28 — compact Gallery header and center Cloud & Repositories */
+/* v0.7.28 — compact Workshop header and center Cloud & Repositories */
 .mlb-central-gallery-head,.mlb-central-gallery-copy,.mlb-gallery-close{display:none!important}
 .mlb-central-gallery-tabs{padding-top:5px}
 .mlb-top-cloud-btn{border-color:#385b78;background:#111d29;color:#b9d8ee;font-weight:800;white-space:nowrap}
@@ -1501,7 +1501,7 @@
 
 
 /* ------------------------------------------------------------------
-   v0.7.29 — Gallery + Repositories as polished center workspaces
+   v0.7.29 — Workshop + Repositories as polished center workspaces
    ------------------------------------------------------------------ */
 .mlb-top-mode-switch{
   display:grid!important;grid-template-columns:minmax(88px,1fr) minmax(104px,1.15fr) minmax(112px,1fr);
@@ -1575,7 +1575,7 @@
 
 
 /* ------------------------------------------------------------------
-   v0.7.30 — separate top actions + reliably scrollable Gallery
+   v0.7.30 — separate top actions + reliably scrollable Workshop
    ------------------------------------------------------------------ */
 .mlb-top-primary{
   display:flex!important;align-items:center;justify-content:center;gap:12px!important;
@@ -1607,7 +1607,7 @@
 /* Retire the old segmented-mode styling if stale markup is restored from cache. */
 .mlb-top-mode-switch{display:contents!important;border:0!important;background:transparent!important;box-shadow:none!important;min-width:0!important}
 
-/* Gallery/Repositories always occupy the available center canvas exactly. */
+/* Workshop/Repositories always occupy the available center canvas exactly. */
 .mlb-canvas.gallery-active,.mlb-canvas.cloud-active{overflow:hidden!important;padding:0!important}
 .mlb-central-gallery,.mlb-central-cloud{
   position:absolute!important;inset:0!important;width:auto!important;height:auto!important;
@@ -1638,7 +1638,7 @@
 
 
 /* ------------------------------------------------------------------
-   v0.7.31 — fixed Gallery card sizing + content-only scroll
+   v0.7.31 — fixed Workshop card sizing + content-only scroll
    ------------------------------------------------------------------ */
 .mlb-central-gallery{
   position:absolute!important;inset:0!important;
@@ -1677,7 +1677,7 @@
 .mlb-central-gallery-card-info strong{font-size:12px!important}
 .mlb-central-gallery-card-info span{font-size:10px!important;line-height:1.35!important}
 
-/* Build + Gallery remain centered. Cloud & Repositories replaces Share on the right. */
+/* Build + Workshop remain centered. Cloud & Repositories replaces Share on the right. */
 .mlb-top-primary>.mlb-top-cloud-btn{display:none!important}
 .mlb-top-actions>.mlb-top-cloud-action{
   display:inline-flex!important;align-items:center;justify-content:center;
@@ -1693,7 +1693,7 @@
 
 
 /* ------------------------------------------------------------------
-   v0.7.32 — full-width saved-model gallery + Gallery file actions
+   v0.7.32 — full-width saved-model gallery + Workshop file actions
    ------------------------------------------------------------------ */
 .mlb-gallery-page-actions{
   margin-left:auto;display:flex;align-items:center;gap:7px;min-width:0;flex:0 0 auto;
@@ -1720,7 +1720,7 @@
 
 
 /* ------------------------------------------------------------------
-   v0.7.33 — Fetch/Stop lifecycle + two-column Components/Data Gallery
+   v0.7.33 — Fetch/Stop lifecycle + two-column Components/Data Workshop
    ------------------------------------------------------------------ */
 .mlb-central-gallery-body.components-tab,
 .mlb-central-gallery-body.data-tab{
@@ -1809,7 +1809,7 @@
 
 
 /* ------------------------------------------------------------------
-   v0.7.35 patch — slightly smaller logo + top padding + explicit Build/Gallery icons
+   v0.7.35 patch — slightly smaller logo + top padding + explicit Build/Workshop icons
    ------------------------------------------------------------------ */
 .mlb-topbar{
   height:60px!important;
@@ -1956,7 +1956,7 @@
   stroke-width:1.9!important;
 }
 
-/* Build / Stop / Gallery share the same control height and vertical rhythm. */
+/* Build / Stop / Workshop share the same control height and vertical rhythm. */
 .mlb-top-primary>.mlb-top-build-tab,
 .mlb-top-primary>.mlb-center-stop,
 .mlb-top-primary>.mlb-top-gallery-btn{
@@ -2092,7 +2092,7 @@
 .mlb-node .node-icon{top:9px!important;}
 
 /* ------------------------------------------------------------------
-   v0.7.44 — custom component Gallery lifecycle + palette edit controls
+   v0.7.44 — custom component Workshop lifecycle + palette edit controls
    ------------------------------------------------------------------ */
 .mlb-custom-binding-field{display:flex;flex-direction:column;gap:5px;margin:0 0 9px}
 .mlb-custom-binding-field label{font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#8292a5}
@@ -3554,7 +3554,7 @@
 }
 
 /* ------------------------------------------------------------------
-   v0.7.36 — Local drafts/repository live in Gallery, not Cloud
+   v0.7.36 — Local drafts/repository live in Workshop, not Cloud
    ------------------------------------------------------------------ */
 .mlb-central-gallery-body.drafts-tab{
   display:block!important;
@@ -3572,7 +3572,7 @@
   overflow:visible!important;
 }
 
-/* Determinate data-source progress. Streaming Gallery quickstarts report rows
+/* Determinate data-source progress. Streaming Workshop quickstarts report rows
    loaded so the active source card does not look frozen on large Hub datasets. */
 .mlb-run-track.determinate i{
   transform:none!important;

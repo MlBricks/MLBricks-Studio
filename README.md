@@ -2,9 +2,15 @@
 
 Visual model studio for building, training, generating, serving, and managing MLBricks models.
 
-> **MLB Studio V1.0 Beta (`1.0.0b1`):** install the `mlb-studio` distribution. It uses `mlbricks-kit==1.0.0b2`. The public Python module is `mlbstudio` (`mlb_studio` remains supported for compatibility).
+> **MLB Studio V1.0 Beta (`1.0.0b1`):** install the primary `mlbricks-studio` distribution (or the short `mlb-studio` alias). It uses `mlbricks-kit==1.0.0b2`. The public Python module is `mlbstudio` (`mlb_studio` remains supported for compatibility).
 
 ## Install
+
+```bash
+pip install mlbricks-studio
+```
+
+Short PyPI alias (installs the same MLBricks Studio runtime):
 
 ```bash
 pip install mlb-studio
@@ -13,6 +19,8 @@ pip install mlb-studio
 Launch the local app directly from a terminal:
 
 ```bash
+mlbricks-studio
+# or the short alias
 mlb-studio
 ```
 
@@ -21,7 +29,7 @@ This command launches the same local application as `Builder().app()`.
 ## Install on Kaggle
 
 ```python
-%pip install -U mlb-studio
+%pip install -U mlbricks-studio
 ```
 
 Then launch the notebook/web version:
@@ -93,9 +101,9 @@ The Builder now includes:
 - Component-specific MLBricks API inspector on the right.
 - Nested reusable layer architecture with double-click / Open Architecture.
 - Override and Save As New workflow for custom components.
-- TinyStories 30M starter preset:
-  - 6 nested model layers
-  - target ~30M parameters
+- 50M SLM starter preset:
+  - 10 nested model layers
+  - target ~50M parameters
   - 512 context
   - batch size 16
   - TinyStories dataset
@@ -110,7 +118,7 @@ from mlb_studio import Builder
 Builder(preset="tinystories")
 ```
 
-The preset's ~30M value is an architecture target/estimate. Exact trainable parameters should be calculated by the installed MLBricks runtime because implementation details, vocabulary size and weight tying can change between MLBricks versions.
+The preset's ~50M value is an architecture target/estimate. Exact trainable parameters should be calculated by the installed MLBricks runtime because implementation details, vocabulary size and weight tying can change between MLBricks versions.
 
 
 ## v0.2.1 — Real MLBricks API inspector
@@ -124,7 +132,7 @@ Use `builder.component_api("esa")` to inspect the metadata in Python.
 
 ## v0.3.0
 
-Full dark ComfyUI-style MLB Studio frontend with layer-by-layer layout, curved manual connections, residual edges, minimap, dark inspector, real installed MLBricks API forms, nested custom components, and TinyStories 30M preset.
+Full dark ComfyUI-style MLB Studio frontend with layer-by-layer layout, curved manual connections, residual edges, minimap, dark inspector, real installed MLBricks API forms, nested custom components, and the 50M SLM preset.
 
 
 ## v0.3.1 — Kaggle stale-renderer + real API fix
@@ -388,13 +396,13 @@ The **Load** button restores the same design from JSON.
 Keep the normal Builder installation light. Install data features with:
 
 ```bash
-pip install -U mlb-studio
+pip install -U mlbricks-studio
 ```
 
 or, when installing Builder from GitHub in Kaggle, install:
 
 ```bash
-# Data Processing dependencies are installed automatically with mlb-studio
+# Data Processing dependencies are installed automatically with mlbricks-studio
 ```
 
 Authentication tokens/credentials are deliberately **not** stored in design
@@ -1173,14 +1181,14 @@ a secure backend is available. In notebook/headless environments without an OS
 keyring, the real secret remains session-only and the UI marks the saved reference
 as requiring re-entry after the session ends.
 
-Real credentials are never included in Builder state, autosaved drafts, Gallery
+Real credentials are never included in Builder state, autosaved drafts, Workshop
 items, JSON/BIN exports, model designs, dataset metadata, or cloud bundles.
 Environment/default credentials continue to work when supported.
 
 ### Optional cloud packages
 
 ```bash
-pip install "mlb-studio[cloud]"
+pip install "mlbricks-studio[cloud]"
 ```
 
 or install individual provider packages:
@@ -1250,7 +1258,7 @@ pip install pyngrok
 or:
 
 ```bash
-pip install "mlb-studio[serve]"
+pip install "mlbricks-studio[serve]"
 ```
 
 
@@ -1480,14 +1488,14 @@ Their underlying catalog/API entries remain available internally so older saved
 Builder projects that already contain these node types can still load and render.
 
 
-## v0.7.12 — editable/locked layouts and personal Gallery
+## v0.7.12 — editable/locked layouts and personal Workshop
 
 ### Toolbar cleanup
 - removed the top **Save** button because **Export** is the primary artifact action
 - removed **Auto Layout** and **Add Layer / Add Step**
 - added one layout-mode toggle: **Lock Layout** / **Edit Layout**
 - added **Rename Layout**
-- added **Gallery**
+- added **Workshop**
 
 ### Layout lock
 Lock Layout protects structural edits: adding, deleting, duplicating, moving or
@@ -1499,12 +1507,12 @@ Components in the same layout are automatically given unique names. Repeated
 components become `ESA`, `ESA 2`, `ESA 3`, etc. Component and layout rename
 operations reject duplicate names.
 
-### Gallery
-The new Gallery stores reusable user-created assets:
+### Workshop
+The new Workshop stores reusable user-created assets:
 - **My Components** — custom bricks can be saved and re-added to My Bricks
 - **My Models** — model layouts can be saved and loaded back to the canvas
 
-Gallery data is part of Builder state and is also mirrored to browser local
+Workshop data is part of Builder state and is also mirrored to browser local
 storage when the notebook/browser environment permits it.
 
 
@@ -1606,7 +1614,7 @@ directly into that tab.
 ## v0.7.22 — readable AIBuilder workspace
 
 - Full-window browser tab title is now **MLB Studio V1.0**. The browser address remains `about:blank` by design because a script-injected tab cannot claim a custom URL without a real hosted origin.
-- Raised tiny 5–9 px UI text to readable sizes across the Builder, Inspector, runtime views, repositories, Gallery and Local Environment panels.
+- Raised tiny 5–9 px UI text to readable sizes across the Builder, Inspector, runtime views, repositories, Workshop and Local Environment panels.
 - Enlarged sidebars, nodes and key controls to match the new typography.
 - Build / Training / Generating and Stop are centered in the top bar.
 - Removed the `?` Help and gear Settings buttons from the top-right toolbar.
@@ -1625,7 +1633,7 @@ directly into that tab.
 
 ## v0.7.24 — stable editing and clearer data controls
 
-- Removed the top-toolbar **Rename Layout** and **Gallery** buttons. Gallery remains available from the workspace drawer.
+- Removed the top-toolbar **Rename Layout** and **Workshop** buttons. Workshop remains available from the workspace drawer.
 - The model/project title is now editable inline from the top bar, similar to notebook title editing.
 - Search now keeps keyboard focus and caret position while results update, with a clear **Search...** placeholder.
 - Inspector scroll position is preserved per selected node/output so edits and actions no longer jump the right panel to the top.
@@ -1633,19 +1641,19 @@ directly into that tab.
 - Split preview is slightly larger and the old numeric-only preset buttons are replaced with themed, explicit Train / Validation / Test labels.
 
 
-## v0.7.24 — sample models and data moved to Gallery
+## v0.7.24 — sample models and data moved to Workshop
 
 - Removed TinyStories 30M and Default Data Pipeline sample shortcuts from the canvas toolbar.
-- Added built-in **Sample Models** and **Sample Data** sections to Gallery.
-- TinyStories 30M now loads from Gallery.
-- The TinyStories text-processing pipeline now loads from Gallery.
-- Data Processing pipelines can now be saved to and loaded from **My Data Pipelines** in Gallery.
-- Bottom workspace sample cards now open Gallery instead of loading a preset directly.
+- Added built-in **Sample Models** and **Sample Data** sections to Workshop.
+- TinyStories 30M now loads from Workshop.
+- The TinyStories text-processing pipeline now loads from Workshop.
+- Data Processing pipelines can now be saved to and loaded from **My Data Pipelines** in Workshop.
+- Bottom workspace sample cards now open Workshop instead of loading a preset directly.
 
 
-## v0.7.26 — center Gallery workspace
+## v0.7.26 — center Workshop workspace
 
-Gallery is now a first-class center workspace, opened from the top toolbar before Undo. It has Models, Components, and Data tabs, built-in sample areas, user-saved items, contextual save actions, and a Close Gallery button. The old Gallery entry was removed from the bottom drawer.
+Workshop is now a first-class center workspace, opened from the top toolbar before Undo. It has Models, Components, and Data tabs, built-in sample areas, user-saved items, contextual save actions, and a Close Workshop button. The old Workshop entry was removed from the bottom drawer.
 
 
 ### Hosted AIBuilder launcher
@@ -1653,10 +1661,10 @@ Gallery is now a first-class center workspace, opened from the top toolbar befor
 The separate-tab launcher is configured for `https://builder.mlbricks.io/`. Deploy `web/builder.mlbricks.io/index.html` at that origin. The launcher contains no model runtime; it receives the current Builder UI from the already-open notebook and keeps Python execution bridged through that notebook tab. If the hosted launcher is unavailable, Builder falls back to the working `about:blank` injected tab rather than failing.
 
 
-## v0.7.28 — Gallery blank-screen fix + hosted AIBuilder URL
+## v0.7.28 — Workshop blank-screen fix + hosted AIBuilder URL
 
-- Fixed the v0.7.26 startup regression where the generic button helper referenced an undefined Gallery item, causing a blank/black Builder screen.
-- Gallery remains a center workspace with Models / Components / Data tabs.
+- Fixed the v0.7.26 startup regression where the generic button helper referenced an undefined Workshop item, causing a blank/black Builder screen.
+- Workshop remains a center workspace with Models / Components / Data tabs.
 - Full-window launch is configured for `https://builder.mlbricks.io/` when its launcher page is deployed.
 - Added `web/builder.mlbricks.io/index.html`, the static launcher to deploy at that origin.
 - If the hosted launcher is unavailable, Builder safely falls back to the working injected `about:blank` tab rather than breaking.
@@ -1664,49 +1672,49 @@ The separate-tab launcher is configured for `https://builder.mlbricks.io/`. Depl
 
 ## v0.7.28 — Center Cloud workspace + launcher stability
 
-- Removed the large Gallery title/subtitle banner; Gallery now opens directly into Models / Components / Data tabs.
-- Added a top-level **Cloud & Repositories** button beside Gallery and moved the cloud provider controls into the center workspace.
+- Removed the large Workshop title/subtitle banner; Workshop now opens directly into Models / Components / Data tabs.
+- Added a top-level **Cloud & Repositories** button beside Workshop and moved the cloud provider controls into the center workspace.
 - Removed Cloud & Repositories from the bottom drawer selector.
 - Full Window now opens the working Builder immediately and only upgrades to `https://builder.mlbricks.io/` after the hosted launcher proves it is deployed, preventing the visible URL-to-`about:blank` bounce.
 
 
-## v0.7.29 — Gallery + Repositories center workspaces
+## v0.7.29 — Workshop + Repositories center workspaces
 
-- Gallery, Build, and Repositories are now a centered segmented top control with no overlap.
-- Gallery is a full center workspace with Models, Components, and Data tabs plus visual cards.
+- Workshop, Build, and Repositories are now a centered segmented top control with no overlap.
+- Workshop is a full center workspace with Models, Components, and Data tabs plus visual cards.
 - Cloud & Repositories is a full center workspace with provider/connection, session credentials, Push, and Load sections.
-- Gallery/Repositories hide the secondary graph toolbar and bottom drawer while open so the center workspace gets the full available area.
+- Workshop/Repositories hide the secondary graph toolbar and bottom drawer while open so the center workspace gets the full available area.
 - Close buttons return to the Builder canvas without changing the current graph.
 
 
-## v0.7.30 — Scrollable Gallery and separated top actions
+## v0.7.30 — Scrollable Workshop and separated top actions
 
-- Gallery now has its own reliable vertical scroll area for large prebuilt and saved collections.
-- Top-center controls are separate `Build`, `Gallery`, and `Cloud & Repositories` buttons instead of a segmented switch.
-- Restores the compact Gallery/Repositories banner treatment while keeping close actions.
+- Workshop now has its own reliable vertical scroll area for large prebuilt and saved collections.
+- Top-center controls are separate `Build`, `Workshop`, and `Cloud & Repositories` buttons instead of a segmented switch.
+- Restores the compact Workshop/Repositories banner treatment while keeping close actions.
 - Cloud & Repositories remains a center workspace and scrolls independently when content exceeds the available height.
 
 
-## v0.7.31 — Fixed Gallery sizing and Cloud action placement
+## v0.7.31 — Fixed Workshop sizing and Cloud action placement
 
-- Gallery banner/tabs keep a fixed height; only Gallery contents scroll as collections grow.
-- Restored compact v0.7.27-style Gallery model cards with parameters, batch and block metadata.
+- Workshop banner/tabs keep a fixed height; only Workshop contents scroll as collections grow.
+- Restored compact v0.7.27-style Workshop model cards with parameters, batch and block metadata.
 - Removed Share and placed Cloud & Repositories in its former top-right slot.
 
 
 
-## v0.7.35 — Fetch lifecycle and two-column Components/Data Gallery
+## v0.7.35 — Fetch lifecycle and two-column Components/Data Workshop
 
 - Data action is now **Fetch Data**.
 - **Stop** appears beside Fetch Data only while the data pipeline is actively running.
-- Gallery **Components** and **Data** saved items use the same two-column layout as saved Models.
+- Workshop **Components** and **Data** saved items use the same two-column layout as saved Models.
 - Data progress is explicitly tagged as the data runtime so toolbar state stays accurate.
 
-## v0.7.32 — Two-column saved models and Gallery file actions
+## v0.7.32 — Two-column saved models and Workshop file actions
 
-- Saved models now flow across both Gallery columns instead of being confined to one side.
-- Load and Export moved from the global toolbar into Gallery to free top-bar space.
-- Prebuilt Models and My Models are full-width Gallery sections with responsive two-column card grids.
+- Saved models now flow across both Workshop columns instead of being confined to one side.
+- Load and Export moved from the global toolbar into Workshop to free top-bar space.
+- Prebuilt Models and My Models are full-width Workshop sections with responsive two-column card grids.
 
 
 ## v0.7.38 — SOUP and ElasticBit 4–32 components
@@ -1722,7 +1730,7 @@ The separate-tab launcher is configured for `https://builder.mlbricks.io/`. Depl
 - Compiled training captures one full causal-LM graph (model + LM head + cross entropy) through one explicit `torch.compile(..., mode="reduce-overhead", fullgraph=True, dynamic=False)` call and performs two untimed forward/backward warm-up passes. Builder uses the explicit PyTorch call so these benchmark flags are forwarded unchanged for visual `TensorGraph` models.
 - Training reports **GPU Tok/s** separately from **end-to-end Tok/s** so data preparation/H2D time is no longer confused with model compute throughput.
 - Default AdamW settings now match the validated notebook (`lr=5e-4`, betas `0.9/0.95`, weight decay `0.1`, no LR warmup); Beta 1/Beta 2 are editable in Training Setup.
-- The TinyStories ~30M starter now mirrors the validated 10-layer/330-width/6-head ESA benchmark, including learned positions, two pre-norm residuals per layer, final LayerNorm, 4× GELU FFN, and tied token-embedding/LM-head weights.
+- The 50M SLM starter uses 10 ESA layers at width 480 with 6 heads, 4× GELU FFN, learned positions, pre-norm residual structure, final LayerNorm, and tied token-embedding/LM-head weights.
 - New training outputs/checkpoints use the package-level MLBricks lifecycle API: `mlbricks.save`, `mlbricks.load`, and `mlbricks.inspect`. Directory model artifacts (`model.pt` + `metadata.json`) are supported by local loading, cloud bundles, generation restore, and Hugging Face push/load. Legacy Builder `.pt/.pth/.ckpt` checkpoints remain loadable.
 - Builder resolves the current `LMHead(..., tie_to=...)` module-reference API visually through a `Tie Embeddings` setting.
 - Learned and sinusoidal position modules are executable in the Builder runtime.
@@ -1730,13 +1738,14 @@ The separate-tab launcher is configured for `https://builder.mlbricks.io/`. Depl
 - Generic `Brick` / `Bricks` composition-container APIs are not exposed as Builder palette components; reusable visual compositions live under **My Components** instead.
 
 
-## v0.7.38 — 200M ESA/SOUP and 30M one-layer SOUP presets
+## v1.0.0b1 — SLM Workshop presets
 
-- **StateAware ESA 200M** — 8 layers, d_model 384, 6 ESA heads, state_dim 2749, context 256, **199,982,344 parameters**.
-- **SOUP 200M** — 3 layers, d_model 1152, state width 2864, 18-head ESA mixers, observer memory 256, fusion hidden 1728, **199,916,160 parameters**.
-- **SOUP 30M 1L** — one SOUP layer, d_model 384, state width 1408, 6-head ESA mixer, context 512, **30,003,528 parameters**.
+- **50M SLM** — 10 ESA layers, width 480, 6 ESA heads, context 512, target **~50M parameters**.
+- **50M SLM · SOUP** — 2 SOUP layers, width 448, 8-head ESA mixers, context 512, target **~50M parameters**.
+- **200M SLM** — 12 StateAware ESA layers, d_model 384, 6 ESA heads, state width 1824, context 256, target **~200M parameters**.
+- **200M SLM · SOUP** — 3 SOUP layers, d_model 1152, state width 2864, 18-head ESA mixers, observer memory 256, fusion hidden 1728, **199,916,160 parameters**.
 
-Programmatic presets: `stateaware-esa-200m`, `soup-200m`, `soup-30m-1l`.
+Preferred programmatic presets: `slm-50m`, `soup-50m-2l`, `slm-200m`, `soup-200m-3l`. Legacy preset aliases remain accepted for compatibility.
 
 ## v0.7.40 — Lazy MLBricks import pool
 
@@ -1760,34 +1769,34 @@ Programmatic presets: `stateaware-esa-200m`, `soup-200m`, `soup-30m-1l`.
 
 
 
-## v0.7.44 — Custom component Gallery lifecycle
+## v0.7.44 — Custom component Workshop lifecycle
 
-- **Save Component** now saves/upserts the definition in **Gallery → Custom Components** instead of automatically installing it in the left **My Components** palette.
-- Gallery custom components remain reusable templates; **Add to My Components** explicitly installs a saved component into the left palette.
+- **Save Component** now saves/upserts the definition in **Workshop → Custom Components** instead of automatically installing it in the left **My Components** palette.
+- Workshop custom components remain reusable templates; **Add to My Components** explicitly installs a saved component into the left palette.
 - Every custom component installed in the left palette now has a compact **✎ edit icon** with **Edit**, **Rename**, and **Remove** actions.
 - Removing a custom component asks for confirmation once. Removing from **My Components** hides the palette template while preserving already-placed model instances.
-- Gallery removals also require one confirmation.
+- Workshop removals also require one confirmation.
 
 ## v0.7.42 — Custom API components
 
-Gallery → Components can now create reusable **API-bound custom components** in addition to visual nested components. A custom API component stores a dotted Python import path (for example `torch.nn.Linear` or `mamba_ssm.Mamba`), a target kind (`module` or `function`), and typed constructor/call parameters. Parameters can be exposed to the component Inspector or bound to the Main, Skip, or Extra tensor lanes and Builder model settings such as model dimension, head count, context, batch, device, and dtype.
+Workshop → Components can now create reusable **API-bound custom components** in addition to visual nested components. A custom API component stores a dotted Python import path (for example `torch.nn.Linear` or `mamba_ssm.Mamba`), a target kind (`module` or `function`), and typed constructor/call parameters. Parameters can be exposed to the component Inspector or bound to the Main, Skip, or Extra tensor lanes and Builder model settings such as model dimension, head count, context, batch, device, and dtype.
 
 External APIs use the same lazy import pool design as MLBricks components: the target is imported only when tested or used and then cached. The runtime supports arbitrary installed PyTorch `nn.Module` classes and callable functions, including multi-input functions through the three Builder tensor lanes. Tuple/list/dict outputs can be reduced with an output selector.
 
 
 ### v0.7.44 — simplified custom component flow
 
-- Custom components are created from **Gallery → Components** only; the duplicate sidebar **+ Create Component** button is removed.
-- Gallery creation is reduced to two compact actions: **API Component** and **Component**.
+- Custom components are created from **Workshop → Components** only; the duplicate sidebar **+ Create Component** button is removed.
+- Workshop creation is reduced to two compact actions: **API Component** and **Component**.
 - Custom component editing uses **Save** and **Save As New** in the right Inspector.
-- The Gallery toolbar no longer shows a second **Save Current Component** action while editing a custom component.
+- The Workshop toolbar no longer shows a second **Save Current Component** action while editing a custom component.
 
 
 ## v0.7.45 — API Component function graph composer
 
 API Components are now explicit Python/PyTorch function DAGs rather than a single binding. Creating an API Component starts with one Function block. Each block can bind an import module + function/class, choose Module or Function execution, define init/call parameters, and bind tensor arguments to Main / Skip / Extra lanes. `+ Add Function` adds another operation block; visual links can be added or removed to build serial chains, parallel fan-out, and three-input merges such as Q/K/V-style APIs. Nested Builder components are intentionally disabled inside API Components.
 
-Saving an API Component now returns directly to Gallery → Components. Saved custom API components expose Add to My Components, Edit, and Remove actions. The runtime executes the saved API graph as a differentiable PyTorch DAG, lazily resolves every external import, registers module steps as submodules, and retains compatibility with older single-binding API Components.
+Saving an API Component now returns directly to Workshop → Components. Saved custom API components expose Add to My Components, Edit, and Remove actions. The runtime executes the saved API graph as a differentiable PyTorch DAG, lazily resolves every external import, registers module steps as submodules, and retains compatibility with older single-binding API Components.
 
 
 ## v0.7.46 — mixed API + MLBricks component graphs
@@ -1796,13 +1805,13 @@ API Component editing now supports a true mixed execution graph. API function/mo
 
 ## v0.7.47 — focused nested component composition
 
-- Component editors are now focused workspaces: Gallery navigation is hidden/blocked until the top-level component is saved.
-- Saved custom components are available directly in the left Component Library while composing another Component, so nested components do not require a Gallery detour.
+- Component editors are now focused workspaces: Workshop navigation is hidden/blocked until the top-level component is saved.
+- Saved custom components are available directly in the left Component Library while composing another Component, so nested components do not require a Workshop detour.
 - Small `+` insertion controls appear between layers and at the end of a Component graph; the Inspector also has `+ Add Component`.
 - The component picker can insert an existing saved Component/API Component or create a new nested Component in-place.
-- Saving a nested child returns to its parent editor and inserts/updates it there; saving the top-level component returns to Gallery → Components.
+- Saving a nested child returns to its parent editor and inserts/updates it there; saving the top-level component returns to Workshop → Components.
 - Circular component nesting is rejected in the UI and guarded again by the Python runtime compiler.
-- Gallery component snapshots now carry nested dependency definitions so reusable nested Components remain self-contained when restored later.
+- Workshop component snapshots now carry nested dependency definitions so reusable nested Components remain self-contained when restored later.
 
 ## v0.7.52 — in-canvas Module insertion
 
@@ -1817,12 +1826,12 @@ API Component editing now supports a true mixed execution graph. API function/mo
 Reusable visual custom graphs are now presented as **Modules**. Low-level items remain Components, while API Component continues to describe Python/PyTorch API graphs.
 
 - Opening or creating a Module enters a focused Module Editor. The outer Module is the editor root instead of inheriting `Untitled Model` in the breadcrumb/title.
-- Model **Build**, **Gallery**, **Cloud & Repositories**, and the Model Workspace drawer are hidden while a Module or API Component is being authored. Saving the outer item returns to Gallery.
+- Model **Build**, **Workshop**, **Cloud & Repositories**, and the Model Workspace drawer are hidden while a Module or API Component is being authored. Saving the outer item returns to Workshop.
 - In the Module Editor, **+ New Module** replaces Auto Connect. Compact `+` insertion controls remain between layers and after the last layer, and the redundant empty-canvas `+ Add Component` action was removed.
-- Nested Modules use **Done**, not Save. Done applies the child to its parent draft and returns one level. Only the outermost **Save / Save As New** writes a Gallery item.
-- The outer Gallery item carries recursive dependency snapshots, so the saved Module is a self-contained graph with its nested Modules/API Components rather than a stack of separately saved inner layers.
+- Nested Modules use **Done**, not Save. Done applies the child to its parent draft and returns one level. Only the outermost **Save / Save As New** writes a Workshop item.
+- The outer Workshop item carries recursive dependency snapshots, so the saved Module is a self-contained graph with its nested Modules/API Components rather than a stack of separately saved inner layers.
 - Module identity is ID-based, not name-based. Parent and child Modules can therefore have the same display name while circular nesting is still rejected using the dependency-ID graph.
-- Gallery/model restoration remaps definition IDs instead of merging definitions by visible name, preserving same-name nested Modules correctly.
+- Workshop/model restoration remaps definition IDs instead of merging definitions by visible name, preserving same-name nested Modules correctly.
 
 
 ## v0.7.52 — direct nested Module creation
@@ -1871,7 +1880,7 @@ The visual mapper can bind **Main Input → `x`**, **Top Input → `residual`**,
 
 ## User-defined source components
 
-MLB Studio API Components can embed **User Defined Function** and **User Defined Class** source code. When a component is saved, Studio stores the source, entry point, detected import dependencies, source revision, and source hash in the component cache and embeds that cache in Gallery/project exports. Reopening or importing the component restores the source automatically.
+MLB Studio API Components can embed **User Defined Function** and **User Defined Class** source code. When a component is saved, Studio stores the source, entry point, detected import dependencies, source revision, and source hash in the component cache and embeds that cache in Workshop/project exports. Reopening or importing the component restores the source automatically.
 
 Third-party Python libraries are **not installed automatically**. The dependency list is validated against the active notebook/local Python environment; install missing packages explicitly before building or running the component.
 
@@ -1881,9 +1890,9 @@ A User Defined Class node constructs one reusable object instance. Later Instanc
 
 User Defined Function nodes can use either the standard Main/Skip/Extra interface or **Custom Named Ports**. Named mode allows an arbitrary number of visual inputs and outputs. Each input maps to a Python function parameter; each output maps to `auto`, a tuple/list index, or a dict/object key. Named User Function ports can connect to other named User Functions or directly to standard MLB Studio Main/Skip/Extra ports.
 
-## MLBricks maintained Data Gallery presets
+## MLBricks maintained Data Workshop presets
 
-Gallery → Data includes six ready-to-open text pipelines backed by MLBricks-maintained
+Workshop → Data includes six ready-to-open text pipelines backed by MLBricks-maintained
 Hugging Face dataset repositories:
 
 - `MlBricks/tinystories` — full TinyStories mirror.
@@ -1893,7 +1902,7 @@ Hugging Face dataset repositories:
 - `MlBricks/openwebmath-1b` — curated OpenWebMath edition at about 1B GPT-2 tokens.
 - `MlBricks/ultrachat-200k` — normalized UltraChat SFT mirror with a common `text` column.
 
-Every prebuilt data pipeline defaults to a 10,000-row quickstart so opening a Gallery card
+Every prebuilt data pipeline defaults to a 10,000-row quickstart so opening a Workshop card
 does not accidentally process the entire maintained edition. Set **Max Rows = 0** on the
 Hugging Face Dataset source only when full-dataset processing is intended.
 
@@ -1913,7 +1922,7 @@ the browser session as disposable:
 - the Python side mirrors drafts into a local SQLite Studio store when the kernel bridge is available;
 - **Cloud & Repositories → Local Studio Storage** lists recent drafts and named Local Repository items;
 - users can save model designs, data pipelines, complete projects, and reusable Module/API Component definitions locally;
-- saved components are also mirrored into the Local Repository when they are saved to Gallery;
+- saved components are also mirrored into the Local Repository when they are saved to Workshop;
 - Hugging Face data nodes can reference a saved credential profile (default: `Default`) for private/gated datasets.
 
 The local database is deliberately **design-only**. It stores graphs, component source/config,

@@ -527,7 +527,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     // Full Window must open on the exact page the notebook is currently showing
-    // (Training Setup/Status, Generation, Gallery, etc.), not reset to Model Builder.
+    // (Training Setup/Status, Generation, Workshop, etc.), not reset to Model Builder.
     const initialView=(payload.initial_view&&typeof payload.initial_view==="object")?cp(payload.initial_view):null;
     if(initialView){
       if(initialView.runtime_panel&&typeof initialView.runtime_panel==="object")runtimePanel=cp(initialView.runtime_panel);
@@ -738,17 +738,17 @@ function __MLB_STUDIO_FACTORY__(){
       source.params.config=preset.config||"";
       source.params.split=preset.split||"train";
       source.params.text_column=preset.text_column||"text";
-      // Gallery presets stream only the requested quickstart prefix, then
+      // Workshop presets stream only the requested quickstart prefix, then
       // materialize it into a normal Dataset for splitting/tokenization. This
       // avoids downloading entire multi-GB Hub repositories for 10k rows.
       source.params.streaming="true";
-      // Gallery quickstarts fetch the verified public upstream directly.
+      // Workshop quickstarts fetch the verified public upstream directly.
       // Keep the MLBricks mirror as metadata until that mirror contains data.
       // For the 10k quickstart, prefer the Dataset Viewer Parquet API so the
       // kernel can stream rows without resolving the full repository first.
       source.params.prefer_parquet_api="true";
       source.params.mirror_dataset_id=preset.mirror_dataset_id||"";
-      // Gallery presets are intentionally safe quickstarts. Users can set 0
+      // Workshop presets are intentionally safe quickstarts. Users can set 0
       // explicitly when they want to process the entire maintained edition.
       source.params.max_rows=10000;
       nodes[2].params.train_size=90;
@@ -980,8 +980,8 @@ function __MLB_STUDIO_FACTORY__(){
       const proposed=win&&typeof win.prompt==="function"?win.prompt(label,defaultName||""):null;
       if(proposed===null)return null;
       const name=String(proposed||"").trim().replace(/\s+/g," ");
-      if(!name){setStatus("Gallery name cannot be empty.");return null;}
-      if(galleryNameExists(kind,name)){setStatus('Gallery already contains "'+name+'".');return null;}
+      if(!name){setStatus("Workshop name cannot be empty.");return null;}
+      if(galleryNameExists(kind,name)){setStatus('Workshop already contains "'+name+'".');return null;}
       return name;
     }
 
@@ -989,40 +989,40 @@ function __MLB_STUDIO_FACTORY__(){
       const c=current(state);if(!c)return;
       if(c.kind==="custom_edit"){
         const def=state.custom_components?.[c.definition_id];
-        const name=askGalleryName("components",def?.name||c.name,"Save Module / API Component to Gallery as:");
+        const name=askGalleryName("components",def?.name||c.name,"Save Module / API Component to Workshop as:");
         if(!name)return;
         const snapshot=customGallerySnapshot(def,c);snapshot.name=name;
         state.gallery.components.push({
           id:uid("gallery_component"),component_id:ensureComponentLocalId(def||snapshot),name,kind:"component",saved_at:new Date().toISOString(),
           source_definition_id:def?.id||snapshot.id,definition:snapshot
         });
-        persistGallery();persistComponentCache();setStatus(name+" saved to Gallery with cached user source.");draw();
+        persistGallery();persistComponentCache();setStatus(name+" saved to Workshop with cached user source.");draw();
         const persistConfig=componentPersistenceConfig(def||snapshot,name);
         clearBrowserDraftById(persistConfig.source_draft_id);
         setTimeout(()=>requestPersistenceCommand("persistence_save_item",persistConfig,true),180);return;
       }
       if(state.active_workspace==="data"){
         const pipeline=current(state);if(!pipeline)return;
-        const name=askGalleryName("data",pipeline.name||"Data Pipeline","Save data pipeline to Gallery as:");
+        const name=askGalleryName("data",pipeline.name||"Data Pipeline","Save data pipeline to Workshop as:");
         if(!name)return;
         state.gallery.data.push({
           id:uid("gallery_data"),name,kind:"data",saved_at:new Date().toISOString(),
           architecture:cp(pipeline)
         });
-        persistGallery();setStatus(name+" saved to Data Gallery.");draw();
+        persistGallery();setStatus(name+" saved to Data Workshop.");draw();
         setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"data",name},true),180);return;
       }
       if(state.active_workspace!=="model"){
-        setStatus("Open Model Builder or Data Processing to save the current design to Gallery.");return;
+        setStatus("Open Model Builder or Data Processing to save the current design to Workshop.");return;
       }
       const model=modelRootComponent();if(!model)return;
-      const name=askGalleryName("models",state.project?.name||model.name||"My Model","Save model to Gallery as:");
+      const name=askGalleryName("models",state.project?.name||model.name||"My Model","Save model to Workshop as:");
       if(!name)return;
       state.gallery.models.push({
         id:uid("gallery_model"),name,kind:"model",saved_at:new Date().toISOString(),
         project:cp(state.project||{}),architecture:cp(model),custom_components:cp(state.custom_components||{}),component_cache:cp(state.component_cache||{})
       });
-      persistGallery();setStatus(name+" saved to Model Gallery.");draw();
+      persistGallery();setStatus(name+" saved to Model Workshop.");draw();
       setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"model",name},true),180);
     }
 
@@ -1084,7 +1084,7 @@ function __MLB_STUDIO_FACTORY__(){
 
     function loadGalleryModel(entry){
       if(!entry?.architecture)return;
-      checkpoint("Load model from Gallery");
+      checkpoint("Load model from Workshop");
       rememberWorkspaceView();
       state.active_workspace="model";
       const rootId=state.workspaces.model.root_component_id;
@@ -1115,12 +1115,12 @@ function __MLB_STUDIO_FACTORY__(){
       state.project={...(entry.project||{}),name:entry.name};
       state.breadcrumbs=[{id:rootId,name:entry.name}];
       state.workspaces.model.view_component_id=rootId;state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
-      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(entry.name+" loaded from Gallery.");draw();
+      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(entry.name+" loaded from Workshop.");draw();
     }
 
     function loadGalleryData(entry){
       if(!entry?.architecture)return;
-      checkpoint("Load data pipeline from Gallery");
+      checkpoint("Load data pipeline from Workshop");
       rememberWorkspaceView();
       state.active_workspace="data";
       const ws=state.workspaces.data;
@@ -1135,7 +1135,7 @@ function __MLB_STUDIO_FACTORY__(){
       execution={status:"idle",overall:0,message:"Ready",nodes:{}};
       collapseArtifactWorkspace();
       switchingWorkspace=true;
-      setStatus(entry.name+" loaded from Gallery.");draw();
+      setStatus(entry.name+" loaded from Workshop.");draw();
     }
 
     function editGalleryComponent(entry){
@@ -1147,16 +1147,16 @@ function __MLB_STUDIO_FACTORY__(){
     function removeGalleryEntry(kind,id){
       const entry=(state.gallery?.[kind]||[]).find(x=>x.id===id);
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const label=entry?.name||"this Gallery item";
-      if(win&&typeof win.confirm==="function"&&!win.confirm('Remove "'+label+'" from Gallery?'))return;
-      checkpoint("Remove Gallery item");
+      const label=entry?.name||"this Workshop item";
+      if(win&&typeof win.confirm==="function"&&!win.confirm('Remove "'+label+'" from Workshop?'))return;
+      checkpoint("Remove Workshop item");
       state.gallery[kind]=(state.gallery[kind]||[]).filter(x=>x.id!==id);
-      persistGallery();setStatus(label+" removed from Gallery.");draw();
+      persistGallery();setStatus(label+" removed from Workshop.");draw();
     }
 
     function openGallery(tab){
       if(current(state)?.kind==="custom_edit"){
-        setStatus("Finish the component in the editor. Save returns you to Gallery automatically.");
+        setStatus("Finish the component in the editor. Save returns you to Workshop automatically.");
         draw();
         return;
       }
@@ -1167,14 +1167,14 @@ function __MLB_STUDIO_FACTORY__(){
       galleryWorkspace={open:true,tab:["models","components","data","drafts"].includes(tab)?tab:"models"};
       outputDirectorySelection=null;
       selected=null;
-      setStatus("Gallery opened.");
+      setStatus("Workshop opened.");
       draw();
     }
 
     function closeGallery(){
       galleryWorkspace.open=false;
       bottomExpanded=galleryPreviousBottomExpanded;
-      setStatus("Gallery closed.");
+      setStatus("Workshop closed.");
       draw();
     }
 
@@ -1875,7 +1875,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Recover/Open/List/Delete are DB-backed operations and do not need the
       // current Builder graph sent to Python first. Sending a large design through
       // the hidden notebook textarea was the main reason Local Repository/Draft
-      // navigation felt much slower than opening an in-memory Gallery component.
+      // navigation felt much slower than opening an in-memory Workshop component.
       const needsCurrentState=action==="persistence_save_draft"||action==="persistence_save_item";
       if(isPopout)pendingBroadcastSkipState=!needsCurrentState;
       const stateReady=needsCurrentState?setBridgeState():true;
@@ -1993,7 +1993,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       // Let the state textarea comm flush first. Immediately before clicking the
       // shared Python Run button, explicitly select the data command. The command
-      // widget is also used by Gallery persistence, cloud actions and background
+      // widget is also used by Workshop persistence, cloud actions and background
       // component imports; relying on its previous/default value made Fetch Data
       // intermittently execute the wrong action after using another Studio area.
       setTimeout(()=>{
@@ -2608,7 +2608,7 @@ function __MLB_STUDIO_FACTORY__(){
         css:(window.__MLB_STUDIO_CSS_ELEMENT__?.textContent||window.__MLB_STUDIO_CSS__||""),
         // Always ask the current factory for its source. A notebook may render a
         // newer Builder after an older one, and a cached source string must not
-        // make Full Window boot the older Gallery/runtime implementation.
+        // make Full Window boot the older Workshop/runtime implementation.
         js:(window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__():(window.__MLB_STUDIO_JS_SOURCE__||""))
       };
       if(!assets.css||!assets.js)return null;
@@ -4753,13 +4753,13 @@ function __MLB_STUDIO_FACTORY__(){
         const acts=document.createElement("div");const load=btn(actionLabel,"mlb-gallery-action sample");load.addEventListener("click",onLoad);acts.append(load);card.append(info,acts);return card;
       };
 
-      // Built-in examples live only in Gallery so the canvas toolbar stays clean.
+      // Built-in examples live only in Workshop so the canvas toolbar stays clean.
       // Add future examples to these registries rather than adding toolbar buttons.
       const builtInSampleModels=[
-        {name:"TinyStories 30M",meta:"6 layers · Context 512 · Batch 16 · ~30M parameters",action:"Load Model",load:loadTinyStories},
-        {name:"SOUP 30M 1L",meta:"1 SOUP layer · Context 512 · Batch 16 · 30,003,528 parameters",action:"Load Model",load:loadSOUP30M1L},
-        {name:"StateAware ESA 200M",meta:"8 layers · Context 256 · Batch 16 · 199,982,344 parameters",action:"Load Model",load:loadStateAwareESA200M},
-        {name:"SOUP 200M",meta:"3 SOUP layers · Context 256 · Batch 16 · 199,916,160 parameters",action:"Load Model",load:loadSOUP200M}
+        {name:"50M SLM",meta:"10 layers · Context 512 · Batch 16 · ~50M parameters",action:"Load Model",load:loadTinyStories},
+        {name:"50M SLM · SOUP",meta:"2 SOUP layers · Context 512 · Batch 16 · ~50M parameters",action:"Load Model",load:loadSOUP30M1L},
+        {name:"200M SLM",meta:"12 layers · Context 256 · Batch 16 · ~200M parameters",action:"Load Model",load:loadStateAwareESA200M},
+        {name:"200M SLM · SOUP",meta:"3 SOUP layers · Context 256 · Batch 16 · 199,916,160 parameters",action:"Load Model",load:loadSOUP200M}
       ];
       const builtInSampleData=mlbricksDataPresets.map(preset=>({
         name:preset.name+" Pipeline",
@@ -4803,7 +4803,7 @@ function __MLB_STUDIO_FACTORY__(){
       });
 
       grid.append(sampleModels,sampleData,componentSection,modelSection,dataSection);container.appendChild(grid);
-      const note=document.createElement("div");note.className="mlb-gallery-note";note.textContent="Built-in samples stay available in Gallery. Your saved items are stored in the Builder project and mirrored to browser storage when available.";container.appendChild(note);
+      const note=document.createElement("div");note.className="mlb-gallery-note";note.textContent="Built-in samples stay available in Workshop. Your saved items are stored in the Builder project and mirrored to browser storage when available.";container.appendChild(note);
     }
 
 
@@ -4814,7 +4814,7 @@ function __MLB_STUDIO_FACTORY__(){
       const head=document.createElement("div");head.className="mlb-gallery-page-head";
       const copy=document.createElement("div");copy.className="mlb-gallery-page-copy";
       copy.innerHTML="<strong>GALLERY</strong><span>Prebuilt MLBricks models, reusable Modules/API Components, data pipelines, autosaved drafts, and your local designs.</span>";
-      const close=btn("×","mlb-gallery-page-close");close.title="Close Gallery";close.addEventListener("click",closeGallery);
+      const close=btn("×","mlb-gallery-page-close");close.title="Close Workshop";close.addEventListener("click",closeGallery);
       head.append(copy,close);outer.appendChild(head);
 
       const tabsRow=document.createElement("div");tabsRow.className="mlb-gallery-tabs-row";
@@ -4877,18 +4877,18 @@ function __MLB_STUDIO_FACTORY__(){
         const samples=makeSection("PREBUILT MODELS","4 available","featured full-width");
         const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
         const loadTiny=btn("Open Model","mlb-gallery-action sample");loadTiny.addEventListener("click",openAndClose(loadTinyStories));
-        sampleGrid.appendChild(card("TinyStories 30M","Parameters ~30M · Batch 16 · Block 512 · 6 layers","MODEL",[loadTiny]));
+        sampleGrid.appendChild(card("50M SLM","Parameters ~50M · Batch 16 · Block 512 · 10 layers","MODEL",[loadTiny]));
         const loadSoup30=btn("Open Model","mlb-gallery-action sample");loadSoup30.addEventListener("click",openAndClose(loadSOUP30M1L));
-        sampleGrid.appendChild(card("SOUP 30M 1L","Parameters 30,003,528 · Batch 16 · Block 512 · 1 SOUP layer","MODEL",[loadSoup30]));
+        sampleGrid.appendChild(card("50M SLM · SOUP","Parameters ~50M · Batch 16 · Block 512 · 2 SOUP layers","MODEL",[loadSoup30]));
         const loadEsa200=btn("Open Model","mlb-gallery-action sample");loadEsa200.addEventListener("click",openAndClose(loadStateAwareESA200M));
-        sampleGrid.appendChild(card("StateAware ESA 200M","Parameters 199,982,344 · Batch 16 · Block 256 · 8 layers","MODEL",[loadEsa200]));
+        sampleGrid.appendChild(card("200M SLM","Parameters ~200M · Batch 16 · Block 256 · 12 layers","MODEL",[loadEsa200]));
         const loadSoup200=btn("Open Model","mlb-gallery-action sample");loadSoup200.addEventListener("click",openAndClose(loadSOUP200M));
-        sampleGrid.appendChild(card("SOUP 200M","Parameters 199,916,160 · Batch 16 · Block 256 · 3 SOUP layers","MODEL",[loadSoup200]));
+        sampleGrid.appendChild(card("200M SLM · SOUP","Parameters 199,916,160 · Batch 16 · Block 256 · 3 SOUP layers","MODEL",[loadSoup200]));
         samples.appendChild(sampleGrid);
         body.appendChild(samples);
 
         const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
-        if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Gallery will appear here."));}
+        if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Workshop will appear here."));}
         else{
           const savedGrid=document.createElement("div");savedGrid.className="mlb-central-gallery-card-grid saved-model-grid";
           (state.gallery.models||[]).forEach(entry=>{
@@ -4944,7 +4944,7 @@ function __MLB_STUDIO_FACTORY__(){
         body.appendChild(samples);
 
         const mine=makeSection("MY DATA",(state.gallery.data||[]).length+" saved","full-width saved-data");
-        if(!(state.gallery.data||[]).length)mine.appendChild(empty("Data pipelines you save to Gallery will appear here."));
+        if(!(state.gallery.data||[]).length)mine.appendChild(empty("Data pipelines you save to Workshop will appear here."));
         else{
           const savedGrid=document.createElement("div");savedGrid.className="mlb-central-gallery-card-grid saved-data-grid";
           (state.gallery.data||[]).forEach(entry=>{
@@ -5239,7 +5239,7 @@ function __MLB_STUDIO_FACTORY__(){
       card.appendChild(actions);
 
       const note=document.createElement("div");note.className="mlb-cloud-secret-note";
-      note.textContent="Real secrets never enter project JSON/BIN, Gallery items, drafts, model designs, or dataset metadata. The local Studio database stores only masked credential metadata; persistent secrets use the operating-system keyring when available.";
+      note.textContent="Real secrets never enter project JSON/BIN, Workshop items, drafts, model designs, or dataset metadata. The local Studio database stores only masked credential metadata; persistent secrets use the operating-system keyring when available.";
       card.appendChild(note);
     }
 
@@ -7396,7 +7396,7 @@ function __MLB_STUDIO_FACTORY__(){
       if(win&&typeof win.confirm==="function"&&!win.confirm('Remove "'+def.name+'" from the Component Library? Existing model instances will remain unchanged.'))return;
       checkpoint("Remove custom item from Component Library");
       def.palette_hidden=true;def.palette_installed=false;customActionMenuId=null;
-      setStatus(def.name+" removed from the Component Library. It remains available in Gallery if it was saved there.");draw();
+      setStatus(def.name+" removed from the Component Library. It remains available in Workshop if it was saved there.");draw();
     }
 
     function addCustom(def,options={}){
@@ -7543,7 +7543,7 @@ function __MLB_STUDIO_FACTORY__(){
       const actions=document.createElement("div");actions.className="mlb-action-grid mlb-custom-save-actions "+(c?.parent_edit_return?"nested":"outer");
       if(c?.parent_edit_return){
         const done=btn("Done");
-        done.title="Apply this nested Module/API Component and return to its parent. The outer Module remains the only Gallery save boundary.";
+        done.title="Apply this nested Module/API Component and return to its parent. The outer Module remains the only Workshop save boundary.";
         done.addEventListener("click",()=>saveCustom(false));
         const cancel=btn("Cancel");
         cancel.title="Discard changes made in this nested editor and return to the parent";
@@ -7551,10 +7551,10 @@ function __MLB_STUDIO_FACTORY__(){
         actions.append(done,cancel);
       }else{
         const save=btn("Save");
-        save.title="Save the complete outer Module/API Component, including all nested dependencies, to Gallery";
+        save.title="Save the complete outer Module/API Component, including all nested dependencies, to Workshop";
         save.addEventListener("click",()=>saveCustom(false));
         const saveAsNew=btn("Save As New");
-        saveAsNew.title="Save the complete outer graph as a new Gallery item";
+        saveAsNew.title="Save the complete outer graph as a new Workshop item";
         saveAsNew.addEventListener("click",()=>saveCustom(true));
         const cancel=btn("Cancel");
         cancel.title="Discard this editor transaction and return without saving";
@@ -7570,7 +7570,7 @@ function __MLB_STUDIO_FACTORY__(){
       const returnInfo=c.parent_edit_return||null;
 
       // Nested editors are draft scopes. "Done" commits the child definition in
-      // memory and returns to its parent; it never creates a separate Gallery
+      // memory and returns to its parent; it never creates a separate Workshop
       // entry. The outermost Module/API Component is the transaction boundary.
       if(returnInfo){
         const frame=customEditorTransactions.pop()||null;
@@ -7617,7 +7617,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
       // Saving the outer editor commits the transaction only after every
       // prompt/validation has succeeded. Editor history is discarded so Undo
-      // on the Model/Gallery screen can never reopen or cancel the saved item.
+      // on the Model/Workshop screen can never reopen or cancel the saved item.
       customEditorTransactions.pop();
       upsertCustomInGallery(savedDef,savedView);
       if(savedDef.palette_installed!==true)savedDef.palette_hidden=true;
@@ -7625,7 +7625,7 @@ function __MLB_STUDIO_FACTORY__(){
       const label=String(savedDef.implementation||"graph")==="api"?"API Component":"Module";
       const savedMessage=savedDef.name+" saved as one "+label+" with all nested dependencies.";
       if(!galleryWorkspace.open)galleryPreviousBottomExpanded=bottomExpanded;
-      // Restore the Model Builder workspace before opening Gallery.
+      // Restore the Model Builder workspace before opening Workshop.
       const modelWs=state.workspaces?.model;
       if(modelWs){state.active_workspace="model";state.view_component_id=modelWs.view_component_id||modelWs.root_component_id;state.breadcrumbs=cp(modelWs.breadcrumbs||[{id:modelWs.root_component_id,name:modelWs.name||"Model Builder"}]);}
       runtimePanel=null;cloudWorkspace.open=false;bottomExpanded=false;galleryWorkspace={open:true,tab:"components"};outputDirectorySelection=null;selected=null;componentInsertPicker={open:false,afterNodeId:null};
@@ -8484,7 +8484,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function loadTinyStories(){
-      checkpoint("Load TinyStories 30M");
+      checkpoint("Load 50M SLM");
       rememberWorkspaceView();
       state.active_workspace="model";
       const rootId=state.workspaces.model.root_component_id;
@@ -8492,29 +8492,33 @@ function __MLB_STUDIO_FACTORY__(){
       state.view_component_id=rootId;
       state.project={
         ...(state.project||{}),
-        name:"TinyStories 30M",
+        name:"50M SLM",
         context_length:512,
         batch_size:16,
         model_settings:{
-          embedding_size:384,
+          embedding_size:480,
           heads:6,
           block:512,
           default_batch:16,
-          vocab_size:32000,
+          vocab_size:50257,
           precision:"fp16"
         },
         dataset:"TinyStories",
-        estimated_parameters:"~30M"
+        estimated_parameters:"~50M",
+        description:"10-layer ESA small language model targeting ~50M parameters"
       };
-      state.breadcrumbs=[{id:rootId,name:"TinyStories 30M"}];
+      state.breadcrumbs=[{id:rootId,name:"50M SLM"}];
       state.workspaces.model.view_component_id=rootId;
       state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
       const defId=uid("custom");
       const esa=makeNode(cat(catalog,"esa")),norm=makeNode(cat(catalog,"rmsnorm")),ffn=makeNode(cat(catalog,"ffn")),res=makeNode(cat(catalog,"residual"));
+      esa.params={...(esa.params||{}),embd:480,dim:480,head:6,heads:6,batch:16,block:512,precision:"fp16",compass:16};
+      norm.params={...(norm.params||{}),normalized_shape:480,hidden_size:480,dim:480};
+      ffn.params={...(ffn.params||{}),hidden_size:480,dim:480,intermediate_size:1920,ffn_dim:1920};
       state.custom_components[defId]={
         id:defId,
-        name:"TinyStories ESA Block",
-        revision:1,
+        name:"50M SLM ESA Block",
+        revision:2,
         description:"ESA → RMSNorm → FFN → Residual",
         input_count:3,
         output_count:3,
@@ -8528,13 +8532,13 @@ function __MLB_STUDIO_FACTORY__(){
       };
       const nodes=[];
       const input=makeNode(cat(catalog,"text_input"));configureTextInputForLatest(input);nodes.push(input);
-      const emb=makeNode(cat(catalog,"embedding"));nodes.push(emb);
-      for(let i=1;i<=6;i++)nodes.push({id:uid("node"),type:"custom",name:"Layer "+i,definition_id:defId,repeat:1,params:{},input_count:3,output_count:3,position:{x:0,y:0}});
+      const emb=makeNode(cat(catalog,"embedding"));emb.params={...(emb.params||{}),vocab_size:50257,embedding_dim:480,hidden_size:480,dim:480};nodes.push(emb);
+      for(let i=1;i<=10;i++)nodes.push({id:uid("node"),type:"custom",name:"Layer "+i,definition_id:defId,repeat:1,params:{},input_count:3,output_count:3,position:{x:0,y:0}});
       const head=makeNode(cat(catalog,"lm_head")),out=makeNode(cat(catalog,"text_output"));nodes.push(head,out);
       const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
-      state.components[rootId]={id:rootId,name:"TinyStories 30M",kind:"model",revision:1,nodes,edges};
+      state.components[rootId]={id:rootId,name:"50M SLM",kind:"model",revision:1,nodes,edges};
       syncModelSettingsToGraph(state.project.model_settings,state.project.model_settings);
-      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus("TinyStories starter loaded.");draw();
+      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus("50M SLM starter loaded.");draw();
     }
 
     function loadSequentialPrebuiltModel(spec){
@@ -8554,17 +8558,17 @@ function __MLB_STUDIO_FACTORY__(){
       selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(spec.name+" loaded.");draw();
     }
 
-    function loadStateAwareESA200M(){loadSequentialPrebuiltModel({name:"StateAware ESA 200M",parameters:"199,982,344",description:"Notebook-matched 8-layer StateAware ESA model",dataset:null,
-      dim:384,heads:6,block:256,batch:16,vocab:50257,precision:"fp16",coreType:"stateaware_esa_stack",coreName:"StateAware ESA ×8",
-      coreParams:{dim:384,state_dim:2749,layers:8,heads:6,block:256,batch:16,depth_dim:64,compass:16,update_ratio_start:0.20,update_ratio_end:0.14,stream_ratio:1.08}});}
+    function loadStateAwareESA200M(){loadSequentialPrebuiltModel({name:"200M SLM",parameters:"~200M",description:"12-layer StateAware ESA small language model targeting ~200M parameters",dataset:null,
+      dim:384,heads:6,block:256,batch:16,vocab:50257,precision:"fp16",coreType:"stateaware_esa_stack",coreName:"StateAware ESA ×12",
+      coreParams:{dim:384,state_dim:1824,layers:12,heads:6,block:256,batch:16,depth_dim:64,compass:16,update_ratio_start:0.20,update_ratio_end:0.14,stream_ratio:1.08}});}
 
-    function loadSOUP200M(){loadSequentialPrebuiltModel({name:"SOUP 200M",parameters:"199,916,160",description:"Notebook-matched SOUP 200M with three physical layers",dataset:null,
+    function loadSOUP200M(){loadSequentialPrebuiltModel({name:"200M SLM · SOUP",parameters:"199,916,160",description:"SOUP 200M SLM with three physical layers",dataset:null,
       dim:1152,heads:18,block:256,batch:16,vocab:50257,precision:"fp16",coreType:"soup",coreName:"SOUP ×3",
       coreParams:{dim:1152,width:2864,depth:3,mixer:"esa",ffn:"saffn",mixer_config:{head:18,batch:16,block:256,compass:16,auto_compile:false},ffn_config:{depth_dim:128},memory_dim:256,fusion_hidden:1728}});}
 
-    function loadSOUP30M1L(){loadSequentialPrebuiltModel({name:"SOUP 30M 1L",parameters:"30,003,528",description:"One-layer SOUP causal LM at ~30M parameters",dataset:"TinyStories",
-      dim:384,heads:6,block:512,batch:16,vocab:50257,precision:"fp16",coreType:"soup",coreName:"SOUP ×1",
-      coreParams:{dim:384,width:1408,depth:1,mixer:"esa",ffn:"saffn",mixer_config:{head:6,batch:16,block:512,compass:16,auto_compile:false},ffn_config:{depth_dim:64},memory_dim:128,fusion_hidden:928}});}
+    function loadSOUP30M1L(){loadSequentialPrebuiltModel({name:"50M SLM · SOUP",parameters:"~50M",description:"Two-layer SOUP small language model targeting ~50M parameters",dataset:"TinyStories",
+      dim:448,heads:8,block:512,batch:16,vocab:50257,precision:"fp16",coreType:"soup",coreName:"SOUP ×2",
+      coreParams:{dim:448,width:1600,depth:2,mixer:"esa",ffn:"saffn",mixer_config:{head:8,batch:16,block:512,compass:16,auto_compile:false},ffn_config:{depth_dim:64},memory_dim:160,fusion_hidden:1088}});}
 
     function safeFilename(name){
       const base=String(name||"mlbricks-design").trim().replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/^-+|-+$/g,"");
@@ -8792,7 +8796,7 @@ function __MLB_STUDIO_FACTORY__(){
       topLeft.append(logo,title,saved);
       top.appendChild(topLeft);
 
-      // Build/Gallery belong to model/data workspaces, not the focused Module/API editor.
+      // Build/Workshop belong to model/data workspaces, not the focused Module/API editor.
       const primary=document.createElement("div");primary.className="mlb-top-primary";
       const modelRuntimeBusy=state.active_workspace==="model" && execution.status==="running" &&
         (execution.runtime_kind==="train"||execution.runtime_kind==="generate");
@@ -8836,7 +8840,7 @@ function __MLB_STUDIO_FACTORY__(){
             stopBtn.style.display=(dataFetchBusy||modelRuntimeBusy)?"inline-flex":"none";
             primary.appendChild(stopBtn);
           }
-          const galleryBtn=actionBtn("Gallery","mlb-dark-btn mlb-top-gallery-btn"+(galleryWorkspace.open?" active":""),"gallery");
+          const galleryBtn=actionBtn("Workshop","mlb-dark-btn mlb-top-gallery-btn"+(galleryWorkspace.open?" active":""),"gallery");
           galleryBtn.title="Open prebuilt Models, Components and Data";
           galleryBtn.addEventListener("click",()=>{
             if(galleryWorkspace.open){closeGallery();return;}
@@ -8937,7 +8941,7 @@ function __MLB_STUDIO_FACTORY__(){
         applySidebarSearch();
       });
       sr.appendChild(searchInput);side.appendChild(sr);
-      // Gallery owns the center workspace while it is open, so keep the sidebar
+      // Workshop owns the center workspace while it is open, so keep the sidebar
       // focused on the Component/Data Library and hide the Build Workspace switcher.
       if(current(state)?.kind!=="custom_edit" && !galleryWorkspace.open){
         const workspaceBox=document.createElement("div");workspaceBox.className="mlb-workspace-box";
@@ -9280,7 +9284,7 @@ function __MLB_STUDIO_FACTORY__(){
         }else if(state.active_workspace==="data"){
           e.innerHTML="<strong>Build your data pipeline step by step.</strong><br><br>Start with Hugging Face, Kaggle, URL, Local or Manual Data.";
         }else{
-          e.innerHTML="<strong>Build your model layer by layer.</strong><br><br>Add a component from the left or open Gallery to load a sample model.";
+          e.innerHTML="<strong>Build your model layer by layer.</strong><br><br>Add a component from the left or open Workshop to load a sample model.";
         }
         flow.appendChild(e);
       }else{
@@ -9563,7 +9567,7 @@ function __MLB_STUDIO_FACTORY__(){
           if(isApiCustom){
             renderAPICustomOverview(body,defNow);
           }else{
-            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Compose this reusable Module from built-in and saved components. You can nest Modules directly here without returning to Gallery.";body.appendChild(help);
+            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Compose this reusable Module from built-in and saved components. You can nest Modules directly here without returning to Workshop.";body.appendChild(help);
             // Nested Modules are created from the top toolbar; built-in Components remain in the left library.
           }
           appendCustomSaveActions(body);

@@ -713,22 +713,21 @@ def new_project(name: str = "Untitled Model"):
 
 
 def tinystories_30m_project():
-    """Notebook-matched TinyStories ~30M ESA starter.
+    """Compatibility entry point for the 50M SLM ESA starter.
 
-    This preset intentionally mirrors the validated eager-vs-whole-model-compile
-    benchmark: 10 layers, width 330, six ESA heads, context 512, standard 4x
-    FFN, learned positions, two pre-norm residuals, final LayerNorm, and tied
-    token-embedding/LM-head weights.
+    The public preset was expanded from the older ~30M sample to a 10-layer,
+    ~50M small-language-model target while keeping the legacy function name so
+    existing notebooks continue to load.
     """
-    project = new_project("TinyStories 30M ESA")
+    project = new_project("50M SLM")
     project["project"].update({
         "context_length": 512,
         "batch_size": 16,
         "dataset": "TinyStories",
-        "estimated_parameters": "~29.85M",
-        "description": "10-layer ESA causal LM matched to the validated whole-model compile benchmark",
+        "estimated_parameters": "~50M",
+        "description": "10-layer ESA small language model targeting ~50M parameters",
         "model_settings": {
-            "embedding_size": 330,
+            "embedding_size": 480,
             "heads": 6,
             "block": 512,
             "default_batch": 16,
@@ -737,8 +736,6 @@ def tinystories_30m_project():
         },
     })
 
-    # Match the benchmark tokenizer/data semantics. The runtime packer joins
-    # tokenized stories with EOS and emits exact [batch, 512] training tensors.
     data_ws = (project.get("workspaces") or {}).get("data") or {}
     data_root = data_ws.get("root_component_id")
     for node in (project.get("components") or {}).get(data_root, {}).get("nodes", []):
@@ -752,18 +749,15 @@ def tinystories_30m_project():
             })
 
     root_id = project["root_component_id"]
-
-    # Reusable block exactly matching ESAModel's standard block:
-    # x -> LN -> ESA -> +x -> LN -> 4x GELU FFN -> +residual.
     layer_def_id = _id("custom")
     block_input = _node("dropout", "Block Input", {"p": 0.0})
     ln1 = _node("layernorm", "LayerNorm 1", {
-        "normalized_shape": 330, "eps": 1e-5,
+        "normalized_shape": 480, "eps": 1e-5,
         "elementwise_affine": True, "bias": True,
         "device": None, "dtype": None,
     })
     esa = _node("esa", "ESA", {
-        "embd": 330, "head": 6, "batch": 16, "block": 512,
+        "embd": 480, "head": 6, "batch": 16, "block": 512,
         "backend": "pytorch", "precision": "fp16", "compass": 16,
         "dropout": 0.0, "gate_min": 0.8, "gate_max": 0.995,
         "eps": 1e-5, "device": "auto", "auto_compile": False,
@@ -772,12 +766,12 @@ def tinystories_30m_project():
     })
     res1 = _node("residual", "ESA Residual", {"dropout": 0.0})
     ln2 = _node("layernorm", "LayerNorm 2", {
-        "normalized_shape": 330, "eps": 1e-5,
+        "normalized_shape": 480, "eps": 1e-5,
         "elementwise_affine": True, "bias": True,
         "device": None, "dtype": None,
     })
     ffn = _node("ffn", "FFN", {
-        "hidden_size": 330, "intermediate_size": 1320,
+        "hidden_size": 480, "intermediate_size": 1920,
         "activation": "gelu", "dropout": 0.0, "bias": True,
         "gated": False, "device": None, "dtype": None,
     })
@@ -785,9 +779,9 @@ def tinystories_30m_project():
 
     project["custom_components"][layer_def_id] = {
         "id": layer_def_id,
-        "name": "TinyStories ESA Layer",
+        "name": "50M SLM ESA Layer",
         "description": "Pre-LN ESA + residual → Pre-LN FFN + residual",
-        "revision": 2,
+        "revision": 3,
         "nodes": [block_input, ln1, esa, res1, ln2, ffn, res2],
         "edges": [
             _edge(block_input["id"], ln1["id"]),
@@ -807,31 +801,31 @@ def tinystories_30m_project():
         ],
     }
 
-    text = _node("text_input", "Text Input", {"prompt": "Once upon a time"})
+    text_input = _node("text_input", "Text Input", {"prompt": "Once upon a time"})
     emb = _node("embedding", "Token Embedding", {
-        "vocab_size": 50257, "embedding_dim": 330,
+        "vocab_size": 50257, "embedding_dim": 480,
     })
     pos = _node("learned_position", "Learned Position", {
-        "dim": 330, "max_seq_len": 512,
+        "dim": 480, "max_seq_len": 512,
     })
     drop = _node("dropout", "Embedding Dropout", {"p": 0.0})
-    nodes = [text, emb, pos, drop]
+    nodes = [text_input, emb, pos, drop]
 
     for i in range(1, 11):
         nodes.append(_node(
             "custom",
             f"Layer {i}",
-            {"embd": 330, "head": 6, "compass": 16, "intermediate_size": 1320},
+            {"embd": 480, "head": 6, "compass": 16, "intermediate_size": 1920},
             definition_id=layer_def_id,
         ))
 
     final_norm = _node("layernorm", "Final LayerNorm", {
-        "normalized_shape": 330, "eps": 1e-5,
+        "normalized_shape": 480, "eps": 1e-5,
         "elementwise_affine": True, "bias": True,
         "device": None, "dtype": None,
     })
     head = _node("lm_head", "LM Head", {
-        "hidden_size": 330, "vocab_size": 50257, "bias": False,
+        "hidden_size": 480, "vocab_size": 50257, "bias": False,
         "tie_embeddings": True, "device": None, "dtype": None,
     })
     out = _node("text_output", "Text Output", {
@@ -839,24 +833,30 @@ def tinystories_30m_project():
     })
     nodes.extend([final_norm, head, out])
 
-    edges = [
+    project["components"][root_id]["nodes"] = nodes
+    project["components"][root_id]["edges"] = [
         _edge(left["id"], right["id"])
         for left, right in zip(nodes[:-1], nodes[1:])
     ]
-    project["components"][root_id]["nodes"] = nodes
-    project["components"][root_id]["edges"] = edges
     return project
 
 
+def slm_50m_project():
+    """Preferred public name for the 50M SLM preset."""
+    return tinystories_30m_project()
 
+
+def tinystories_50m_project():
+    """Dataset-oriented alias for the 50M SLM preset."""
+    return tinystories_30m_project()
 
 def stateaware_esa_200m_project():
-    """Notebook-matched StateAware ESA 200M starter (199,982,344 params)."""
-    project = new_project("StateAware ESA 200M")
+    """12-layer StateAware ESA preset targeting the 200M SLM class."""
+    project = new_project("200M SLM")
     project["project"].update({
         "context_length": 256, "batch_size": 16, "dataset": None,
-        "estimated_parameters": "199,982,344",
-        "description": "Notebook-matched 8-layer StateAware ESA causal LM",
+        "estimated_parameters": "~200M",
+        "description": "12-layer StateAware ESA small language model targeting ~200M parameters",
         "model_settings": {"embedding_size": 384, "heads": 6, "block": 256,
                            "default_batch": 16, "vocab_size": 50257, "precision": "fp16"},
     })
@@ -864,8 +864,8 @@ def stateaware_esa_200m_project():
     nodes = [
         _node("text_input", "Text Input", {"prompt": "Once upon a time"}),
         _node("embedding", "Token Embedding", {"vocab_size": 50257, "embedding_dim": 384}),
-        _node("stateaware_esa_stack", "StateAware ESA ×8", {
-            "dim": 384, "state_dim": 2749, "layers": 8, "heads": 6,
+        _node("stateaware_esa_stack", "StateAware ESA ×12", {
+            "dim": 384, "state_dim": 1824, "layers": 12, "heads": 6,
             "block": 256, "batch": 16, "depth_dim": 64, "compass": 16,
             "update_ratio_start": 0.20, "update_ratio_end": 0.14, "stream_ratio": 1.08,
         }),
@@ -878,13 +878,18 @@ def stateaware_esa_200m_project():
     return project
 
 
+def slm_200m_project():
+    """Preferred public name for the 200M StateAware ESA SLM preset."""
+    return stateaware_esa_200m_project()
+
+
 def soup_200m_project():
-    """Exact supplied-notebook SOUP 200M starter (199,916,160 params)."""
-    project = new_project("SOUP 200M")
+    """Three-layer SOUP 200M SLM preset."""
+    project = new_project("200M SLM · SOUP")
     project["project"].update({
         "context_length": 256, "batch_size": 16, "dataset": None,
         "estimated_parameters": "199,916,160",
-        "description": "Notebook-matched SOUP 200M causal LM with three physical layers",
+        "description": "SOUP 200M SLM with three physical layers",
         "model_settings": {"embedding_size": 1152, "heads": 18, "block": 256,
                            "default_batch": 16, "vocab_size": 50257, "precision": "fp16"},
     })
@@ -906,29 +911,40 @@ def soup_200m_project():
     return project
 
 
+def soup_200m_3l_project():
+    """Explicit-depth alias for the 200M SOUP SLM preset."""
+    return soup_200m_project()
+
+
 def soup_30m_1l_project():
-    """One-layer SOUP ~30M starter (30,003,528 params)."""
-    project = new_project("SOUP 30M 1L")
+    """Compatibility entry point for the two-layer ~50M SOUP SLM preset."""
+    project = new_project("50M SLM · SOUP")
     project["project"].update({
         "context_length": 512, "batch_size": 16, "dataset": "TinyStories",
-        "estimated_parameters": "30,003,528",
-        "description": "One-layer SOUP causal LM at ~30M parameters",
-        "model_settings": {"embedding_size": 384, "heads": 6, "block": 512,
+        "estimated_parameters": "~50M",
+        "description": "Two-layer SOUP small language model targeting ~50M parameters",
+        "model_settings": {"embedding_size": 448, "heads": 8, "block": 512,
                            "default_batch": 16, "vocab_size": 50257, "precision": "fp16"},
     })
     root_id = project["root_component_id"]
     nodes = [
         _node("text_input", "Text Input", {"prompt": "Once upon a time"}),
-        _node("embedding", "Token Embedding", {"vocab_size": 50257, "embedding_dim": 384}),
-        _node("soup", "SOUP ×1", {
-            "dim": 384, "width": 1408, "depth": 1, "mixer": "esa", "ffn": "saffn",
-            "mixer_config": {"head": 6, "batch": 16, "block": 512, "compass": 16, "auto_compile": False},
-            "ffn_config": {"depth_dim": 64}, "memory_dim": 128, "fusion_hidden": 928,
+        _node("embedding", "Token Embedding", {"vocab_size": 50257, "embedding_dim": 448}),
+        _node("soup", "SOUP ×2", {
+            "dim": 448, "width": 1600, "depth": 2, "mixer": "esa", "ffn": "saffn",
+            "mixer_config": {"head": 8, "batch": 16, "block": 512, "compass": 16, "auto_compile": False},
+            "ffn_config": {"depth_dim": 64}, "memory_dim": 160, "fusion_hidden": 1088,
         }),
-        _node("rmsnorm", "Final RMSNorm", {"normalized_shape": 384, "eps": 1e-6, "elementwise_affine": True}),
-        _node("lm_head", "LM Head", {"hidden_size": 384, "vocab_size": 50257, "bias": False, "tie_embeddings": True}),
+        _node("rmsnorm", "Final RMSNorm", {"normalized_shape": 448, "eps": 1e-6, "elementwise_affine": True}),
+        _node("lm_head", "LM Head", {"hidden_size": 448, "vocab_size": 50257, "bias": False, "tie_embeddings": True}),
         _node("text_output", "Text Output", {"max_new_tokens": 64, "temperature": 0.8, "top_p": 0.95}),
     ]
     project["components"][root_id]["nodes"] = nodes
     project["components"][root_id]["edges"] = [_edge(a["id"], b["id"]) for a,b in zip(nodes[:-1],nodes[1:])]
     return project
+
+
+def soup_50m_2l_project():
+    """Preferred public name for the two-layer 50M SOUP SLM preset."""
+    return soup_30m_1l_project()
+

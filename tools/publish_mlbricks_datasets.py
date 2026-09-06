@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish the MLBricks-maintained Hugging Face datasets used by Studio Gallery.
+"""Publish the MLBricks-maintained Hugging Face datasets used by Studio Workshop.
 
 The script intentionally uses two strategies:
 
@@ -459,7 +459,7 @@ terms of use, and any rights that apply to underlying source content.
 
 ## MLBricks Studio
 
-Studio Gallery opens this repository with a 10,000-row quickstart limit by default.
+Studio Workshop opens this repository with a 10,000-row quickstart limit by default.
 Set **Max Rows = 0** in the Hugging Face Dataset component when you intentionally want the
 entire edition.
 """

@@ -472,7 +472,7 @@ def test_single_layer_saffn_accepts_zero_initialized_previous_value_buffers(monk
     ]
     graph = TensorGraph(nodes=nodes, edges=edges, custom_components={}, runtime={**_runtime(), "model_dim": 3})
     x = torch.randn(1, 2, 3)
-    # This is only a shape/routing test; the Gallery's real graph feeds x and
+    # This is only a shape/routing test; the Workshop's real graph feeds x and
     # esa_update from Embedding/ESA while these buffers initialize prior depth.
     y = graph(x)
     assert y.shape == x.shape
