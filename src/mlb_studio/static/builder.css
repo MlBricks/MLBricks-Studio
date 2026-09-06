@@ -3641,3 +3641,39 @@
 }
 .mlb-vram-clean-btn:hover:not(:disabled){background:#183047!important;border-color:#4f7da1!important;color:#bfe2ff!important}
 .mlb-vram-clean-btn:disabled{opacity:.35!important;cursor:not-allowed!important}
+
+
+/* Cloud & Repositories live activity inspector */
+.mlb-cloud-inspector{padding:12px!important}
+.mlb-cloud-inspector-card{
+  border:1px solid #2e4050;border-radius:8px;background:#0f1821;padding:10px;margin-bottom:10px
+}
+.mlb-cloud-inspector-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+.mlb-cloud-inspector-title>strong{font-size:11px;letter-spacing:.05em;color:#e0e7ee}
+.mlb-cloud-inspector-badge{
+  min-width:66px;text-align:center;border:1px solid #40505e;border-radius:999px;padding:3px 7px;
+  color:#91a0af;background:#131e27;font-size:9.5px;font-weight:900;letter-spacing:.035em
+}
+.mlb-cloud-inspector-badge.ok,.mlb-cloud-inspector-badge.done{border-color:#2d7451;background:#102219;color:#6ee7a5}
+.mlb-cloud-inspector-badge.warn{border-color:#786133;background:#251f13;color:#e3bd64}
+.mlb-cloud-inspector-badge.running{border-color:#5d52a6;background:#18172a;color:#b6a6ff}
+.mlb-cloud-inspector-badge.error{border-color:#78404a;background:#28151a;color:#ff9ca8}
+.mlb-cloud-inspector-badge.stopped{border-color:#725d37;background:#261e12;color:#e5bc6b}
+.mlb-cloud-inspector-row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #1e2b36}
+.mlb-cloud-inspector-row>span{font-size:10.5px;color:#7f91a2;flex:0 0 34%}
+.mlb-cloud-inspector-row>strong{font-size:10.5px;color:#e1e8ef;text-align:right;overflow-wrap:anywhere;min-width:0}
+.mlb-cloud-inspector-message{margin:9px 0;padding:8px;border:1px solid #30404d;border-radius:6px;background:#101a22;color:#9fb0bf;font-size:10.5px;line-height:1.4}
+.mlb-cloud-inspector-message.ok{border-color:#2b6e4d;background:#0f2118;color:#72d7a2}
+.mlb-cloud-inspector-message.warn{border-color:#6d5830;background:#211b10;color:#d2b167}
+.mlb-cloud-inspector-empty{padding:10px;border:1px dashed #334655;border-radius:6px;color:#7d8e9e;font-size:10.5px;line-height:1.45}
+.mlb-cloud-transfer-progress{margin-top:10px;padding-top:3px}
+.mlb-cloud-transfer-progress>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.mlb-cloud-transfer-progress>div:first-child span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a9b5c1;font-size:10.5px}
+.mlb-cloud-transfer-progress>div:first-child strong{color:#e6ecf2;font-size:10.5px}
+.mlb-cloud-transfer-track{height:7px;border-radius:999px;background:#1c2a35;overflow:hidden;border:1px solid #2c3c49}
+.mlb-cloud-transfer-track i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#6955df,#9f7cff);transition:width .18s ease}
+.mlb-cloud-transfer-bytes{min-height:14px;margin-top:5px;color:#718394;font-size:9.5px;text-align:right}
+.mlb-cloud-inspector-actions{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.mlb-cloud-inspector-action{height:30px!important;padding:0 10px!important;border:1px solid #40515f!important;border-radius:6px!important;background:#17222c!important;color:#cbd5df!important;font-size:10.5px!important}
+.mlb-cloud-inspector-action.primary{border-color:#6657b7!important;background:#241d42!important;color:#d9d1ff!important}
+.mlb-cloud-inspector-action.danger{border-color:#78404a!important;background:#2a171c!important;color:#ff9ca8!important}

@@ -182,6 +182,12 @@ function __MLB_STUDIO_FACTORY__(){
       private:true,
       region:""
     };
+    let cloudActivity={
+      status:"idle",action:"",provider:cloudForm.provider,phase:"idle",overall:0,
+      message:"No cloud activity yet.",content_type:"",artifact_id:"",target:{},
+      bytes_done:null,bytes_total:null,started_at:0,finished_at:0,result:null,error:""
+    };
+    let lastCloudRequest=null;
     let localPersistence=cp(payload.local_persistence||{root:"Local Studio Store",drafts:[],repository:[],credentials:[]});
     const cloudCredentialSelection={huggingface:"",github:"",aws:"",gcp:"",azure:""};
     const cloudCredentialNames={huggingface:"Default",github:"Default",aws:"Default",gcp:"Default",azure:"Default"};
@@ -607,9 +613,11 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function inspectorRenderKey(){
-      const target=outputDirectorySelection
-        ?("output:"+outputDirectorySelection)
-        :(selected?("node:"+selected):"empty");
+      const target=cloudWorkspace.open
+        ?("cloud:"+String(cloudForm.provider||""))
+        :(outputDirectorySelection
+          ?("output:"+outputDirectorySelection)
+          :(selected?("node:"+selected):"empty"));
       return (state.active_workspace||"model")+"|"+inspectorTab+"|"+target;
     }
 
@@ -1178,6 +1186,7 @@ function __MLB_STUDIO_FACTORY__(){
       bottomExpanded=false;
       outputDirectorySelection=null;
       selected=null;
+      inspectorTab="settings";
       setStatus("Cloud & Repositories opened.");
       draw();
     }
@@ -1757,21 +1766,70 @@ function __MLB_STUDIO_FACTORY__(){
       setTimeout(()=>{clickBridgeButton(button);},250);
     }
 
-    function requestCloudCommand(action,config={}){
-      if(!ensureBridgeForAction()){
-        execution={status:"error",runtime_kind:"cloud",overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
-        applyExecutionProgress(execution);setStatus(execution.message);return;
+    function cloudTargetFromConfig(config={}){
+      const p=String(config.provider||cloudForm.provider||"");
+      const target={};
+      if(p==="huggingface"){
+        if(config.repo)target.repository=config.repo;
+        if(config.revision)target.revision=config.revision;
+      }else if(p==="github"){
+        if(config.repo)target.repository=config.repo;
+        if(config.branch)target.branch=config.branch;
+        if(config.object_path)target.path=config.object_path;
+      }else if(p==="aws"||p==="gcp"){
+        if(config.bucket)target.bucket=config.bucket;
+        if(config.object_path)target.path=config.object_path;
+        if(p==="aws"&&config.region)target.region=config.region;
+      }else if(p==="azure"){
+        if(config.container)target.container=config.container;
+        if(config.object_path)target.path=config.object_path;
       }
-      const command={action,cloud:cp(config),ts:Date.now()};
+      return target;
+    }
+
+    function cloudActionLabel(action){
+      return action==="cloud_push"?"Upload":action==="cloud_load"?"Download":action==="cloud_status"?"Connection check":"Cloud task";
+    }
+
+    function formatCloudBytes(value){
+      const n=Number(value);
+      if(!Number.isFinite(n)||n<0)return "";
+      if(n<1024)return Math.round(n)+" B";
+      if(n<1024*1024)return (n/1024).toFixed(1)+" KB";
+      if(n<1024*1024*1024)return (n/(1024*1024)).toFixed(1)+" MB";
+      return (n/(1024*1024*1024)).toFixed(2)+" GB";
+    }
+
+    function requestCloudCommand(action,config={}){
+      const cleanConfig=cp(config||{});
+      const provider=String(cleanConfig.provider||cloudForm.provider||"huggingface");
+      if(!ensureBridgeForAction()){
+        execution={status:"error",runtime_kind:"cloud",phase:action,overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
+        cloudActivity={...cloudActivity,status:"error",action,provider,phase:action,overall:0,message:execution.message,error:execution.message,finished_at:Date.now(),target:cloudTargetFromConfig(cleanConfig)};
+        applyExecutionProgress(execution);setStatus(execution.message);draw();return;
+      }
+      lastCloudRequest={action,config:cp(cleanConfig)};
+      const command={action,cloud:cleanConfig,ts:Date.now()};
+      cloudActivity={
+        status:"running",action,provider,phase:"queued",overall:0,
+        message:action==="cloud_status"?"Checking provider connection…":(action==="cloud_push"?"Preparing upload…":"Preparing download…"),
+        content_type:String(cleanConfig.content_type||""),artifact_id:String(cleanConfig.artifact_id||""),
+        target:cloudTargetFromConfig(cleanConfig),bytes_done:null,bytes_total:null,
+        started_at:Date.now(),finished_at:0,result:null,error:""
+      };
       if(!setBridgeState()||!setBridgeCommand(command)){
-        setStatus("Could not send cloud command to Python.");return;
+        cloudActivity.status="error";cloudActivity.message="Could not send cloud command to Python.";cloudActivity.error=cloudActivity.message;cloudActivity.finished_at=Date.now();
+        setStatus(cloudActivity.message);draw();return;
       }
       const button=bridgeControl(bridge.run,"button");
-      if(!button){setStatus("Python cloud control was not found.");return;}
+      if(!button){
+        cloudActivity.status="error";cloudActivity.message="Python cloud control was not found.";cloudActivity.error=cloudActivity.message;cloudActivity.finished_at=Date.now();
+        setStatus(cloudActivity.message);draw();return;
+      }
       const progressInput=bridgeControl(bridge.progress,"textarea");
       lastProgressRaw=progressInput?.value||lastProgressRaw;
-      execution={status:"running",runtime_kind:"cloud",phase:action,overall:0,message:"Connecting to cloud provider…",nodes:{}};
-      applyExecutionProgress(execution);setStatus(execution.message);
+      execution={status:"running",runtime_kind:"cloud",phase:action,overall:0,message:cloudActivity.message,nodes:{}};
+      applyExecutionProgress(execution);setStatus(execution.message);draw();
       setTimeout(()=>{clickBridgeButton(button);},250);
     }
 
@@ -2149,7 +2207,25 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       if(next.runtime_kind==="cloud"){
-        if(next.cloud_status){cloudStatus[next.cloud_status.provider]=cp(next.cloud_status);}
+        if(next.cloud_status){cloudStatus[next.cloud_status.provider]=cp(next.cloud_status);setTimeout(draw,20);}
+        const keepPct=(next.status==="error"||next.status==="stopped")?Math.max(Number(cloudActivity.overall||0),Number(next.overall||0)):Number(next.overall||0);
+        cloudActivity={
+          ...cloudActivity,
+          status:String(next.status||cloudActivity.status||"idle"),
+          action:String(next.cloud_action||cloudActivity.action||next.phase||""),
+          provider:String(next.cloud_provider||next.cloud_status?.provider||cloudActivity.provider||cloudForm.provider||""),
+          phase:String(next.phase||cloudActivity.phase||""),
+          overall:Math.max(0,Math.min(100,keepPct)),
+          message:String(next.message||cloudActivity.message||""),
+          content_type:String(next.cloud_content_type||cloudActivity.content_type||""),
+          target:next.cloud_target?cp(next.cloud_target):cloudActivity.target,
+          bytes_done:next.bytes_done==null?cloudActivity.bytes_done:Number(next.bytes_done),
+          bytes_total:next.bytes_total==null?cloudActivity.bytes_total:Number(next.bytes_total),
+          result:next.cloud_result?cp(next.cloud_result):cloudActivity.result,
+          error:next.status==="error"?String(next.message||"Cloud task failed."):((next.status==="running")?"":cloudActivity.error),
+          finished_at:(next.status==="done"||next.status==="error"||next.status==="stopped")?Date.now():0
+        };
+        updateCloudInspectorLive(cloudActivity);
         if(next.state_replace){
           state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
           selected=null;pendingPort=null;outputDirectorySelection=null;
@@ -2160,7 +2236,7 @@ function __MLB_STUDIO_FACTORY__(){
           else if(next.phase==="cloud_load")collapseArtifactWorkspace();
         }
         if(next.message)setStatus(next.message);
-        if(next.status==="done"||next.status==="error")setTimeout(draw,80);
+        if(next.status==="done"||next.status==="error"||next.status==="stopped")setTimeout(draw,80);
       }
 
       if(next.runtime_kind==="local"){
@@ -5336,6 +5412,118 @@ function __MLB_STUDIO_FACTORY__(){
         card.appendChild(list);
       }
       container.appendChild(card);
+    }
+
+    function cloudConnectionState(status={}){
+      if(status.ok||status.authenticated)return {label:"CONNECTED",cls:"ok"};
+      if(status.message)return {label:"ATTENTION",cls:"warn"};
+      return {label:"NOT CHECKED",cls:"idle"};
+    }
+
+    function appendCloudInspectorRow(parent,label,value){
+      if(value===undefined||value===null||String(value)==="")return;
+      const row=document.createElement("div");row.className="mlb-cloud-inspector-row";
+      const l=document.createElement("span");l.textContent=label;
+      const v=document.createElement("strong");v.textContent=String(value);
+      row.append(l,v);parent.appendChild(row);
+    }
+
+    function renderCloudInspector(body){
+      body.classList.add("mlb-cloud-inspector");
+      const provider=String(cloudForm.provider||"huggingface");
+      const status=cloudStatus[provider]||{};
+      const conn=cloudConnectionState(status);
+
+      const connection=document.createElement("section");connection.className="mlb-cloud-inspector-card";
+      const ch=document.createElement("div");ch.className="mlb-cloud-inspector-title";
+      const ctitle=document.createElement("strong");ctitle.textContent="CONNECTION";
+      const badge=document.createElement("span");badge.className="mlb-cloud-inspector-badge "+conn.cls;badge.textContent=conn.label;
+      ch.append(ctitle,badge);connection.appendChild(ch);
+      appendCloudInspectorRow(connection,"Provider",providerLabel(provider));
+      const identity=status.username||status.account||status.account_name||status.project||status.arn||"";
+      appendCloudInspectorRow(connection,"User / Account",identity||"—");
+      appendCloudInspectorRow(connection,"Credential",cloudCredentialSelection[provider]|| (currentCredentialHasInput(provider)?"Session credential":"None"));
+      const cmsg=document.createElement("div");cmsg.className="mlb-cloud-inspector-message "+conn.cls;cmsg.textContent=status.message||"Connection has not been checked yet.";connection.appendChild(cmsg);
+      const check=btn("Check Connection","mlb-cloud-inspector-action");
+      check.disabled=cloudActivity.status==="running";
+      check.addEventListener("click",()=>requestCloudCommand("cloud_status",{provider,credential_name:cloudCredentialSelection[provider]||"",credentials:currentCloudCredentials(),region:cloudForm.region}));
+      connection.appendChild(check);body.appendChild(connection);
+
+      const activity=document.createElement("section");activity.className="mlb-cloud-inspector-card mlb-cloud-activity-card";
+      const ah=document.createElement("div");ah.className="mlb-cloud-inspector-title";
+      const atitle=document.createElement("strong");atitle.textContent="TRANSFER ACTIVITY";
+      const stateBadge=document.createElement("span");stateBadge.dataset.cloudRole="state";stateBadge.className="mlb-cloud-inspector-badge "+String(cloudActivity.status||"idle");stateBadge.textContent=String(cloudActivity.status||"idle").toUpperCase();
+      ah.append(atitle,stateBadge);activity.appendChild(ah);
+
+      if(!cloudActivity.action){
+        const empty=document.createElement("div");empty.className="mlb-cloud-inspector-empty";empty.textContent="No push or download task has been started in this Studio session.";activity.appendChild(empty);
+      }else{
+        appendCloudInspectorRow(activity,"Operation",cloudActionLabel(cloudActivity.action));
+        appendCloudInspectorRow(activity,"Provider",providerLabel(cloudActivity.provider||provider));
+        appendCloudInspectorRow(activity,"Content",cloudActivity.content_type?cloudActivity.content_type.replace(/_/g," "):"—");
+        const target=cloudActivity.target||{};
+        appendCloudInspectorRow(activity,"Repository",target.repository);
+        appendCloudInspectorRow(activity,"Bucket",target.bucket);
+        appendCloudInspectorRow(activity,"Container",target.container);
+        appendCloudInspectorRow(activity,"Path",target.path);
+        appendCloudInspectorRow(activity,"Revision",target.revision);
+        appendCloudInspectorRow(activity,"Branch",target.branch);
+        appendCloudInspectorRow(activity,"Region",target.region);
+
+        const prog=document.createElement("div");prog.className="mlb-cloud-transfer-progress";
+        const phead=document.createElement("div");
+        const pmsg=document.createElement("span");pmsg.dataset.cloudRole="message";pmsg.textContent=cloudActivity.message||"Working…";
+        const ppct=document.createElement("strong");ppct.dataset.cloudRole="percent";ppct.textContent=Math.round(Number(cloudActivity.overall||0))+"%";
+        phead.append(pmsg,ppct);
+        const track=document.createElement("div");track.className="mlb-cloud-transfer-track";
+        const fill=document.createElement("i");fill.dataset.cloudRole="bar";fill.style.width=Math.max(0,Math.min(100,Number(cloudActivity.overall||0)))+"%";track.appendChild(fill);
+        const bytes=document.createElement("div");bytes.className="mlb-cloud-transfer-bytes";bytes.dataset.cloudRole="bytes";
+        if(cloudActivity.bytes_total!=null){bytes.textContent=formatCloudBytes(cloudActivity.bytes_done||0)+" / "+formatCloudBytes(cloudActivity.bytes_total);}else bytes.textContent="";
+        prog.append(phead,track,bytes);activity.appendChild(prog);
+
+        if(cloudActivity.started_at)appendCloudInspectorRow(activity,"Started",new Date(cloudActivity.started_at).toLocaleTimeString());
+        if(cloudActivity.finished_at)appendCloudInspectorRow(activity,"Finished",new Date(cloudActivity.finished_at).toLocaleTimeString());
+        if(cloudActivity.result?.url)appendCloudInspectorRow(activity,"Remote",cloudActivity.result.url);
+
+        const actions=document.createElement("div");actions.className="mlb-cloud-inspector-actions";
+        if(cloudActivity.status==="running"){
+          const cancel=btn("Cancel","mlb-cloud-inspector-action danger");
+          cancel.addEventListener("click",()=>{
+            cloudActivity.phase="cancelling";cloudActivity.message="Cancel requested — waiting for the active provider operation to stop…";
+            updateCloudInspectorLive(cloudActivity);requestStop();
+          });
+          actions.appendChild(cancel);
+        }
+        if((cloudActivity.status==="error"||cloudActivity.status==="stopped")&&lastCloudRequest){
+          const retry=btn("Retry","mlb-cloud-inspector-action primary");
+          retry.addEventListener("click",()=>requestCloudCommand(lastCloudRequest.action,cp(lastCloudRequest.config)));
+          actions.appendChild(retry);
+        }
+        if(cloudActivity.status==="done"||cloudActivity.status==="error"||cloudActivity.status==="stopped"){
+          const clear=btn("Clear","mlb-cloud-inspector-action");
+          clear.addEventListener("click",()=>{cloudActivity={status:"idle",action:"",provider:cloudForm.provider,phase:"idle",overall:0,message:"No cloud activity yet.",content_type:"",artifact_id:"",target:{},bytes_done:null,bytes_total:null,started_at:0,finished_at:0,result:null,error:""};draw();});
+          actions.appendChild(clear);
+        }
+        if(actions.childNodes.length)activity.appendChild(actions);
+      }
+      body.appendChild(activity);
+    }
+
+    function renderCloudInfoInspector(body){
+      body.innerHTML='<div class="mlb-section-title">CLOUD ACTIVITY</div><div class="mlb-api-path">Connection identity, upload/download target, progress, completion state and failures are shown in the Cloud tab. Cancel requests stop supported transfers at the next safe provider boundary; Retry repeats the last failed or cancelled command.</div>';
+    }
+
+    function updateCloudInspectorLive(activity=cloudActivity){
+      const panel=root.querySelector(".mlb-cloud-inspector");
+      if(!panel)return;
+      const stateEl=panel.querySelector('[data-cloud-role="state"]');
+      if(stateEl){stateEl.className="mlb-cloud-inspector-badge "+String(activity.status||"idle");stateEl.textContent=String(activity.status||"idle").toUpperCase();}
+      const msg=panel.querySelector('[data-cloud-role="message"]');if(msg)msg.textContent=activity.message||"Working…";
+      const pct=Math.max(0,Math.min(100,Number(activity.overall||0)));
+      const pctEl=panel.querySelector('[data-cloud-role="percent"]');if(pctEl)pctEl.textContent=Math.round(pct)+"%";
+      const bar=panel.querySelector('[data-cloud-role="bar"]');if(bar)bar.style.width=pct+"%";
+      const bytes=panel.querySelector('[data-cloud-role="bytes"]');
+      if(bytes)bytes.textContent=activity.bytes_total!=null?(formatCloudBytes(activity.bytes_done||0)+" / "+formatCloudBytes(activity.bytes_total)):"";
     }
 
     function renderCloudView(container,showHead=true){
@@ -9226,14 +9414,17 @@ function __MLB_STUDIO_FACTORY__(){
       const ins=document.createElement("aside");ins.className="mlb-inspector";
       const runtimeInspectorEntry=runtimeWorkspaceActive?builtModelById(runtimePanel?.modelId):null;
       const tabs=document.createElement("div");tabs.className="mlb-ins-tabs";
-      const primaryInspectorLabel=runtimeInspectorEntry?(runtimePanel?.mode==="train"?"Training":"Runtime"):"Inspector";
+      const primaryInspectorLabel=cloudWorkspace.open?"Cloud":(runtimeInspectorEntry?(runtimePanel?.mode==="train"?"Training":"Runtime"):"Inspector");
       [["settings",primaryInspectorLabel],["info","Info"]].forEach(([k,t])=>{const b=btn(t);if(inspectorTab===k)b.className="active";b.addEventListener("click",()=>{inspectorTab=k;draw();});tabs.appendChild(b);});ins.appendChild(tabs);
       const body=document.createElement("div");body.className="mlb-ins-body";
       const outputDataset=selectedOutputDataset();
       const outputModel=selectedOutputModel();
       const n=selectedNode();
 
-      if(runtimeInspectorEntry){
+      if(cloudWorkspace.open){
+        if(inspectorTab==="info")renderCloudInfoInspector(body);
+        else renderCloudInspector(body);
+      }else if(runtimeInspectorEntry){
         renderRuntimeContextInspector(body,runtimeInspectorEntry,runtimePanel?.mode||"train");
       }else if(outputDataset){
         renderPreparedDatasetInspector(body,outputDataset);

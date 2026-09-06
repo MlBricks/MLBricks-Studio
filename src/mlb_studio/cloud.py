@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+import threading
 
 
 class CloudProviderError(RuntimeError):
@@ -59,6 +60,7 @@ def github_upload(
     branch: str = "main",
     token: str,
     commit_message: str = "Upload from MLB Studio",
+    progress_callback=None,
 ) -> dict:
     if not token:
         raise CloudProviderError("GitHub token is required for upload.")
@@ -81,7 +83,11 @@ def github_upload(
         if "HTTP 404" not in str(exc):
             raise
 
-    content = base64.b64encode(Path(local_path).read_bytes()).decode("ascii")
+    source_path = Path(local_path)
+    total = source_path.stat().st_size
+    if progress_callback:
+        progress_callback(0, total)
+    content = base64.b64encode(source_path.read_bytes()).decode("ascii")
     payload = {
         "message": commit_message,
         "content": content,
@@ -90,6 +96,8 @@ def github_upload(
     if sha:
         payload["sha"] = sha
     result = _json_request(url, method="PUT", token=token, payload=payload)
+    if progress_callback:
+        progress_callback(total, total)
     html_url = (result.get("content") or {}).get("html_url")
     return {
         "provider": "github",
@@ -107,6 +115,7 @@ def github_download(
     path_in_repo: str,
     branch: str = "main",
     token: str | None = None,
+    progress_callback=None,
 ) -> dict:
     if "/" not in str(repo):
         raise ValueError("GitHub repository must be `owner/repository`.")
@@ -115,19 +124,35 @@ def github_download(
     url = f"https://api.github.com/repos/{repo}/contents/{encoded_path}?" + urllib.parse.urlencode({"ref": branch})
     info = _json_request(url, token=token)
     download_url = info.get("download_url")
+    destination = Path(destination)
     if not download_url:
         content = info.get("content")
         if not content:
             raise CloudProviderError("GitHub did not return downloadable file content.")
         data = base64.b64decode(content)
+        if progress_callback:
+            progress_callback(0, len(data))
+        destination.write_bytes(data)
+        if progress_callback:
+            progress_callback(len(data), len(data))
     else:
         headers = {"User-Agent": "MLBricks-Studio"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         req = urllib.request.Request(download_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=120) as response:
-            data = response.read()
-    Path(destination).write_bytes(data)
+        with urllib.request.urlopen(req, timeout=120) as response, destination.open("wb") as handle:
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            if progress_callback:
+                progress_callback(0, total or None)
+            while True:
+                chunk = response.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                done += len(chunk)
+                if progress_callback:
+                    progress_callback(done, total or None)
     return {
         "provider": "github",
         "repo": repo,
@@ -169,11 +194,25 @@ def s3_status(credentials: dict) -> dict:
         return {"ok": False, "message": str(exc)}
 
 
-def s3_upload(local_path, *, bucket: str, object_key: str, credentials: dict) -> dict:
+def s3_upload(local_path, *, bucket: str, object_key: str, credentials: dict, progress_callback=None) -> dict:
     if not bucket or not object_key:
         raise ValueError("AWS Bucket and Object Key are required.")
     client = s3_client(credentials)
-    client.upload_file(str(local_path), bucket, object_key)
+    source = Path(local_path)
+    total = source.stat().st_size
+    lock = threading.Lock()
+    done = 0
+    def callback(amount):
+        nonlocal done
+        with lock:
+            done += int(amount or 0)
+            if progress_callback:
+                progress_callback(done, total)
+    if progress_callback:
+        progress_callback(0, total)
+    client.upload_file(str(source), bucket, object_key, Callback=callback)
+    if progress_callback:
+        progress_callback(total, total)
     return {
         "provider": "aws",
         "bucket": bucket,
@@ -182,11 +221,27 @@ def s3_upload(local_path, *, bucket: str, object_key: str, credentials: dict) ->
     }
 
 
-def s3_download(destination, *, bucket: str, object_key: str, credentials: dict) -> dict:
+def s3_download(destination, *, bucket: str, object_key: str, credentials: dict, progress_callback=None) -> dict:
     if not bucket or not object_key:
         raise ValueError("AWS Bucket and Object Key are required.")
     client = s3_client(credentials)
-    client.download_file(bucket, object_key, str(destination))
+    try:
+        total = int((client.head_object(Bucket=bucket, Key=object_key) or {}).get("ContentLength") or 0)
+    except Exception:
+        total = 0
+    lock = threading.Lock()
+    done = 0
+    def callback(amount):
+        nonlocal done
+        with lock:
+            done += int(amount or 0)
+            if progress_callback:
+                progress_callback(done, total or None)
+    if progress_callback:
+        progress_callback(0, total or None)
+    client.download_file(bucket, object_key, str(destination), Callback=callback)
+    if progress_callback and total:
+        progress_callback(total, total)
     return {
         "provider": "aws",
         "bucket": bucket,
@@ -221,18 +276,24 @@ def gcs_status(credentials: dict) -> dict:
         client = _gcs_client(credentials)
         return {
             "ok": True,
+            "project": client.project or "default",
             "message": f"Google Cloud Storage client ready for project {client.project or 'default'}."
         }
     except Exception as exc:
         return {"ok": False, "message": str(exc)}
 
 
-def gcs_upload(local_path, *, bucket: str, object_name: str, credentials: dict) -> dict:
+def gcs_upload(local_path, *, bucket: str, object_name: str, credentials: dict, progress_callback=None) -> dict:
     if not bucket or not object_name:
         raise ValueError("GCS Bucket and Object Name are required.")
     client = _gcs_client(credentials)
     blob = client.bucket(bucket).blob(object_name)
+    total = Path(local_path).stat().st_size
+    if progress_callback:
+        progress_callback(0, total)
     blob.upload_from_filename(str(local_path))
+    if progress_callback:
+        progress_callback(total, total)
     return {
         "provider": "gcp",
         "bucket": bucket,
@@ -241,12 +302,22 @@ def gcs_upload(local_path, *, bucket: str, object_name: str, credentials: dict) 
     }
 
 
-def gcs_download(destination, *, bucket: str, object_name: str, credentials: dict) -> dict:
+def gcs_download(destination, *, bucket: str, object_name: str, credentials: dict, progress_callback=None) -> dict:
     if not bucket or not object_name:
         raise ValueError("GCS Bucket and Object Name are required.")
     client = _gcs_client(credentials)
     blob = client.bucket(bucket).blob(object_name)
+    try:
+        blob.reload()
+        total = int(blob.size or 0)
+    except Exception:
+        total = 0
+    if progress_callback:
+        progress_callback(0, total or None)
     blob.download_to_filename(str(destination))
+    if progress_callback:
+        final_size = total or (Path(destination).stat().st_size if Path(destination).exists() else 0)
+        progress_callback(final_size, final_size or None)
     return {
         "provider": "gcp",
         "bucket": bucket,
@@ -275,19 +346,31 @@ def azure_status(credentials: dict) -> dict:
         # Construction validates the connection string without exposing it.
         return {
             "ok": True,
+            "account": service.account_name,
             "message": f"Azure Blob client ready for account {service.account_name}.",
         }
     except Exception as exc:
         return {"ok": False, "message": str(exc)}
 
 
-def azure_upload(local_path, *, container: str, blob_name: str, credentials: dict) -> dict:
+def azure_upload(local_path, *, container: str, blob_name: str, credentials: dict, progress_callback=None) -> dict:
     if not container or not blob_name:
         raise ValueError("Azure Container and Blob Name are required.")
     service = _azure_service(credentials)
     client = service.get_blob_client(container=container, blob=blob_name)
+    total = Path(local_path).stat().st_size
+    if progress_callback:
+        progress_callback(0, total)
+    def hook(current, total_bytes):
+        if progress_callback:
+            progress_callback(int(current or 0), int(total_bytes or total or 0) or None)
     with open(local_path, "rb") as handle:
-        client.upload_blob(handle, overwrite=True)
+        try:
+            client.upload_blob(handle, overwrite=True, progress_hook=hook)
+        except TypeError:
+            client.upload_blob(handle, overwrite=True)
+    if progress_callback:
+        progress_callback(total, total)
     return {
         "provider": "azure",
         "container": container,
@@ -296,12 +379,24 @@ def azure_upload(local_path, *, container: str, blob_name: str, credentials: dic
     }
 
 
-def azure_download(destination, *, container: str, blob_name: str, credentials: dict) -> dict:
+def azure_download(destination, *, container: str, blob_name: str, credentials: dict, progress_callback=None) -> dict:
     if not container or not blob_name:
         raise ValueError("Azure Container and Blob Name are required.")
     service = _azure_service(credentials)
     client = service.get_blob_client(container=container, blob=blob_name)
-    Path(destination).write_bytes(client.download_blob().readall())
+    def hook(current, total_bytes):
+        if progress_callback:
+            progress_callback(int(current or 0), int(total_bytes or 0) or None)
+    try:
+        downloader = client.download_blob(progress_hook=hook)
+    except TypeError:
+        downloader = client.download_blob()
+    if progress_callback:
+        progress_callback(0, int(getattr(getattr(downloader, "properties", None), "size", 0) or 0) or None)
+    data = downloader.readall()
+    Path(destination).write_bytes(data)
+    if progress_callback:
+        progress_callback(len(data), len(data))
     return {
         "provider": "azure",
         "container": container,

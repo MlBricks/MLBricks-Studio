@@ -2610,7 +2610,7 @@ class Builder:
             return cloud_backend.azure_status(credentials)
         raise ValueError(f"Unknown cloud provider: {provider!r}")
 
-    def _push_generic_cloud(self, provider, cloud):
+    def _push_generic_cloud(self, provider, cloud, progress_callback=None):
         from . import cloud as cloud_backend
         provider = str(provider).lower()
         credentials = self._resolve_cloud_credentials(provider, cloud)
@@ -2626,8 +2626,26 @@ class Builder:
         )
         with tempfile.TemporaryDirectory(prefix="mlbricks_cloud_push_") as td:
             archive = Path(td) / f"{name}.mlbricks.zip"
+            if progress_callback:
+                progress_callback("packaging", 18, "Packaging local content for upload…", None, None)
             self._create_cloud_bundle(content_type, artifact_id, archive)
+            total = archive.stat().st_size if archive.exists() else None
+            if progress_callback:
+                progress_callback("upload", 28, "Uploading bundle to remote storage…", 0, total)
 
+            def transfer(done, total_bytes):
+                if self._stop_event.is_set():
+                    raise PipelineStopped()
+                if total_bytes:
+                    fraction = max(0.0, min(1.0, float(done or 0) / float(total_bytes)))
+                    pct = 28 + int(round(fraction * 62))
+                else:
+                    pct = 55
+                if progress_callback:
+                    progress_callback("upload", pct, "Uploading bundle to remote storage…", done, total_bytes)
+
+            if self._stop_event.is_set():
+                raise PipelineStopped()
             if provider == "github":
                 return cloud_backend.github_upload(
                     archive,
@@ -2636,6 +2654,7 @@ class Builder:
                     branch=cloud.get("branch") or "main",
                     token=credentials.get("token") or "",
                     commit_message=f"Push {content_type} from MLB Studio",
+                    progress_callback=transfer,
                 )
             if provider == "aws":
                 return cloud_backend.s3_upload(
@@ -2643,6 +2662,7 @@ class Builder:
                     bucket=cloud.get("bucket"),
                     object_key=cloud.get("object_path") or archive.name,
                     credentials=credentials,
+                    progress_callback=transfer,
                 )
             if provider == "gcp":
                 return cloud_backend.gcs_upload(
@@ -2650,6 +2670,7 @@ class Builder:
                     bucket=cloud.get("bucket"),
                     object_name=cloud.get("object_path") or archive.name,
                     credentials=credentials,
+                    progress_callback=transfer,
                 )
             if provider == "azure":
                 return cloud_backend.azure_upload(
@@ -2657,15 +2678,32 @@ class Builder:
                     container=cloud.get("container"),
                     blob_name=cloud.get("object_path") or archive.name,
                     credentials=credentials,
+                    progress_callback=transfer,
                 )
         raise ValueError(f"Unsupported generic cloud provider: {provider!r}")
 
-    def _load_generic_cloud(self, provider, cloud):
+    def _load_generic_cloud(self, provider, cloud, progress_callback=None):
         from . import cloud as cloud_backend
         provider = str(provider).lower()
         credentials = self._resolve_cloud_credentials(provider, cloud)
         with tempfile.TemporaryDirectory(prefix="mlbricks_cloud_load_") as td:
             archive = Path(td) / "download.mlbricks.zip"
+            if progress_callback:
+                progress_callback("download", 24, "Downloading remote bundle…", 0, None)
+
+            def transfer(done, total_bytes):
+                if self._stop_event.is_set():
+                    raise PipelineStopped()
+                if total_bytes:
+                    fraction = max(0.0, min(1.0, float(done or 0) / float(total_bytes)))
+                    pct = 24 + int(round(fraction * 56))
+                else:
+                    pct = 52
+                if progress_callback:
+                    progress_callback("download", pct, "Downloading remote bundle…", done, total_bytes)
+
+            if self._stop_event.is_set():
+                raise PipelineStopped()
             if provider == "github":
                 result = cloud_backend.github_download(
                     archive,
@@ -2673,6 +2711,7 @@ class Builder:
                     path_in_repo=cloud.get("object_path"),
                     branch=cloud.get("branch") or "main",
                     token=credentials.get("token") or None,
+                    progress_callback=transfer,
                 )
             elif provider == "aws":
                 result = cloud_backend.s3_download(
@@ -2680,6 +2719,7 @@ class Builder:
                     bucket=cloud.get("bucket"),
                     object_key=cloud.get("object_path"),
                     credentials=credentials,
+                    progress_callback=transfer,
                 )
             elif provider == "gcp":
                 result = cloud_backend.gcs_download(
@@ -2687,6 +2727,7 @@ class Builder:
                     bucket=cloud.get("bucket"),
                     object_name=cloud.get("object_path"),
                     credentials=credentials,
+                    progress_callback=transfer,
                 )
             elif provider == "azure":
                 result = cloud_backend.azure_download(
@@ -2694,35 +2735,77 @@ class Builder:
                     container=cloud.get("container"),
                     blob_name=cloud.get("object_path"),
                     credentials=credentials,
+                    progress_callback=transfer,
                 )
             else:
                 raise ValueError(f"Unsupported generic cloud provider: {provider!r}")
+            if self._stop_event.is_set():
+                raise PipelineStopped()
+            if progress_callback:
+                size = archive.stat().st_size if archive.exists() else None
+                progress_callback("restore", 86, "Restoring downloaded content into Studio…", size, size)
             restored = self._restore_cloud_bundle(archive)
             result["restored"] = restored
             return result
+
+    @staticmethod
+    def _cloud_target(provider, cloud):
+        provider = str(provider or "").lower()
+        if provider == "huggingface":
+            return {"repository": cloud.get("repo"), "revision": cloud.get("revision") or "main"}
+        if provider == "github":
+            return {"repository": cloud.get("repo"), "branch": cloud.get("branch") or "main", "path": cloud.get("object_path")}
+        if provider in {"aws", "gcp"}:
+            target = {"bucket": cloud.get("bucket"), "path": cloud.get("object_path")}
+            if provider == "aws":
+                target["region"] = cloud.get("region")
+            return target
+        if provider == "azure":
+            return {"container": cloud.get("container"), "path": cloud.get("object_path")}
+        return {}
 
     def _execute_cloud_command(self, command, progress_callback=None):
         cloud = command.get("cloud") or {}
         action = str(command.get("action") or "")
         provider = str(cloud.get("provider") or "huggingface").lower()
+        content_type = str(cloud.get("content_type") or "project")
+        target = self._cloud_target(provider, cloud)
 
-        def emit(payload):
+        def emit(status, phase, overall, message, **extra):
+            payload = {
+                "status": status,
+                "runtime_kind": "cloud",
+                "phase": phase,
+                "overall": int(max(0, min(100, overall))),
+                "message": message,
+                "cloud_action": action,
+                "cloud_provider": provider,
+                "cloud_content_type": content_type,
+                "cloud_target": target,
+            }
+            payload.update(extra)
             if progress_callback:
                 progress_callback(payload)
 
         if action == "cloud_status":
+            emit("running", "connection", 5, f"Checking {provider} connection…")
             status = self._cloud_provider_status(provider, cloud)
-            emit({
-                "status": "done", "runtime_kind": "cloud", "phase": "status",
-                "overall": 100, "message": status.get("message", "Connection checked."),
-                "cloud_status": {"provider": provider, **status},
-            })
+            emit(
+                "done", "status", 100,
+                status.get("message", "Connection checked."),
+                cloud_status={"provider": provider, **status},
+            )
             return status
 
-        emit({
-            "status": "running", "runtime_kind": "cloud", "phase": action,
-            "overall": 5, "message": f"Connecting to {provider}…",
-        })
+        emit("running", "connection", 4, f"Connecting to {provider}…")
+        connection = self._cloud_provider_status(provider, cloud)
+        emit(
+            "running", "connection", 10,
+            connection.get("message", f"{provider} connection ready."),
+            cloud_status={"provider": provider, **connection},
+        )
+        if self._stop_event.is_set():
+            raise PipelineStopped()
 
         if provider == "huggingface":
             credentials = self._resolve_cloud_credentials(provider, cloud)
@@ -2730,17 +2813,19 @@ class Builder:
             repo_id = str(cloud.get("repo") or "").strip()
             revision = str(cloud.get("revision") or "main").strip() or "main"
             private = bool(cloud.get("private", True))
-            content_type = cloud.get("content_type") or "project"
             artifact_id = cloud.get("artifact_id")
             if action == "cloud_push":
+                emit("running", "upload", 22, f"Uploading {content_type} to {repo_id}…")
                 if content_type == "dataset":
                     result = self.push_dataset_to_hub(artifact_id, repo_id, private=private, token=token)
                 elif content_type == "model":
                     result = self.push_model_to_hub(artifact_id, repo_id, private=private, token=token)
                 else:
                     result = self.push_project_to_hub(repo_id, private=private, token=token)
+                emit("running", "finalizing", 94, "Finalizing Hugging Face repository metadata…")
                 message = f'{content_type.title()} pushed to {repo_id}.'
             elif action == "cloud_load":
+                emit("running", "download", 22, f"Downloading {content_type} from {repo_id}@{revision}…")
                 if content_type == "dataset":
                     restored = self.load_dataset_from_hub(repo_id, revision=revision, token=token)
                     result = {"restored": {"content_type": "dataset", "dataset": restored}}
@@ -2749,25 +2834,29 @@ class Builder:
                     result = {"restored": {"content_type": "model", "model": restored}}
                 else:
                     result = self.load_project_from_hub(repo_id, revision=revision, token=token)
+                emit("running", "restore", 92, "Registering downloaded content in Studio…")
                 message = f'{content_type.title()} loaded from {repo_id}.'
             else:
                 raise ValueError(f"Unknown cloud action: {action!r}")
         else:
+            def stage(phase, pct, msg, done=None, total=None):
+                emit("running", phase, pct, msg, bytes_done=done, bytes_total=total)
             if action == "cloud_push":
-                result = self._push_generic_cloud(provider, cloud)
-                message = f'{(cloud.get("content_type") or "content").title()} pushed to {provider}.'
+                result = self._push_generic_cloud(provider, cloud, progress_callback=stage)
+                emit("running", "finalizing", 94, "Finalizing remote upload…")
+                message = f'{content_type.title()} pushed to {provider}.'
             elif action == "cloud_load":
-                result = self._load_generic_cloud(provider, cloud)
+                result = self._load_generic_cloud(provider, cloud, progress_callback=stage)
+                emit("running", "finalizing", 94, "Finalizing restored content…")
                 message = f'Content loaded from {provider}.'
             else:
                 raise ValueError(f"Unknown cloud action: {action!r}")
 
-        emit({
-            "status": "done", "runtime_kind": "cloud", "phase": action,
-            "overall": 100, "message": message,
-            "cloud_result": result,
-            "state_replace": self.to_dict(),
-        })
+        emit(
+            "done", action, 100, message,
+            cloud_result=result,
+            state_replace=self.to_dict(),
+        )
         return result
 
     def _execute_hub_command(self, command, progress_callback=None):
@@ -3133,9 +3222,11 @@ class Builder:
                         progress_callback=self._publish_bridge_progress,
                     )
             except PipelineStopped:
+                stopped_kind = "cloud" if str(action).startswith("cloud_") else action
+                stopped_message = "Cloud transfer cancelled." if stopped_kind == "cloud" else f"{action.title()} stopped."
                 self._publish_bridge_progress({
-                    "status":"stopped","runtime_kind":action,"overall":0,
-                    "message":f"{action.title()} stopped."
+                    "status":"stopped","runtime_kind":stopped_kind,"phase":action,"overall":0,
+                    "message":stopped_message
                 })
             except Exception as exc:
                 # Keep model_runtime lazy at Studio startup. TrainingStopped is
@@ -3160,7 +3251,7 @@ class Builder:
                 elif action in {"delete_dataset", "delete_model", "runtime_clear_memory"}:
                     runtime_kind = "maintenance"
                 error_payload = {
-                    "status":"error","runtime_kind":runtime_kind,"overall":0,
+                    "status":"error","runtime_kind":runtime_kind,"phase":action,"overall":0,
                     "message":f"{type(exc).__name__}: {exc}"
                 }
                 if runtime_kind == "serve":
