@@ -1803,10 +1803,13 @@ function __MLB_STUDIO_FACTORY__(){
     function requestCloudCommand(action,config={}){
       const cleanConfig=cp(config||{});
       const provider=String(cleanConfig.provider||cloudForm.provider||"huggingface");
-      inspectorTab="info";
+      // Cloud tab owns live connection + transfer activity. Final results move
+      // to Info only when the operation reaches a terminal state.
+      inspectorTab="settings";
       if(!ensureBridgeForAction()){
         execution={status:"error",runtime_kind:"cloud",phase:action,overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
         cloudActivity={...cloudActivity,status:"error",action,provider,phase:action,overall:0,message:execution.message,error:execution.message,finished_at:Date.now(),target:cloudTargetFromConfig(cleanConfig)};
+        inspectorTab="info";
         applyExecutionProgress(execution);draw();return;
       }
       lastCloudRequest={action,config:cp(cleanConfig)};
@@ -1820,12 +1823,12 @@ function __MLB_STUDIO_FACTORY__(){
       };
       if(!setBridgeState()||!setBridgeCommand(command)){
         cloudActivity.status="error";cloudActivity.message="Could not send cloud command to Python.";cloudActivity.error=cloudActivity.message;cloudActivity.finished_at=Date.now();
-        draw();return;
+        inspectorTab="info";draw();return;
       }
       const button=bridgeControl(bridge.run,"button");
       if(!button){
         cloudActivity.status="error";cloudActivity.message="Python cloud control was not found.";cloudActivity.error=cloudActivity.message;cloudActivity.finished_at=Date.now();
-        draw();return;
+        inspectorTab="info";draw();return;
       }
       const progressInput=bridgeControl(bridge.progress,"textarea");
       lastProgressRaw=progressInput?.value||lastProgressRaw;
@@ -2208,7 +2211,8 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       if(next.runtime_kind==="cloud"){
-        inspectorTab="info";
+        const cloudTerminal=next.status==="done"||next.status==="error"||next.status==="stopped";
+        inspectorTab=cloudTerminal?"info":"settings";
         if(next.cloud_status){cloudStatus[next.cloud_status.provider]=cp(next.cloud_status);setTimeout(draw,20);}
         const keepPct=(next.status==="error"||next.status==="stopped")?Math.max(Number(cloudActivity.overall||0),Number(next.overall||0)):Number(next.overall||0);
         cloudActivity={
@@ -5491,12 +5495,9 @@ function __MLB_STUDIO_FACTORY__(){
         if(cloudActivity.started_at)appendCloudInspectorRow(activity,"Started",new Date(cloudActivity.started_at).toLocaleTimeString());
         if(cloudActivity.finished_at)appendCloudInspectorRow(activity,"Finished",new Date(cloudActivity.finished_at).toLocaleTimeString());
         if(cloudActivity.result?.url)appendCloudInspectorRow(activity,"Remote",cloudActivity.result.url);
-        if(cloudActivity.error){
-          const err=document.createElement("div");err.className="mlb-cloud-inspector-message error";err.textContent=cloudActivity.error;activity.appendChild(err);
-        }else if(cloudActivity.status==="done"){
-          const done=document.createElement("div");done.className="mlb-cloud-inspector-message ok";done.textContent=cloudActivity.message||"Cloud task completed successfully.";activity.appendChild(done);
-        }
 
+        // Keep Cloud focused on live connection/transfer telemetry. Terminal
+        // messages and recovery actions belong to Info, which opens automatically.
         const actions=document.createElement("div");actions.className="mlb-cloud-inspector-actions";
         if(cloudActivity.status==="running"){
           const cancel=btn("Cancel","mlb-cloud-inspector-action danger");
@@ -5506,32 +5507,81 @@ function __MLB_STUDIO_FACTORY__(){
           });
           actions.appendChild(cancel);
         }
-        if((cloudActivity.status==="error"||cloudActivity.status==="stopped")&&lastCloudRequest){
-          const retry=btn("Retry","mlb-cloud-inspector-action primary");
-          retry.addEventListener("click",()=>requestCloudCommand(lastCloudRequest.action,cp(lastCloudRequest.config)));
-          actions.appendChild(retry);
-        }
-        if(cloudActivity.status==="done"||cloudActivity.status==="error"||cloudActivity.status==="stopped"){
-          const clear=btn("Clear","mlb-cloud-inspector-action");
-          clear.addEventListener("click",()=>{cloudActivity={status:"idle",action:"",provider:cloudForm.provider,phase:"idle",overall:0,message:"No cloud activity yet.",content_type:"",artifact_id:"",target:{},bytes_done:null,bytes_total:null,started_at:0,finished_at:0,result:null,error:""};draw();});
-          actions.appendChild(clear);
-        }
         if(actions.childNodes.length)activity.appendChild(actions);
       }
       body.appendChild(activity);
     }
 
+    function cloudFinalState(){
+      const provider=String(cloudActivity.provider||cloudForm.provider||"huggingface");
+      const connection=cloudStatus[provider]||{};
+      if(cloudActivity.status==="error")return {label:"FAILED",cls:"error"};
+      if(cloudActivity.status==="stopped")return {label:"CANCELLED",cls:"stopped"};
+      if(cloudActivity.status==="done" && cloudActivity.action==="cloud_status" && !(connection.ok||connection.authenticated)){
+        return {label:"WARNING",cls:"warn"};
+      }
+      if(cloudActivity.status==="done")return {label:"COMPLETED",cls:"done"};
+      return {label:"NO RESULT",cls:"idle"};
+    }
+
     function renderCloudInfoInspector(body){
-      renderCloudInspector(body);
+      body.classList.add("mlb-cloud-info-panel");
+      const provider=String(cloudActivity.provider||cloudForm.provider||"huggingface");
+      const finalState=cloudFinalState();
+      const hasResult=cloudActivity.status==="done"||cloudActivity.status==="error"||cloudActivity.status==="stopped";
+
+      const result=document.createElement("section");result.className="mlb-cloud-inspector-card mlb-cloud-result-card";
+      const rh=document.createElement("div");rh.className="mlb-cloud-inspector-title";
+      const rtitle=document.createElement("strong");rtitle.textContent="STATUS";
+      const badge=document.createElement("span");badge.className="mlb-cloud-inspector-badge "+finalState.cls;badge.textContent=finalState.label;
+      rh.append(rtitle,badge);result.appendChild(rh);
+
+      if(!hasResult){
+        const empty=document.createElement("div");empty.className="mlb-cloud-inspector-empty";
+        empty.textContent="Completion, failure, cancellation and warning details will appear here automatically.";
+        result.appendChild(empty);body.appendChild(result);return;
+      }
+
+      appendCloudInspectorRow(result,"Operation",cloudActionLabel(cloudActivity.action));
+      appendCloudInspectorRow(result,"Provider",providerLabel(provider));
+      appendCloudInspectorRow(result,"Phase",String(cloudActivity.phase||"—").replace(/_/g," "));
+      appendCloudInspectorRow(result,"Content",cloudActivity.content_type?cloudActivity.content_type.replace(/_/g," "):"—");
+      const target=cloudActivity.target||{};
+      appendCloudInspectorRow(result,"Repository",target.repository);
+      appendCloudInspectorRow(result,"Bucket",target.bucket);
+      appendCloudInspectorRow(result,"Container",target.container);
+      appendCloudInspectorRow(result,"Path",target.path);
+      appendCloudInspectorRow(result,"Revision",target.revision);
+      appendCloudInspectorRow(result,"Branch",target.branch);
+      appendCloudInspectorRow(result,"Region",target.region);
+      if(cloudActivity.result?.url)appendCloudInspectorRow(result,"Remote",cloudActivity.result.url);
+      if(cloudActivity.finished_at)appendCloudInspectorRow(result,"Finished",new Date(cloudActivity.finished_at).toLocaleTimeString());
+
+      const providerStatus=cloudStatus[provider]||{};
+      let message=String(cloudActivity.error||cloudActivity.message||"").trim();
+      if(finalState.cls==="warn" && providerStatus.message)message=String(providerStatus.message);
+      if(message){
+        const wrap=document.createElement("div");wrap.className="mlb-cloud-result-message-wrap";
+        const label=document.createElement("div");label.className="mlb-cloud-result-message-label";
+        label.textContent=finalState.cls==="error"?"ERROR":(finalState.cls==="warn"?"WARNING":"MESSAGE");
+        const box=document.createElement("div");box.className="mlb-cloud-result-message "+finalState.cls;box.textContent=message;
+        wrap.append(label,box);result.appendChild(wrap);
+      }
+
+      const actions=document.createElement("div");actions.className="mlb-cloud-inspector-actions";
+      if((cloudActivity.status==="error"||cloudActivity.status==="stopped")&&lastCloudRequest){
+        const retry=btn("Retry","mlb-cloud-inspector-action primary");
+        retry.addEventListener("click",()=>requestCloudCommand(lastCloudRequest.action,cp(lastCloudRequest.config)));
+        actions.appendChild(retry);
+      }
+      const clear=btn("Clear","mlb-cloud-inspector-action");
+      clear.addEventListener("click",()=>{cloudActivity={status:"idle",action:"",provider:cloudForm.provider,phase:"idle",overall:0,message:"No cloud activity yet.",content_type:"",artifact_id:"",target:{},bytes_done:null,bytes_total:null,started_at:0,finished_at:0,result:null,error:""};draw();});
+      actions.appendChild(clear);result.appendChild(actions);body.appendChild(result);
     }
 
     function renderCloudSettingsInspector(body){
-      const provider=String(cloudForm.provider||"huggingface");
-      const status=cloudStatus[provider]||{};
-      body.innerHTML='<div class="mlb-section-title">CLOUD</div>';
-      const note=document.createElement("div");note.className="mlb-api-path";note.textContent="Configure credentials and transfer targets in the Cloud & Repositories workspace. Live connection, push/load progress, success, cancellation and failure details appear automatically in the Info tab.";body.appendChild(note);
-      appendCloudInspectorRow(body,"Provider",providerLabel(provider));
-      appendCloudInspectorRow(body,"Connection",status.message||"Not checked");
+      // Cloud tab is dedicated to live connection identity and transfer activity.
+      renderCloudInspector(body);
     }
 
     function updateCloudInspectorLive(activity=cloudActivity){

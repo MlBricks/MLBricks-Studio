@@ -13,10 +13,13 @@ def test_cloud_workspace_uses_right_sidebar_for_connection_and_transfer_activity
     assert 'data-cloud-role="bar"' in js
     assert '.mlb-cloud-transfer-track' in css
     assert 'cloudWorkspace.open?"Cloud"' in js
-    assert 'inspectorTab="info";' in js
+    assert 'inspectorTab=cloudTerminal?"info":"settings";' in js
     assert 'if(inspectorTab==="info")renderCloudInfoInspector(body);' in js
+    assert 'function renderCloudSettingsInspector(body)' in js
     assert 'renderCloudInspector(body);' in js
-    assert 'mlb-cloud-inspector-message error' in js
+    assert 'mlb-cloud-result-message' in js
+    assert 'height:116px' in css
+    assert 'overflow-y:auto' in css
 
 
 def test_cloud_backend_emits_staged_progress_and_target_metadata():
