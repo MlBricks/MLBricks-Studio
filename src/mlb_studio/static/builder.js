@@ -2646,7 +2646,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Build the closing script tag by concatenation so builder.js itself never
       // contains a raw script end tag while generated HTML receives a real one.
       const closeScript="</"+"script>";
-      return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MLB Studio</title><link rel="icon" type="image/svg+xml" href="'+faviconHref+'"><link rel="shortcut icon" href="'+faviconHref+'"><style>'+cssText+'</style><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1118}body{padding:0}.mlb-root{width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;min-width:0!important;border-radius:0!important;border:0!important;box-shadow:none!important}</style></head><body><div id="'+targetId+'" class="mlb-root" data-mlb-studio-version="1.0.0"></div><script>'+jsText+closeScript+'<script>window.MLBricksBuilder.mount(document.getElementById('+JSON.stringify(targetId)+'),'+safePayload+');'+closeScript+'</body></html>';
+      return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MLB Studio</title><link rel="icon" type="image/svg+xml" href="'+faviconHref+'"><link rel="shortcut icon" href="'+faviconHref+'"><style>'+cssText+'</style><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1118}body{padding:0}.mlb-root{width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;min-width:0!important;border-radius:0!important;border:0!important;box-shadow:none!important}</style></head><body><div id="'+targetId+'" class="mlb-root" data-mlb-studio-version="1.0.0b1"></div><script>'+jsText+closeScript+'<script>window.MLBricksBuilder.mount(document.getElementById('+JSON.stringify(targetId)+'),'+safePayload+');'+closeScript+'</body></html>';
     }
 
     function openFullWindow(){
@@ -4719,7 +4719,7 @@ function __MLB_STUDIO_FACTORY__(){
       if(!model)return;
       const config={
         format:"mlbricks-model-config",
-        builder_version:"1.0.0",
+        builder_version:"1.0.0b1",
         project:cp(state.project||{}),
         model:cp(model),
         selected_dataset:selectedModelDataset(),
@@ -8582,8 +8582,8 @@ function __MLB_STUDIO_FACTORY__(){
       rememberWorkspaceView();
       return {
         format:"mlb-studio-design",
-        format_version:"1.0.0",
-        builder_version:"1.0.0",
+        format_version:"1.0.0b1",
+        builder_version:"1.0.0b1",
         saved_at:new Date().toISOString(),
         state:sanitizedProjectState()
       };
@@ -8629,7 +8629,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
       const payload={
         format:"mlbricks-export",
-        builder_version:"1.0.0",
+        builder_version:"1.0.0b1",
         workspace:state.active_workspace,
         project:cp(state.project||{}),
         prepared_datasets:cp(state.prepared_datasets||[]),
@@ -8760,7 +8760,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       // Top bar
       const top=document.createElement("div");top.className="mlb-topbar";
-      const frontendVersion=root.dataset.mlbricksBuilderVersion||"1.0.0";
+      const frontendVersion=root.dataset.mlbricksBuilderVersion||"1.0.0b1";
 
       const topLeft=document.createElement("div");topLeft.className="mlb-top-left";
       const logo=document.createElement("div");logo.className="mlb-logo";

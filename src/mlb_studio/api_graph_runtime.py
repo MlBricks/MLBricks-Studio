@@ -327,7 +327,7 @@ API_COMPONENTS.register(APIComponentContract(
     },
 ))
 
-# Vision classification path. Both current MLBricks Kit 1.0.0b1 families take
+# Vision classification path. Both current MLBricks Kit 1.0.0b2 families take
 # raw image tensors [B,C,H,W] for Serpentine / ViT / CNN and return class logits.
 API_COMPONENTS.register(VisionClassificationContract(
     component_type="vesa",

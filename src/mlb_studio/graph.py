@@ -650,7 +650,7 @@ def new_project(name: str = "Untitled Model"):
     now = datetime.now(timezone.utc).isoformat()
     return {
         "format": "mlb-studio",
-        "format_version": "1.0.0",
+        "format_version": "1.0.0b1",
         "project": {
             "name": name,
             "created_at": now,

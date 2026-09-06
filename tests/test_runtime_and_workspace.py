@@ -9,7 +9,7 @@ from mlb_studio.runtime import get_mlbricks_info
 
 
 def test_versions_are_consistent():
-    assert __version__ == "1.0.0"
+    assert __version__ == "1.0.0b1"
     assert new_project()["format_version"] == __version__
 
 
@@ -37,7 +37,7 @@ def test_mlbricks_diagnostics_prefers_mlbricks_kit_distribution(monkeypatch):
     calls = []
 
     class Distribution:
-        version = "1.0.0b1"
+        version = "1.0.0b2"
 
     def distribution(name):
         calls.append(name)
@@ -55,7 +55,7 @@ def test_mlbricks_diagnostics_prefers_mlbricks_kit_distribution(monkeypatch):
     assert calls == ["mlbricks-kit"]
     assert info == {
         "installed": True,
-        "version": "1.0.0b1",
+        "version": "1.0.0b2",
         "module_path": "/tmp/mlbricks/__init__.py",
     }
 

@@ -18,8 +18,8 @@ def _field(component, key):
 
 def test_schema_targets_current_mlbricks_kit_beta():
     payload = _schema()
-    assert payload["mlbricks_version"] == "1.0.0b1"
-    assert payload["generated_from"] == "MLBricks Kit 1.0.0b1 public API"
+    assert payload["mlbricks_version"] == "1.0.0b2"
+    assert payload["generated_from"] == "MLBricks Kit 1.0.0b2 public API"
 
 
 def test_component_specific_position_and_scan_choices():

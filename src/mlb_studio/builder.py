@@ -1421,7 +1421,7 @@ class Builder:
             root.mkdir(parents=True, exist_ok=True)
             manifest = {
                 "format": "mlbricks-cloud-bundle-v1",
-                "builder_version": "1.0.0",
+                "builder_version": "1.0.0b1",
                 "content_type": content_type,
             }
 

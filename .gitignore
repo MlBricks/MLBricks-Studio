@@ -1,17 +1,8 @@
-﻿
-# ----------------------------------------------------------------------
-# Python / test / build artifacts
-# ----------------------------------------------------------------------
 __pycache__/
 *.py[cod]
-*.class
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-
 build/
 dist/
 *.egg-info/
-.eggs/
+.venv/
+venv/

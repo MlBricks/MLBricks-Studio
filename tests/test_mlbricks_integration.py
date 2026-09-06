@@ -14,7 +14,7 @@ from mlb_studio.import_pool import API_IMPORTS, COMPONENT_IMPORTS, IMPORT_POOL  
 
 
 EXPECTED_DISTRIBUTION = "mlbricks-kit"
-EXPECTED_VERSION = "1.0.0b1"
+EXPECTED_VERSION = "1.0.0b2"
 
 
 @pytest.mark.integration

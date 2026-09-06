@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlb-studio"
-version = "1.0.0"
-description = "MLB Studio V1.0 — visual model studio for MLBricks in Jupyter, Kaggle and Colab."
+version = "1.0.0b1"
+description = "MLB Studio V1.0 Beta — visual model studio for MLBricks across local Python, Jupyter, Kaggle and Colab."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -17,6 +17,7 @@ authors = [
 ]
 
 dependencies = [
+  "mlbricks-kit==1.0.0b2",
   "ipython>=7.34,<10",
   "ipywidgets>=8,<9",
   "huggingface_hub>=0.24,<2",
@@ -30,6 +31,9 @@ dependencies = [
   "torch>=2.2",
   "keyring>=25,<27"
 ]
+
+[project.scripts]
+mlb-studio = "mlbstudio.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/MlBricks/MLBricks-Studio"
