@@ -1791,6 +1791,21 @@ function __MLB_STUDIO_FACTORY__(){
       return action==="cloud_push"?"Upload":action==="cloud_load"?"Download":action==="cloud_status"?"Connection check":"Cloud task";
     }
 
+    function cloudBottomStatus(activity=cloudActivity){
+      const state=String(activity?.status||"idle");
+      const action=cloudActionLabel(activity?.action||"");
+      if(state==="running")return action+": Running";
+      if(state==="done"){
+        const provider=String(activity?.provider||cloudForm.provider||"");
+        const conn=cloudStatus[provider]||{};
+        if(activity?.action==="cloud_status" && !(conn.ok||conn.authenticated))return action+": Warning";
+        return action+": Completed";
+      }
+      if(state==="error")return action+": Failed";
+      if(state==="stopped")return action+": Cancelled";
+      return "Cloud: Ready";
+    }
+
     function formatCloudBytes(value){
       const n=Number(value);
       if(!Number.isFinite(n)||n<0)return "";
@@ -2238,6 +2253,10 @@ function __MLB_STUDIO_FACTORY__(){
           cloudActivity.target={...(cloudActivity.target||{}),path:cloudForm.object_path};
         }
         updateCloudInspectorLive(cloudActivity);
+        // The bottom bar is intentionally summary-only for cloud work. Full
+        // provider errors, warnings and completion messages live in the right
+        // sidebar so long API responses never stretch across the footer.
+        setStatus(cloudBottomStatus(cloudActivity));
         // Running progress used to update only the existing DOM. If an older
         // terminal event had just drawn Info, the purple Info tab could remain
         // visible while live Connection / Transfer Activity was being updated.
@@ -2368,7 +2387,10 @@ function __MLB_STUDIO_FACTORY__(){
       }
 
       const stat=root.querySelector(".mlb-statusbar .right");
-      if(stat)stat.textContent="● "+(execution.message||status);
+      if(stat){
+        const footerStatus=execution.runtime_kind==="cloud"?cloudBottomStatus(cloudActivity):(execution.message||status);
+        stat.textContent="● "+footerStatus;
+      }
 
       const run=root.querySelector(".mlb-run");
       if(run){
