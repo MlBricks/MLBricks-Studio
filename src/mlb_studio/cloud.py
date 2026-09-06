@@ -118,6 +118,71 @@ def github_status(*, token: str) -> dict[str, Any]:
     }
 
 
+
+def github_list_studio_bundles(
+    *,
+    repo: str,
+    branch: str = "main",
+    token: str | None = None,
+    base_path: str = "",
+) -> list[str]:
+    """Return MLBricks Studio bundle paths available in a GitHub repository.
+
+    This is used by the Load flow when the user leaves File Path blank or
+    points at a directory.  It keeps GitHub convenient for Studio projects
+    without guessing arbitrary non-MLBricks files.
+    """
+    repo = normalize_github_repo(repo)
+    branch = str(branch or "main").strip() or "main"
+    prefix = str(base_path or "").strip().strip("/")
+    encoded_branch = urllib.parse.quote(branch, safe="")
+    url = f"https://api.github.com/repos/{repo}/git/trees/{encoded_branch}?recursive=1"
+    tree_info = _require_github_object(
+        _json_request(url, token=token),
+        context="repository tree",
+    )
+    rows = tree_info.get("tree") or []
+    if not isinstance(rows, list):
+        raise CloudProviderError("GitHub repository tree did not contain a valid file list.")
+
+    matches: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("type") != "blob":
+            continue
+        path = str(row.get("path") or "").strip().lstrip("/")
+        if not path.lower().endswith(".mlbricks.zip"):
+            continue
+        if prefix and path != prefix and not path.startswith(prefix + "/"):
+            continue
+        matches.append(path)
+    return sorted(set(matches), key=lambda value: value.lower())
+
+
+def _select_github_bundle_path(
+    *,
+    repo: str,
+    branch: str,
+    token: str | None,
+    base_path: str = "",
+) -> str:
+    candidates = github_list_studio_bundles(
+        repo=repo, branch=branch, token=token, base_path=base_path
+    )
+    scope = f" under `{base_path.strip().strip('/')}`" if str(base_path or "").strip().strip("/") else ""
+    if not candidates:
+        raise CloudProviderError(
+            "No MLBricks Studio bundle (`*.mlbricks.zip`) was found" + scope +
+            ". Push Studio content first or enter the complete GitHub File Path."
+        )
+    if len(candidates) > 1:
+        preview = "\n".join(f"- {item}" for item in candidates[:10])
+        more = f"\n- … and {len(candidates) - 10} more" if len(candidates) > 10 else ""
+        raise CloudProviderError(
+            "Multiple MLBricks Studio bundles were found" + scope +
+            ". Enter the File Path for the one you want to load:\n" + preview + more
+        )
+    return candidates[0]
+
 def github_upload(
     local_path: str | Path,
     *,
@@ -209,17 +274,30 @@ def github_download(
     progress_callback=None,
 ) -> dict:
     repo = normalize_github_repo(repo)
+    branch = str(branch or "main").strip() or "main"
     path_in_repo = str(path_in_repo or "").strip().lstrip("/")
+
+    # A blank path means "find my Studio bundle".  This matches Push, which
+    # defaults to mlbricks/<name>.mlbricks.zip, and avoids forcing users to
+    # remember the generated bundle filename.
     if not path_in_repo:
-        raise ValueError("GitHub file path is required for download.")
+        path_in_repo = _select_github_bundle_path(
+            repo=repo, branch=branch, token=token, base_path=""
+        )
+
     encoded_path = urllib.parse.quote(path_in_repo, safe="/")
     url = f"https://api.github.com/repos/{repo}/contents/{encoded_path}?" + urllib.parse.urlencode({"ref": branch})
     raw_info = _json_request(url, token=token)
     if isinstance(raw_info, list):
-        raise CloudProviderError(
-            "GitHub Path points to a directory. Enter the complete Studio bundle file path, "
-            "for example `mlbricks/project.mlbricks.zip`."
+        # If a directory was entered, auto-select the bundle when there is only
+        # one beneath it.  If there are several, return their paths so the user
+        # can choose explicitly instead of failing with an opaque list error.
+        path_in_repo = _select_github_bundle_path(
+            repo=repo, branch=branch, token=token, base_path=path_in_repo
         )
+        encoded_path = urllib.parse.quote(path_in_repo, safe="/")
+        url = f"https://api.github.com/repos/{repo}/contents/{encoded_path}?" + urllib.parse.urlencode({"ref": branch})
+        raw_info = _json_request(url, token=token)
     info = _require_github_object(raw_info, context="download target")
     download_url = info.get("download_url")
     destination = Path(destination)

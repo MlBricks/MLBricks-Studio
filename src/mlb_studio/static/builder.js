@@ -2227,6 +2227,10 @@ function __MLB_STUDIO_FACTORY__(){
           error:next.status==="error"?String(next.message||"Cloud task failed."):((next.status==="running")?"":cloudActivity.error),
           finished_at:(next.status==="done"||next.status==="error"||next.status==="stopped")?Date.now():0
         };
+        if(next.status==="done" && String(next.cloud_provider||cloudActivity.provider)==="github" && next.cloud_result?.path){
+          cloudForm.object_path=String(next.cloud_result.path);
+          cloudActivity.target={...(cloudActivity.target||{}),path:cloudForm.object_path};
+        }
         updateCloudInspectorLive(cloudActivity);
         if(next.state_replace){
           state=cp(next.state_replace);delete state._runtime_command;delete state._session_secrets;ensureWorkspaces();
@@ -5208,7 +5212,7 @@ function __MLB_STUDIO_FACTORY__(){
       return {};
     }
 
-    function providerTargetFields(card){
+    function providerTargetFields(card,mode="push"){
       const p=cloudForm.provider;
       if(p==="huggingface"){
         card.appendChild(cloudField("Repository ID","text",cloudForm.repo,"username-or-org/repo-name",v=>cloudForm.repo=v));
@@ -5218,7 +5222,7 @@ function __MLB_STUDIO_FACTORY__(){
         const grid=document.createElement("div");grid.className="mlb-cloud-mini-grid";
         grid.append(
           cloudField("Branch","text",cloudForm.branch,"main",v=>cloudForm.branch=v),
-          cloudField("File Path","text",cloudForm.object_path,"mlbricks/project.mlbricks.zip",v=>cloudForm.object_path=v)
+          cloudField(mode==="load"?"File Path (optional — auto-detect)":"File Path (optional)","text",cloudForm.object_path,mode==="load"?"blank = auto-detect one *.mlbricks.zip":"blank = mlbricks/<bundle>.mlbricks.zip",v=>cloudForm.object_path=v)
         );
         card.appendChild(grid);
       }else if(p==="aws"||p==="gcp"){
@@ -5575,7 +5579,7 @@ function __MLB_STUDIO_FACTORY__(){
       push.appendChild(cloudSelect("Content Type",cloudForm.push_type,[{value:"dataset",label:"Prepared Dataset"},{value:"model",label:"Built / Trained Model"},{value:"project",label:"Builder Project"}],v=>{cloudForm.push_type=v;cloudForm.push_artifact="";draw();}));
       const artifacts=cloudArtifactOptions(cloudForm.push_type);if(!cloudForm.push_artifact&&artifacts.length)cloudForm.push_artifact=artifacts[0].id;
       push.appendChild(cloudSelect("Local Content",cloudForm.push_artifact,artifacts.length?artifacts.map(x=>({value:x.id,label:x.name+" — "+x.detail})):[{value:"",label:"Nothing available yet"}],v=>cloudForm.push_artifact=v));
-      providerTargetFields(push);
+      providerTargetFields(push,"push");
       if(cloudForm.provider==="huggingface"){
         const privacy=document.createElement("label");privacy.className="mlb-cloud-private";const box=document.createElement("input");box.type="checkbox";box.checked=!!cloudForm.private;box.addEventListener("change",()=>cloudForm.private=box.checked);
         const text=document.createElement("span");text.innerHTML="<strong>Private repository</strong><small>Uncheck to publish publicly</small>";privacy.append(box,text);push.appendChild(privacy);
@@ -5585,7 +5589,7 @@ function __MLB_STUDIO_FACTORY__(){
       const load=document.createElement("section");load.className="mlb-cloud-card";
       const lt=document.createElement("div");lt.className="mlb-cloud-card-title";lt.innerHTML="<strong>↓ LOAD</strong><span>Restore content from "+providerLabel(cloudForm.provider)+"</span>";load.appendChild(lt);
       load.appendChild(cloudSelect("Content Type",cloudForm.load_type,[{value:"dataset",label:"Prepared Dataset"},{value:"model",label:"MLB Studio Model"},{value:"project",label:"Builder Project"}],v=>cloudForm.load_type=v));
-      providerTargetFields(load);const loadBtn=btn("↓ Load","mlb-cloud-primary secondary");loadBtn.addEventListener("click",()=>requestCloudCommand("cloud_load",cloudCommandConfig(cloudForm.load_type,null)));load.appendChild(loadBtn);grid.appendChild(load);
+      providerTargetFields(load,"load");const loadBtn=btn("↓ Load","mlb-cloud-primary secondary");loadBtn.addEventListener("click",()=>requestCloudCommand("cloud_load",cloudCommandConfig(cloudForm.load_type,null)));load.appendChild(loadBtn);grid.appendChild(load);
       container.appendChild(grid);
     }
 
