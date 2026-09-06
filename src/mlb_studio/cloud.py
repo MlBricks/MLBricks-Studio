@@ -14,6 +14,55 @@ class CloudProviderError(RuntimeError):
     pass
 
 
+def normalize_github_repo(repo: str) -> str:
+    """Return a canonical ``owner/repository`` identifier.
+
+    Studio accepts the short GitHub form as well as common HTTPS/SSH repo URLs.
+    Extra URL path segments (``/tree/...``, ``/blob/...``) are ignored because the
+    branch/file path is configured separately in the Cloud workspace.
+    """
+    value = str(repo or "").strip()
+    if not value:
+        raise ValueError("GitHub repository must be `owner/repository`.")
+
+    if value.startswith(("http://", "https://")):
+        parsed = urllib.parse.urlparse(value)
+        if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
+            raise ValueError("GitHub repository URL must point to github.com.")
+        parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+        if len(parts) < 2:
+            raise ValueError("GitHub repository must be `owner/repository`.")
+        owner, name = parts[0], parts[1]
+    elif value.startswith("git@github.com:"):
+        path = value.split(":", 1)[1]
+        parts = [part for part in path.split("/") if part]
+        if len(parts) < 2:
+            raise ValueError("GitHub repository must be `owner/repository`.")
+        owner, name = parts[0], parts[1]
+    else:
+        # Do not silently accept branch/file suffixes in the short form.
+        parts = [part for part in value.strip("/").split("/") if part]
+        if len(parts) != 2:
+            raise ValueError("GitHub repository must be `owner/repository`.")
+        owner, name = parts
+
+    if name.endswith(".git"):
+        name = name[:-4]
+    if not owner or not name:
+        raise ValueError("GitHub repository must be `owner/repository`.")
+    return f"{owner}/{name}"
+
+
+def _require_github_object(value: Any, *, context: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        raise CloudProviderError(
+            f"GitHub {context} resolved to a directory/list instead of a file object."
+        )
+    raise CloudProviderError(f"GitHub returned an unexpected response for {context}.")
+
+
 def _json_request(url: str, *, method: str = "GET", token: str | None = None, payload=None):
     headers = {
         "Accept": "application/vnd.github+json",
@@ -43,11 +92,28 @@ def _json_request(url: str, *, method: str = "GET", token: str | None = None, pa
 def github_status(*, token: str) -> dict[str, Any]:
     if not token:
         return {"ok": False, "message": "GitHub token is required."}
-    info = _json_request("https://api.github.com/user", token=token)
+    info = _require_github_object(
+        _json_request("https://api.github.com/user", token=token),
+        context="user lookup",
+    )
     login = info.get("login")
+    organizations: list[str] = []
+    try:
+        org_rows = _json_request("https://api.github.com/user/orgs", token=token)
+        if isinstance(org_rows, list):
+            organizations = [
+                str(row.get("login") or "").strip()
+                for row in org_rows
+                if isinstance(row, dict) and row.get("login")
+            ]
+    except Exception:
+        # Organization enumeration is supplementary; a valid /user response is
+        # enough to establish the connection.
+        pass
     return {
         "ok": True,
         "username": login,
+        "organizations": organizations,
         "message": f"Connected to GitHub as {login}." if login else "GitHub token accepted.",
     }
 
@@ -64,26 +130,47 @@ def github_upload(
 ) -> dict:
     if not token:
         raise CloudProviderError("GitHub token is required for upload.")
-    if "/" not in str(repo):
-        raise ValueError("GitHub repository must be `owner/repository`.")
+    repo = normalize_github_repo(repo)
+    source_path = Path(local_path)
     path_in_repo = str(path_in_repo or "").strip().lstrip("/")
     if not path_in_repo:
         raise ValueError("GitHub file path is required.")
+    if path_in_repo.endswith("/"):
+        path_in_repo += source_path.name
 
-    encoded_path = urllib.parse.quote(path_in_repo, safe="/")
-    url = f"https://api.github.com/repos/{repo}/contents/{encoded_path}"
+    def content_url(remote_path: str) -> str:
+        encoded = urllib.parse.quote(remote_path, safe="/")
+        return f"https://api.github.com/repos/{repo}/contents/{encoded}"
+
+    url = content_url(path_in_repo)
     sha = None
     try:
         existing = _json_request(
             url + "?" + urllib.parse.urlencode({"ref": branch}),
             token=token,
         )
+        if isinstance(existing, list):
+            # The user supplied an existing directory (for example ``studio``)
+            # instead of a complete file path. Upload the Studio bundle inside
+            # that directory rather than crashing on ``list.get``.
+            path_in_repo = f"{path_in_repo.rstrip('/')}/{source_path.name}"
+            url = content_url(path_in_repo)
+            try:
+                existing = _json_request(
+                    url + "?" + urllib.parse.urlencode({"ref": branch}),
+                    token=token,
+                )
+            except CloudProviderError as exc:
+                if "HTTP 404" in str(exc):
+                    existing = {}
+                else:
+                    raise
+        existing = _require_github_object(existing, context="upload target")
         sha = existing.get("sha")
     except CloudProviderError as exc:
         if "HTTP 404" not in str(exc):
             raise
 
-    source_path = Path(local_path)
     total = source_path.stat().st_size
     if progress_callback:
         progress_callback(0, total)
@@ -95,10 +182,14 @@ def github_upload(
     }
     if sha:
         payload["sha"] = sha
-    result = _json_request(url, method="PUT", token=token, payload=payload)
+    result = _require_github_object(
+        _json_request(url, method="PUT", token=token, payload=payload),
+        context="upload result",
+    )
     if progress_callback:
         progress_callback(total, total)
-    html_url = (result.get("content") or {}).get("html_url")
+    result_content = result.get("content")
+    html_url = result_content.get("html_url") if isinstance(result_content, dict) else None
     return {
         "provider": "github",
         "repo": repo,
@@ -117,12 +208,19 @@ def github_download(
     token: str | None = None,
     progress_callback=None,
 ) -> dict:
-    if "/" not in str(repo):
-        raise ValueError("GitHub repository must be `owner/repository`.")
+    repo = normalize_github_repo(repo)
     path_in_repo = str(path_in_repo or "").strip().lstrip("/")
+    if not path_in_repo:
+        raise ValueError("GitHub file path is required for download.")
     encoded_path = urllib.parse.quote(path_in_repo, safe="/")
     url = f"https://api.github.com/repos/{repo}/contents/{encoded_path}?" + urllib.parse.urlencode({"ref": branch})
-    info = _json_request(url, token=token)
+    raw_info = _json_request(url, token=token)
+    if isinstance(raw_info, list):
+        raise CloudProviderError(
+            "GitHub Path points to a directory. Enter the complete Studio bundle file path, "
+            "for example `mlbricks/project.mlbricks.zip`."
+        )
+    info = _require_github_object(raw_info, context="download target")
     download_url = info.get("download_url")
     destination = Path(destination)
     if not download_url:
