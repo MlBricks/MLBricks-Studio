@@ -3789,12 +3789,12 @@
 
 
 .mlb-modal-backdrop{position:fixed;z-index:10000;background:rgba(5,11,18,.28);display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
-.mlb-modal{width:min(470px,calc(100% - 28px));max-height:calc(100% - 28px);overflow:auto;background:#18222c;border:1px solid #334252;border-radius:8px;box-shadow:0 10px 24px rgba(0,0,0,.34);padding:14px;color:#e8edf4}
+.mlb-modal{width:min(470px,calc(100% - 28px));max-height:min(420px,calc(100% - 36px));overflow:hidden;background:#18222c;border:1px solid #334252;border-radius:8px;box-shadow:0 10px 24px rgba(0,0,0,.34);padding:14px;color:#e8edf4;display:flex;flex-direction:column}
 .mlb-modal-title{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:800;line-height:1.25;color:#f4f7fb;margin-bottom:8px}
 .mlb-modal-badge{width:30px;height:30px;min-width:30px;border-radius:7px;display:grid;place-items:center;background:#4d7fc2;color:#fff;font-size:13px;font-weight:900;line-height:1}
-.mlb-modal-body{font-size:12px;line-height:1.5;color:#aab6c5;padding-left:40px}
+.mlb-modal-body{font-size:12px;line-height:1.5;color:#aab6c5;padding-left:40px;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:4px;scrollbar-gutter:stable}
 .mlb-modal-message{white-space:pre-wrap;color:#aab6c5}
-.mlb-modal-details{margin:10px 0 0;padding:9px 10px;border-radius:7px;background:#121a23;border:1px solid #334252;color:#8c98a8;font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.mlb-modal-details{margin:10px 0 0;padding:9px 10px;border-radius:7px;background:#121a23;border:1px solid #334252;color:#8c98a8;font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto}
 .mlb-modal-label{display:block;margin:10px 0 6px;font-size:10px;font-weight:800;letter-spacing:.05em;color:#8c98a8;text-transform:uppercase}
 .mlb-modal-input{width:100%;margin-top:8px;background:#121a23;border:1px solid #334252;border-radius:7px;color:#e8edf4;padding:9px 10px;font:12px/1.45 Inter,system-ui,sans-serif;outline:none;box-sizing:border-box}
 .mlb-modal-input:focus{border-color:#5e9df0;box-shadow:0 0 0 2px rgba(94,157,240,.12)}
