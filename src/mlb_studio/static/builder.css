@@ -9,7 +9,7 @@
   --orange:#f5a849;--cyan:#4bc1cb;--yellow:#d6b64d;--red:#e56a6a;
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   background:var(--bg);color:var(--text);border:1px solid #202a35;border-radius:12px;
-  overflow:hidden;min-width:0;box-shadow:0 8px 24px rgba(0,0,0,.18);
+  overflow:hidden;overflow-anchor:none;min-width:0;box-shadow:0 8px 24px rgba(0,0,0,.18);
   height:min(910px,92vh);min-height:640px;max-height:910px;
   display:flex;flex-direction:column
 }
@@ -2986,6 +2986,32 @@
 .mlb-root input[type="number"]::-webkit-inner-spin-button{
   -webkit-appearance:none!important;
   margin:0!important;
+}
+
+/* Build action: resolve older fixed-width rules and optically center the
+   construction icon + label as one unit. */
+.mlb-top-primary>.mlb-top-build-tab{
+  width:auto!important;
+  min-width:118px!important;
+  max-width:none!important;
+  padding-left:18px!important;
+  padding-right:18px!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:8px!important;
+  text-align:center!important;
+}
+.mlb-top-primary>.mlb-top-build-tab .mlb-action-icon,
+.mlb-top-primary>.mlb-top-build-tab .mlb-action-label{
+  align-self:center!important;
+  margin:0!important;
+}
+.mlb-top-primary>.mlb-top-build-tab .mlb-action-label{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  line-height:16px!important;
 }
 .mlb-number-shell{display:contents!important}
 .mlb-number-stepper,.mlb-number-step{display:none!important}

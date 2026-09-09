@@ -1015,7 +1015,15 @@ class Builder:
             previous_runtime = cached.get("runtime") or {}
             runtime_keys = ("device", "backend", "execution_mode", "compile_mode", "precision")
             runtime_changed = any(str(previous_runtime.get(k, "auto")) != str(config.get(k, "auto")) for k in runtime_keys)
-            if runtime_changed:
+            # A compiled training run wraps only ``training_model``. Its cached
+            # ``model`` intentionally remains the eager TensorGraph, so it must
+            # not be mistaken for a compiled inference build when generation is
+            # requested with the same settings.
+            needs_inference_compile = (
+                str(config.get("execution_mode") or "eager") == "compiled"
+                and compiled.model is compiled.raw_model
+            )
+            if runtime_changed or needs_inference_compile:
                 compiled, tokenizer = load_trained_for_generation(
                     state=self.state, model_entry=entry, dataset_meta=meta, config=config,
                     checkpoint_path=entry.get("checkpoint_path"), progress=emit,
@@ -2601,8 +2609,6 @@ class Builder:
             # copied into the persistent Builder state.
             saved.update({k: v for k, v in direct.items() if v not in {None, ""}})
             direct = saved
-        if str(provider).lower() == "aws" and cloud.get("region") and not direct.get("region"):
-            direct["region"] = cloud.get("region")
         return direct
 
     def _cloud_provider_status(self, provider, cloud):
@@ -2613,12 +2619,6 @@ class Builder:
         from . import cloud as cloud_backend
         if provider == "github":
             return cloud_backend.github_status(token=credentials.get("token") or "")
-        if provider == "aws":
-            return cloud_backend.s3_status(credentials)
-        if provider == "gcp":
-            return cloud_backend.gcs_status(credentials)
-        if provider == "azure":
-            return cloud_backend.azure_status(credentials)
         raise ValueError(f"Unknown cloud provider: {provider!r}")
 
     def _push_generic_cloud(self, provider, cloud, progress_callback=None):
@@ -2667,30 +2667,6 @@ class Builder:
                     commit_message=f"Push {content_type} from MLB Studio",
                     progress_callback=transfer,
                 )
-            if provider == "aws":
-                return cloud_backend.s3_upload(
-                    archive,
-                    bucket=cloud.get("bucket"),
-                    object_key=cloud.get("object_path") or archive.name,
-                    credentials=credentials,
-                    progress_callback=transfer,
-                )
-            if provider == "gcp":
-                return cloud_backend.gcs_upload(
-                    archive,
-                    bucket=cloud.get("bucket"),
-                    object_name=cloud.get("object_path") or archive.name,
-                    credentials=credentials,
-                    progress_callback=transfer,
-                )
-            if provider == "azure":
-                return cloud_backend.azure_upload(
-                    archive,
-                    container=cloud.get("container"),
-                    blob_name=cloud.get("object_path") or archive.name,
-                    credentials=credentials,
-                    progress_callback=transfer,
-                )
         raise ValueError(f"Unsupported generic cloud provider: {provider!r}")
 
     def _load_generic_cloud(self, provider, cloud, progress_callback=None):
@@ -2715,41 +2691,16 @@ class Builder:
 
             if self._stop_event.is_set():
                 raise PipelineStopped()
-            if provider == "github":
-                result = cloud_backend.github_download(
-                    archive,
-                    repo=cloud.get("repo"),
-                    path_in_repo=cloud.get("object_path"),
-                    branch=cloud.get("branch") or "main",
-                    token=credentials.get("token") or None,
-                    progress_callback=transfer,
-                )
-            elif provider == "aws":
-                result = cloud_backend.s3_download(
-                    archive,
-                    bucket=cloud.get("bucket"),
-                    object_key=cloud.get("object_path"),
-                    credentials=credentials,
-                    progress_callback=transfer,
-                )
-            elif provider == "gcp":
-                result = cloud_backend.gcs_download(
-                    archive,
-                    bucket=cloud.get("bucket"),
-                    object_name=cloud.get("object_path"),
-                    credentials=credentials,
-                    progress_callback=transfer,
-                )
-            elif provider == "azure":
-                result = cloud_backend.azure_download(
-                    archive,
-                    container=cloud.get("container"),
-                    blob_name=cloud.get("object_path"),
-                    credentials=credentials,
-                    progress_callback=transfer,
-                )
-            else:
+            if provider != "github":
                 raise ValueError(f"Unsupported generic cloud provider: {provider!r}")
+            result = cloud_backend.github_download(
+                archive,
+                repo=cloud.get("repo"),
+                path_in_repo=cloud.get("object_path"),
+                branch=cloud.get("branch") or "main",
+                token=credentials.get("token") or None,
+                progress_callback=transfer,
+            )
             if self._stop_event.is_set():
                 raise PipelineStopped()
             if progress_callback:
@@ -2766,19 +2717,17 @@ class Builder:
             return {"repository": cloud.get("repo"), "revision": cloud.get("revision") or "main"}
         if provider == "github":
             return {"repository": cloud.get("repo"), "branch": cloud.get("branch") or "main", "path": cloud.get("object_path")}
-        if provider in {"aws", "gcp"}:
-            target = {"bucket": cloud.get("bucket"), "path": cloud.get("object_path")}
-            if provider == "aws":
-                target["region"] = cloud.get("region")
-            return target
-        if provider == "azure":
-            return {"container": cloud.get("container"), "path": cloud.get("object_path")}
         return {}
 
     def _execute_cloud_command(self, command, progress_callback=None):
         cloud = command.get("cloud") or {}
         action = str(command.get("action") or "")
         provider = str(cloud.get("provider") or "huggingface").lower()
+        if provider not in {"huggingface", "github"}:
+            raise ValueError(
+                f"Unsupported cloud provider: {provider!r}. "
+                "MLBricks Studio supports Hugging Face and GitHub."
+            )
         content_type = str(cloud.get("content_type") or "project")
         target = self._cloud_target(provider, cloud)
 
@@ -3580,7 +3529,7 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
       finally {{ progressBusy = false; }}
     }}
     pollProgress();
-    setInterval(pollProgress, 300);
+    setInterval(pollProgress, 100);
   }})();
   </script>
 </body>

@@ -1149,9 +1149,6 @@ Providers:
 
 - Hugging Face
 - GitHub
-- AWS S3
-- Google Cloud Storage
-- Azure Blob Storage
 
 Content:
 
@@ -1159,10 +1156,9 @@ Content:
 - Built / Trained Model
 - Complete Builder Project
 
-Hugging Face continues to use native Hub dataset/model repositories.
-
-GitHub, S3, GCS and Azure store portable `.mlbricks.zip` bundles containing the
-selected dataset/model/project so the same content can be restored into Builder.
+Hugging Face uses native Hub dataset/model repositories. GitHub stores portable
+`.mlbricks.zip` bundles containing the selected dataset/model/project so the
+same content can be restored into Builder.
 
 ### Credentials + local secure references
 
@@ -1170,9 +1166,6 @@ The Cloud panel includes masked credential fields for:
 
 - Hugging Face API/access token
 - GitHub personal access token
-- AWS access key / secret key / optional session token
-- Google Cloud service-account JSON
-- Azure Storage connection string
 
 Credentials can be given a local **Credential Name** and saved. MLBricks Studio
 keeps only masked credential metadata in its SQLite Studio database. The real
@@ -1185,21 +1178,8 @@ Real credentials are never included in Builder state, autosaved drafts, Workshop
 items, JSON/BIN exports, model designs, dataset metadata, or cloud bundles.
 Environment/default credentials continue to work when supported.
 
-### Optional cloud packages
-
-```bash
-pip install "mlbricks-studio[cloud]"
-```
-
-or install individual provider packages:
-
-```bash
-pip install boto3
-pip install google-cloud-storage google-auth
-pip install azure-storage-blob
-```
-
-GitHub support uses Python's standard HTTP library and needs no extra package.
+Hugging Face uses its normal Hub dependency. GitHub support uses Python's
+standard HTTP library and needs no extra provider package.
 
 ## v0.6.8 — Local / Kaggle filesystem loading
 

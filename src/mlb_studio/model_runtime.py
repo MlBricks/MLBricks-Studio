@@ -1257,6 +1257,209 @@ class TensorGraph(nn.Module):
         if len(sinks)>1: raise ModelCompileError("Training compiler currently requires one tensor output.")
         return _lane_output(values[sinks[0]["id"]], "main")
 
+    def recurrent_generation_support(self):
+        """Return whether this visual graph has an exact token-step execution path.
+
+        Generation is deliberately capability based.  Sequence mixers must expose
+        an explicit prefill/decode contract; pointwise layers are safe to run on
+        one token; arbitrary API/user functions are not guessed to be causal.
+        """
+        pointwise = {
+            "text_input", "image_input", "audio_input", "text_output", "logits_output",
+            "embedding", "lm_head", "learned_position", "sinusoidal_position",
+            "rmsnorm", "layernorm", "linear", "ffn", "residual", "dropout",
+            "value_buffer",
+        }
+        for node in self.order:
+            nid=node["id"]
+            component_type=str(node.get("type") or "")
+            module=self.mods[nid]
+            if self.in_named.get(nid):
+                return False, f"{node.get('name', component_type)} uses named state ports"
+            if component_type == "esa":
+                if not callable(getattr(module,"prefill",None)) or not callable(getattr(module,"decode_step",None)):
+                    return False, f"{node.get('name','ESA')} does not expose prefill/decode_step"
+            elif component_type == "bolt":
+                required=("prefill_with_cache","project_decode_state","decode_append_projected")
+                if not all(callable(getattr(module,name,None)) for name in required):
+                    return False, f"{node.get('name','BOLT')} does not expose fixed-cache decoding"
+            elif component_type == "soup":
+                if not callable(getattr(module,"prefill",None)) or not callable(getattr(module,"decode_step",None)):
+                    return False, f"{node.get('name','SOUP')} does not expose recurrent generation"
+            elif component_type == "custom" and isinstance(module,TensorGraph):
+                if self.in_skip.get(nid) or self.in_extra.get(nid):
+                    return False, f"{node.get('name','Module')} uses external Skip/Extra generation inputs"
+                supported,reason=module.recurrent_generation_support()
+                if not supported:
+                    return False, f"{node.get('name','Module')}: {reason}"
+            elif component_type in pointwise:
+                pass
+            elif component_type == "rescontroller":
+                # ResController is a pointwise residual/update merge.  BOLT is
+                # the only other declarative API component with a recurrent path.
+                pass
+            else:
+                return False, f"{node.get('name', component_type)} has no verified token-step contract"
+        return True, None
+
+    def recurrent_generation_algorithms(self):
+        algorithms=[]
+        for node in self.order:
+            component_type=str(node.get("type") or "")
+            module=self.mods[node["id"]]
+            if component_type == "esa": algorithms.append("ESA Thunder prefill + Lightning decode")
+            elif component_type == "bolt": algorithms.append("BOLT fixed C/rho cache decode")
+            elif component_type == "soup": algorithms.append("SOUP recurrent generation")
+            elif component_type == "custom" and isinstance(module,TensorGraph):
+                algorithms.extend(module.recurrent_generation_algorithms())
+        return list(dict.fromkeys(algorithms))
+
+    def _terminal_generation_head(self,nid):
+        """True when every consumer after an LM head is only an output identity."""
+        pending=list(self.outgoing.get(nid) or [])
+        seen=set()
+        while pending:
+            current=pending.pop()
+            if current in seen: continue
+            seen.add(current)
+            node=self.by_id[current]
+            if node.get("type") not in {"text_output","logits_output"}: return False
+            pending.extend(self.outgoing.get(current) or [])
+        return True
+
+    @staticmethod
+    def _bolt_prefill(module,x,capacity,start_pos=0):
+        y,(prefix_c,prefix_rho)=module.prefill_with_cache(x,start_pos=int(start_pos))
+        prefix=int(prefix_c.size(2))
+        capacity=max(prefix,int(capacity))
+        c=prefix_c.new_empty(prefix_c.size(0),prefix_c.size(1),capacity,prefix_c.size(3))
+        rho=prefix_rho.new_empty(prefix_rho.size(0),prefix_rho.size(1),capacity)
+        c[:,:,:prefix,:].copy_(prefix_c)
+        rho[:,:,:prefix].copy_(prefix_rho)
+        return y,{"c":c,"rho":rho,"length":prefix}
+
+    @staticmethod
+    def _bolt_decode(module,x,state,position):
+        q,c_now,rho_now=module.project_decode_state(x,start_pos=int(position))
+        y=module.decode_append_projected(
+            q,c_now,rho_now,state["c"],state["rho"],position=int(position)
+        )[:,None,:]
+        state["length"]=max(int(state.get("length",0)),int(position)+1)
+        return y,state
+
+    def _generation_transform(self,node,module,x,run):
+        phase=run["phase"]
+        nid=node["id"]
+        component_type=str(node.get("type") or "")
+        repeat=max(1,int(node.get("repeat") or 1))
+        states=[] if phase=="prefill" else list(run["states"].get(nid) or [])
+        output=x
+        next_states=[]
+        for index in range(repeat):
+            state=states[index] if index<len(states) else None
+            if component_type == "esa":
+                if phase=="prefill": output,state=module.prefill(output)
+                else: output,state=module.decode_step(output,state)
+                next_states.append(state)
+            elif component_type == "bolt":
+                if phase=="prefill":
+                    output,state=self._bolt_prefill(module,output,run["capacity"],run["position"])
+                else:
+                    output,state=self._bolt_decode(module,output,state,run["position"])
+                next_states.append(state)
+            elif component_type == "soup":
+                if phase=="prefill":
+                    prepare=getattr(module,"prepare_generation",None)
+                    if callable(prepare): prepare(fast=True)
+                    output,state=module.prefill(output)
+                else: output,state=module.decode_step(output,state)
+                next_states.append(state)
+            elif component_type == "custom" and isinstance(module,TensorGraph):
+                if phase=="prefill":
+                    output,state=module.prefill(output,capacity=run["capacity"])
+                else: output,state=module.decode_step(output,state,position=run["position"])
+                next_states.append(state)
+            elif component_type in {"learned_position","sinusoidal_position"}:
+                output=module(output,start_pos=int(run["position"]))
+            elif component_type == "lm_head" and self._terminal_generation_head(nid):
+                # The full-sequence hidden states are useful to earlier layers,
+                # but generation only needs vocabulary scores for the last one.
+                output=module(output[:,-1:,:])
+            else:
+                output=module(output)
+        if next_states: run["next_states"][nid]=next_states
+        return output
+
+    def _generation_execute(self,graph_input,run,graph_skip=None,graph_extra=None):
+        values={}
+        def edge_value(edge,lane):
+            source_id=edge.get("source")
+            return _lane_output(values[source_id],lane)
+        for node in self.order:
+            nid=node["id"]; component_type=node.get("type"); module=self.mods[nid]
+            main_sources=self.in_main[nid]; skip_sources=self.in_skip[nid]; extra_sources=self.in_extra[nid]
+            if main_sources:
+                if len(main_sources)!=1: raise ModelCompileError(f"{node.get('name')} has {len(main_sources)} Main inputs; merge execution is not implemented.")
+                x=edge_value(self.in_main_edges[nid][0],"main")
+            else: x=graph_input
+
+            contract=API_COMPONENTS.get(component_type)
+            if component_type=="bolt":
+                if skip_sources or extra_sources: raise ModelCompileError("BOLT recurrent generation accepts only its Main input.")
+                y=self._generation_transform(node,module,x,run)
+            elif contract is not None:
+                declared=set(contract.input_ports); inputs={}
+                if "main" in declared: inputs["main"]=x
+                if "skip" in declared:
+                    if len(skip_sources)>1: raise ModelCompileError(f"{node.get('name')} has multiple Skip inputs.")
+                    value=edge_value(self.in_skip_edges[nid][0],"skip") if skip_sources else graph_skip
+                    if value is None: raise ModelCompileError(f"{node.get('name')} requires its Skip input.")
+                    inputs["skip"]=value
+                if "extra" in declared:
+                    if len(extra_sources)>1: raise ModelCompileError(f"{node.get('name')} has multiple Extra inputs.")
+                    value=edge_value(self.in_extra_edges[nid][0],"extra") if extra_sources else graph_extra
+                    if value is None: raise ModelCompileError(f"{node.get('name')} requires its Extra input.")
+                    inputs["extra"]=value
+                result=contract.execute(module,inputs)
+                y=result.get("main")
+                for _ in range(1,max(1,int(node.get("repeat") or 1))):
+                    inputs["main"]=y; result=contract.execute(module,inputs); y=result.get("main")
+            elif component_type=="residual":
+                if len(skip_sources)!=1: raise ModelCompileError(f"Residual {node.get('name')} needs exactly one Skip input.")
+                y=module(edge_value(self.in_skip_edges[nid][0],"skip"),x)
+            elif component_type=="custom" and isinstance(module,TensorGraph):
+                y=self._generation_transform(node,module,x,run)
+            else:
+                if skip_sources or extra_sources:
+                    raise ModelCompileError(f"{node.get('name')} has unsupported auxiliary inputs during recurrent generation.")
+                y=self._generation_transform(node,module,x,run)
+            values[nid]=y
+        sinks=[n for n in self.order if not self.outgoing[n["id"]]]
+        if len(sinks)!=1: raise ModelCompileError("Recurrent generation requires exactly one tensor output.")
+        return _lane_output(values[sinks[0]["id"]],"main")
+
+    @torch.no_grad()
+    def prefill(self,graph_input,*,capacity=None,graph_skip=None,graph_extra=None):
+        supported,reason=self.recurrent_generation_support()
+        if not supported: raise ModelCompileError(reason or "Graph has no recurrent generation path.")
+        if graph_input.ndim<2 or graph_input.size(1)<1: raise ValueError("prefill expects a non-empty [B,T,...] input")
+        run={"phase":"prefill","states":{},"next_states":{},"position":0,
+             "capacity":max(int(capacity or graph_input.size(1)),int(graph_input.size(1)))}
+        output=self._generation_execute(graph_input,run,graph_skip,graph_extra)
+        cache={"states":run["next_states"],"position":int(graph_input.size(1)),"capacity":run["capacity"]}
+        return output,cache
+
+    @torch.no_grad()
+    def decode_step(self,graph_input,cache,*,position=None,graph_skip=None,graph_extra=None):
+        if graph_input.ndim<2 or graph_input.size(1)!=1: raise ValueError("decode_step expects one token per batch")
+        position=int(cache.get("position",0) if position is None else position)
+        if position>=int(cache.get("capacity",position+1)): raise ValueError("generation cache capacity exceeded")
+        run={"phase":"decode","states":cache.get("states") or {},"next_states":{},
+             "position":position,"capacity":int(cache.get("capacity",position+1))}
+        output=self._generation_execute(graph_input,run,graph_skip,graph_extra)
+        cache={"states":run["next_states"],"position":position+1,"capacity":run["capacity"]}
+        return output,cache
+
 
 
 @dataclass
@@ -1589,14 +1792,27 @@ def _evaluate(loss_model,raw_model,batcher,*,steps,batch_size,device,precision):
 
 
 def _sample_next(logits,temperature,top_k,top_p,generator=None):
-    temperature=max(runtime_float(temperature,0.8,"Temperature",minimum=1e-5),1e-5); logits=logits/temperature
+    temperature=max(runtime_float(temperature,0.8,"Temperature",minimum=1e-5),1e-5)
+    logits=logits/temperature
     top_k=runtime_int(top_k,50,"Top K",minimum=0)
-    if top_k>0:
-        k=min(top_k,logits.size(-1));v,_=torch.topk(logits,k);cut=v[...,[-1]];logits=torch.where(logits<cut,torch.full_like(logits,float('-inf')),logits)
+    candidate_ids=None
+    if 0<top_k<logits.size(-1):
+        # Restrict first, then run nucleus sampling inside this small candidate
+        # set.  The old path masked to top-k but still sorted/scattered the whole
+        # vocabulary every token.
+        logits,candidate_ids=torch.topk(logits,top_k,dim=-1,sorted=True)
     top_p=runtime_float(top_p,0.95,"Top P",minimum=0.0,maximum=1.0)
     if 0<top_p<1:
-        sorted_logits,idx=torch.sort(logits,descending=True);probs=torch.softmax(sorted_logits,dim=-1);cum=torch.cumsum(probs,dim=-1);mask=cum>float(top_p);mask[...,1:]=mask[...,:-1].clone();mask[...,0]=False;sorted_logits=sorted_logits.masked_fill(mask,float('-inf'));logits=torch.full_like(logits,float('-inf')).scatter(-1,idx,sorted_logits)
-    probs=torch.softmax(logits,dim=-1);return torch.multinomial(probs,1,generator=generator)
+        if candidate_ids is None:
+            logits,sorted_ids=torch.sort(logits,descending=True)
+            candidate_ids=sorted_ids
+        probs=torch.softmax(logits,dim=-1)
+        cum=torch.cumsum(probs,dim=-1)
+        mask=cum>float(top_p)
+        mask[...,1:]=mask[...,:-1].clone();mask[...,0]=False
+        logits=logits.masked_fill(mask,float('-inf'))
+    selected=torch.multinomial(torch.softmax(logits,dim=-1),1,generator=generator)
+    return selected if candidate_ids is None else candidate_ids.gather(-1,selected)
 
 
 def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precision,temperature=.8,top_k=50,top_p=.95,seed=42,progress=None,stop_event=None):
@@ -1611,16 +1827,81 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
         max_new_tokens=runtime_int(max_new_tokens,128,"New Token Count",minimum=1)
         context=runtime_int(context,512,"Model Context",minimum=2)
         gen=torch.Generator(device=generator_device);gen.manual_seed(seed)
-        for i in range(max_new_tokens):
-            if stop_event is not None and stop_event.is_set(): raise TrainingStopped("Generation stopped.")
-            x=torch.tensor([generated[-context:]],dtype=torch.long,device=device)
-            with torch.no_grad(),_autocast_context(device,precision): logits=model(x)
-            if isinstance(logits,(tuple,list)):
-                logits=logits[0]
-            next_id=int(_sample_next(logits[:,-1,:].float(),temperature,top_k,top_p,generator=gen).item());generated.append(next_id)
-            if progress and (i==0 or (i+1)%10==0 or i+1==max_new_tokens):
-                progress({"status":"running","runtime_kind":"generate","phase":"generate","overall":round((i+1)/max_new_tokens*100),"generated_tokens":i+1,"message":f"Generated {i+1}/{max_new_tokens} tokens…","generated_text":tokenizer.decode(generated,skip_special_tokens=True)})
-            if tokenizer.eos_token_id is not None and next_id==tokenizer.eos_token_id:break
+
+        # torch.compile wrappers expose the original TensorGraph through
+        # ``_orig_mod``.  Recurrent methods live on that graph, while ordinary
+        # unsupported models keep using the possibly-compiled full forward.
+        recurrent_model=model
+        while isinstance(getattr(recurrent_model,"_orig_mod",None),nn.Module):
+            recurrent_model=recurrent_model._orig_mod
+        support=getattr(recurrent_model,"recurrent_generation_support",None)
+        supported=False; fallback_reason=None; algorithms=[]
+        if callable(support):
+            supported,fallback_reason=support()
+            if supported:
+                report=getattr(recurrent_model,"recurrent_generation_algorithms",None)
+                algorithms=report() if callable(report) else []
+        mode="recurrent-cache" if supported else "full-context"
+        mode_label=("cached prefill/decode" if supported else "full-context compatibility")
+        started=time.perf_counter()
+        active_ids=list(ids[-context:])
+
+        with torch.inference_mode(),_autocast_context(device,precision):
+            if supported:
+                x=torch.tensor([active_ids],dtype=torch.long,device=device)
+                logits,cache=recurrent_model.prefill(x,capacity=context)
+            else:
+                cache=None
+                x=torch.tensor([active_ids],dtype=torch.long,device=device)
+                logits=model(x)
+            if isinstance(logits,(tuple,list)): logits=logits[0]
+
+            if progress:
+                progress({
+                    "status":"running","runtime_kind":"generate","phase":"prefill","overall":0,
+                    "generated_tokens":0,"prefill_tokens":len(active_ids),"generation_mode":mode,
+                    "generation_algorithms":algorithms,"fallback_reason":fallback_reason,
+                    "message":f"Prompt ready · {mode_label}",
+                    "generated_text":tokenizer.decode(generated,skip_special_tokens=True),
+                })
+
+            for i in range(max_new_tokens):
+                if stop_event is not None and stop_event.is_set(): raise TrainingStopped("Generation stopped.")
+                next_token=_sample_next(logits[:,-1,:].float(),temperature,top_k,top_p,generator=gen)
+                next_id=int(next_token[0,0].item())
+                generated.append(next_id)
+                active_ids.append(next_id)
+                elapsed=max(time.perf_counter()-started,1e-9)
+                if progress:
+                    # Publish every token. The UI redraw is coalesced separately,
+                    # so generation never waits for a full sentence or 10-token batch.
+                    progress({
+                        "status":"running","runtime_kind":"generate","phase":"generate",
+                        "overall":round((i+1)/max_new_tokens*100),"generated_tokens":i+1,
+                        "tokens_per_sec":float(i+1)/elapsed,"generation_mode":mode,
+                        "generation_algorithms":algorithms,"fallback_reason":fallback_reason,
+                        "message":f"Generated {i+1}/{max_new_tokens} tokens · {mode_label}",
+                        "generated_text":tokenizer.decode(generated,skip_special_tokens=True),
+                    })
+                if tokenizer.eos_token_id is not None and next_id==tokenizer.eos_token_id: break
+                if i+1==max_new_tokens: break
+
+                if supported and len(active_ids)<=context:
+                    logits,cache=recurrent_model.decode_step(
+                        next_token,cache,position=len(active_ids)-1
+                    )
+                elif supported:
+                    # Preserve Studio's rolling-context semantics after capacity
+                    # is reached.  Shorter generations stay entirely on the hot
+                    # one-token path; overflow rebuilds from the retained window.
+                    active_ids=active_ids[-context:]
+                    x=torch.tensor([active_ids],dtype=torch.long,device=device)
+                    logits,cache=recurrent_model.prefill(x,capacity=context)
+                else:
+                    active_ids=active_ids[-context:]
+                    x=torch.tensor([active_ids],dtype=torch.long,device=device)
+                    logits=model(x)
+                if isinstance(logits,(tuple,list)): logits=logits[0]
         return tokenizer.decode(generated,skip_special_tokens=True),len(generated)-len(ids)
     finally:
         if was_training: model.train()

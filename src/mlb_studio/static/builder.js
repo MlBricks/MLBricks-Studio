@@ -163,10 +163,7 @@ function __MLB_STUDIO_FACTORY__(){
     let cloudStatus={};
     let cloudSecrets={
       huggingface:{token:""},
-      github:{token:""},
-      aws:{access_key:"",secret_key:"",session_token:""},
-      gcp:{service_account_json:""},
-      azure:{connection_string:""}
+      github:{token:""}
     };
     let cloudForm={
       provider:"huggingface",
@@ -176,11 +173,8 @@ function __MLB_STUDIO_FACTORY__(){
       repo:"",
       branch:"main",
       revision:"main",
-      bucket:"",
-      container:"",
       object_path:"",
-      private:true,
-      region:""
+      private:true
     };
     let cloudActivity={
       status:"idle",action:"",provider:cloudForm.provider,phase:"idle",overall:0,
@@ -189,8 +183,8 @@ function __MLB_STUDIO_FACTORY__(){
     };
     let lastCloudRequest=null;
     let localPersistence=cp(payload.local_persistence||{root:"Local Studio Store",drafts:[],repository:[],credentials:[]});
-    const cloudCredentialSelection={huggingface:"",github:"",aws:"",gcp:"",azure:""};
-    const cloudCredentialNames={huggingface:"Default",github:"Default",aws:"Default",gcp:"Default",azure:"Default"};
+    const cloudCredentialSelection={huggingface:"",github:""};
+    const cloudCredentialNames={huggingface:"Default",github:"Default"};
     (localPersistence.credentials||[]).forEach(item=>{
       const provider=String(item?.provider||"");
       if(provider&&Object.prototype.hasOwnProperty.call(cloudCredentialSelection,provider)&&!cloudCredentialSelection[provider]){
@@ -218,6 +212,7 @@ function __MLB_STUDIO_FACTORY__(){
     let modelBuildTimer=null;
     const workspaceScroll={model:{left:0,top:0},data:{left:0,top:0}};
     const sidebarScroll={model:{left:0,top:0},data:{left:0,top:0}};
+    let lastCanvasScrollKey=state.active_workspace||"model";
     let switchingWorkspace=false;
     const undoStack=[],redoStack=[];
     const historyLimit=60;
@@ -669,7 +664,7 @@ function __MLB_STUDIO_FACTORY__(){
       const oldKey=state.active_workspace||"model";
       const oldCanvas=root.querySelector(".mlb-canvas");
       if(oldCanvas){
-        workspaceScroll[oldKey]={left:oldCanvas.scrollLeft,top:oldCanvas.scrollTop};
+        workspaceScroll[lastCanvasScrollKey||oldKey]={left:oldCanvas.scrollLeft,top:oldCanvas.scrollTop};
       }
       const oldSidebar=root.querySelector(".mlb-sidebar");
       if(oldSidebar){
@@ -1321,6 +1316,66 @@ function __MLB_STUDIO_FACTORY__(){
       return docs;
     }
 
+    // A Studio redraw replaces the complete subtree. In notebooks that can
+    // move the page itself (or a same-origin parent frame) even though the
+    // outer application did not request navigation. Preserve every containing
+    // scroll owner so progress/status redraws never pull the user back to top.
+    function captureViewportScroll(){
+      const entries=[];
+      const seen=new Set();
+      const add=element=>{
+        if(!element||seen.has(element))return;
+        seen.add(element);
+        entries.push({element,left:Number(element.scrollLeft||0),top:Number(element.scrollTop||0)});
+      };
+      const rootDoc=root.ownerDocument||document;
+      let ancestor=root;
+      while(ancestor){
+        if(ancestor!==rootDoc.body&&ancestor!==rootDoc.documentElement)add(ancestor);
+        ancestor=ancestor.parentElement;
+      }
+      bridgeDocuments(false,false).forEach(doc=>{
+        try{
+          const scroller=doc.scrollingElement||doc.documentElement||doc.body;
+          add(scroller);
+          // Some quirks-mode notebook shells use a second document element as
+          // a real scroll owner. Include it only when it actually has offset;
+          // writing zero to a non-scroller can otherwise move the true viewport.
+          [doc.documentElement,doc.body].forEach(element=>{
+            if(element&&element!==scroller&&(element.scrollLeft||element.scrollTop))add(element);
+          });
+        }catch(_){}
+      });
+      return entries;
+    }
+
+    function restoreViewportScroll(entries){
+      (entries||[]).forEach(item=>{
+        try{
+          if(item.element.scrollLeft!==item.left)item.element.scrollLeft=item.left;
+          if(item.element.scrollTop!==item.top)item.element.scrollTop=item.top;
+        }catch(_){}
+      });
+    }
+
+    function focusWithoutScroll(element){
+      if(!element)return;
+      const viewport=captureViewportScroll();
+      try{element.focus({preventScroll:true});}catch(_){element.focus();}
+      // Older embedded browsers ignore preventScroll. Explicit restoration
+      // keeps clipboard/search focus from becoming page navigation.
+      restoreViewportScroll(viewport);
+    }
+
+    function canvasScrollKey(){
+      if(galleryWorkspace.open)return "gallery:"+(galleryWorkspace.tab||"models");
+      if(cloudWorkspace.open)return "cloud";
+      if(runtimePanel){
+        return ["runtime",runtimePanel.mode||"run",runtimePanel.modelId||"model",runtimePanel.tab||"setup"].join(":");
+      }
+      return state.active_workspace||"model";
+    }
+
     function deepQuery(rootNode,selector){
       if(!rootNode)return null;
       try{
@@ -1775,13 +1830,6 @@ function __MLB_STUDIO_FACTORY__(){
       }else if(p==="github"){
         if(config.repo)target.repository=config.repo;
         if(config.branch)target.branch=config.branch;
-        if(config.object_path)target.path=config.object_path;
-      }else if(p==="aws"||p==="gcp"){
-        if(config.bucket)target.bucket=config.bucket;
-        if(config.object_path)target.path=config.object_path;
-        if(p==="aws"&&config.region)target.region=config.region;
-      }else if(p==="azure"){
-        if(config.container)target.container=config.container;
         if(config.object_path)target.path=config.object_path;
       }
       return target;
@@ -2485,7 +2533,7 @@ function __MLB_STUDIO_FACTORY__(){
           bridgeLastProbeAt=now;
           updateKernelBadge(false,false);
         }
-      },400);
+      },100);
     }
 
     function handlePopoutMessage(raw,sourceWindow=null){
@@ -2752,7 +2800,7 @@ function __MLB_STUDIO_FACTORY__(){
     function uiIcon(name){
       const common='viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
       const paths={
-        build:'<svg '+common+'><path d="M14.5 4.5 19.5 9.5"/><path d="M13.2 5.8 18.2 10.8"/><path d="M11.8 7.2 6.2 12.8"/><path d="M5.1 13.9 3.8 19.8 9.7 18.5 15.3 12.9"/><path d="M14.6 4.4 16.9 2.1 21.9 7.1 19.6 9.4"/></svg>',
+        build:'<svg '+common+'><path d="m13.2 5.2 5.6 5.6"/><path d="m11.6 6.8 4.8-4.8 5.6 5.6-4.8 4.8z"/><path d="m14.4 10.4-8.7 8.7a2.1 2.1 0 0 0 3 3l8.7-8.7"/></svg>',
         gallery:'<svg '+common+'><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
         fetch:'<svg '+common+'><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.65 3.36 3 7.5 3 1.15 0 2.24-.1 3.2-.3"/><path d="M4.5 11.5v6c0 1.65 3.36 3 7.5 3 1.18 0 2.3-.11 3.28-.32"/><path d="M18 13v7"/><path d="m15.2 17.3 2.8 2.8 2.8-2.8"/></svg>',
         stop:'<svg '+common+'><rect x="6.5" y="6.5" width="11" height="11" rx="1.8"/></svg>',
@@ -3574,7 +3622,7 @@ function __MLB_STUDIO_FACTORY__(){
         checkpoint_every:500,
         seed:42,
         device:"auto",
-        backend:"pytorch",
+        backend:"auto",
         execution_mode:"eager",
         compile_mode:"reduce-overhead",
         precision:"fp16",
@@ -3591,7 +3639,7 @@ function __MLB_STUDIO_FACTORY__(){
         top_p:0.95,
         seed:42,
         device:"auto",
-        backend:"pytorch",
+        backend:"auto",
         execution_mode:"eager",
         compile_mode:"reduce-overhead",
         precision:"fp16",
@@ -3781,7 +3829,9 @@ function __MLB_STUDIO_FACTORY__(){
         end_to_end_tokens_per_sec:next.end_to_end_tokens_per_sec??null,avg_end_to_end_tokens_per_sec:next.avg_end_to_end_tokens_per_sec??null,
         memory_allocated_gb:next.memory_allocated_gb??null,memory_reserved_gb:next.memory_reserved_gb??null,memory_peak_gb:next.memory_peak_gb??null,memory_total_gb:next.memory_total_gb??null,
         lr:next.lr??null,elapsed_seconds:next.elapsed_seconds??null,compile_seconds:next.compile_seconds??null,
-        message:next.message||"",checkpoint_path:next.checkpoint_path||null
+        message:next.message||"",checkpoint_path:next.checkpoint_path||null,
+        generation_mode:next.generation_mode||null,generation_algorithms:next.generation_algorithms||null,
+        fallback_reason:next.fallback_reason||null
       };
       if(!history.length||history[history.length-1].key!==key)history.push(event);
       if(history.length>250)history.splice(0,history.length-250);
@@ -3807,6 +3857,10 @@ function __MLB_STUDIO_FACTORY__(){
       }else{
         entry.generation_live={
           status:event.status,phase:event.phase,overall:Number(next.overall||0),generated_tokens:event.generated_tokens,
+          tokens_per_sec:event.tokens_per_sec??entry.generation_live?.tokens_per_sec,
+          generation_mode:event.generation_mode||entry.generation_live?.generation_mode||null,
+          generation_algorithms:event.generation_algorithms||entry.generation_live?.generation_algorithms||[],
+          fallback_reason:event.fallback_reason||entry.generation_live?.fallback_reason||null,
           message:event.message,generated_text:next.generated_text||entry.generation_live?.generated_text||entry.last_generation||""
         };
         if(next.generated_text)entry.last_generation=next.generated_text;
@@ -3968,6 +4022,7 @@ function __MLB_STUDIO_FACTORY__(){
       const bar=document.createElement("div");bar.className="mlb-status-progress";bar.innerHTML="<i style='width:"+Math.max(0,Math.min(100,Number(live.overall||0)))+"%'></i>";hero.appendChild(bar);
       const metrics=document.createElement("div");metrics.className="mlb-status-metrics";
       metrics.append(statusMetric("Generated",Number(live.generated_tokens||0).toLocaleString()),statusMetric("Target",Number(config.max_new_tokens||0).toLocaleString()),
+        statusMetric("Tok/s",live.tokens_per_sec==null?"—":Number(live.tokens_per_sec).toFixed(1)),statusMetric("Path",live.generation_mode||"Pending"),
         statusMetric("Temperature",config.temperature),statusMetric("Top K",config.top_k),statusMetric("Top P",config.top_p),statusMetric("Seed",config.seed));hero.appendChild(metrics);main.appendChild(hero);
 
       const output=runtimeSection("Generated Text");const prompt=document.createElement("div");prompt.className="mlb-status-prompt";prompt.innerHTML="<strong>PROMPT</strong><pre>"+escapeRuntimeText(config.prompt||"")+"</pre>";output.appendChild(prompt);
@@ -3975,7 +4030,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       const logs=runtimeSection("Generation Log");renderEventLog(logs,history,"Generation has not started yet.");main.appendChild(logs);
       const runtime=runtimeSection("Runtime Used");const rg=document.createElement("div");rg.className="mlb-validation-status-grid";const dev=selectedRuntimeDevice(config);
-      rg.append(statusMetric("Device",dev.label),statusMetric("Backend",config.backend),statusMetric("Execution",config.execution_mode),statusMetric("Compile",config.execution_mode==="compiled"?config.compile_mode:"Not used"),statusMetric("Precision",config.precision),statusMetric("Generated At",entry.generated_at||"—"));runtime.appendChild(rg);main.appendChild(runtime);
+      rg.append(statusMetric("Device",dev.label),statusMetric("Backend",config.backend),statusMetric("Execution",config.execution_mode),statusMetric("Compile",config.execution_mode==="compiled"?config.compile_mode:"Not used"),statusMetric("Precision",config.precision),statusMetric("Generation Path",live.generation_mode||"Pending"),statusMetric("Algorithms",(live.generation_algorithms||[]).join(" · ")||"Compatibility path"),statusMetric("Generated At",entry.generated_at||"—"));runtime.appendChild(rg);main.appendChild(runtime);
 
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Generation Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Generated</span><strong>"+Number(live.generated_tokens||0)+" / "+Number(config.max_new_tokens||0)+"</strong></div><div><span>Weights</span><strong>"+(entry.weights_ready?"Available":"Missing")+"</strong></div>";side.appendChild(summary);
       side.appendChild(generationActionButton(entry));
@@ -4003,9 +4058,11 @@ function __MLB_STUDIO_FACTORY__(){
         area.style.left="-9999px";
         area.style.top="0";
         doc.body.appendChild(area);
-        area.focus();area.select();area.setSelectionRange(0,value.length);
+        const clipboardViewport=captureViewportScroll();
+        focusWithoutScroll(area);area.select();area.setSelectionRange(0,value.length);
         const ok=doc.execCommand&&doc.execCommand("copy");
         area.remove();
+        restoreViewportScroll(clipboardViewport);
         if(ok){setStatus(label+" copied.");return true;}
       }catch(_){/* fall through */}
 
@@ -5015,7 +5072,7 @@ function __MLB_STUDIO_FACTORY__(){
       const examples=document.createElement("div");examples.className="mlb-local-path-examples";
       const quickPaths=[localDefaultRoot,...(localEnvironment.roots||[])].filter((value,index,array)=>value&&array.indexOf(value)===index);
       quickPaths.forEach(value=>{
-        const chip=document.createElement("button");chip.textContent=value;
+        const chip=document.createElement("button");chip.type="button";chip.textContent=value;
         chip.addEventListener("click",()=>{localForm[pathKey]=value;draw();});
         examples.appendChild(chip);
       });
@@ -5135,10 +5192,7 @@ function __MLB_STUDIO_FACTORY__(){
     function providerLabel(provider){
       return {
         huggingface:"Hugging Face",
-        github:"GitHub",
-        aws:"AWS S3",
-        gcp:"Google Cloud Storage",
-        azure:"Azure Blob Storage"
+        github:"GitHub"
       }[provider]||provider;
     }
 
@@ -5192,29 +5246,6 @@ function __MLB_STUDIO_FACTORY__(){
           savedCredentialMask(p,"token","github_pat_... / ghp_..."),
           v=>cloudSecrets.github.token=v,true
         ));
-      }else if(p==="aws"){
-        const grid=document.createElement("div");grid.className="mlb-cloud-mini-grid";
-        grid.append(
-          cloudField("Access Key ID","text",cloudSecrets.aws.access_key,savedCredentialMask(p,"access_key","AKIA..."),v=>cloudSecrets.aws.access_key=v,true),
-          cloudField("Secret Access Key","text",cloudSecrets.aws.secret_key,savedCredentialMask(p,"secret_key","••••••"),v=>cloudSecrets.aws.secret_key=v,true)
-        );
-        card.appendChild(grid);
-        card.appendChild(cloudField(
-          "Session Token (optional)","text",cloudSecrets.aws.session_token,savedCredentialMask(p,"session_token","Temporary session token"),
-          v=>cloudSecrets.aws.session_token=v,true
-        ));
-      }else if(p==="gcp"){
-        card.appendChild(cloudField(
-          "Service Account JSON","text",cloudSecrets.gcp.service_account_json,
-          savedCredentialMask(p,"service_account_json",'{"type":"service_account", ...}  (blank = Application Default Credentials)'),
-          v=>cloudSecrets.gcp.service_account_json=v,true
-        ));
-      }else if(p==="azure"){
-        card.appendChild(cloudField(
-          "Connection String","text",cloudSecrets.azure.connection_string,
-          savedCredentialMask(p,"connection_string","DefaultEndpointsProtocol=...;AccountName=...;AccountKey=..."),
-          v=>cloudSecrets.azure.connection_string=v,true
-        ));
       }
 
       const actions=document.createElement("div");actions.className="mlb-cloud-credential-actions";
@@ -5224,7 +5255,6 @@ function __MLB_STUDIO_FACTORY__(){
       saveCredential.addEventListener("click",()=>{
         const name=String(cloudCredentialNames[p]||"Default").trim()||"Default";
         const credentials=currentCloudCredentials();
-        if(p==="aws")delete credentials.region;
         requestPersistenceCommand("persistence_save_credentials",{provider:p,name,credentials});
       });
       actions.appendChild(saveCredential);
@@ -5247,14 +5277,6 @@ function __MLB_STUDIO_FACTORY__(){
       const p=cloudForm.provider;
       if(p==="huggingface")return {token:cloudSecrets.huggingface.token};
       if(p==="github")return {token:cloudSecrets.github.token};
-      if(p==="aws")return {
-        access_key:cloudSecrets.aws.access_key,
-        secret_key:cloudSecrets.aws.secret_key,
-        session_token:cloudSecrets.aws.session_token,
-        region:cloudForm.region
-      };
-      if(p==="gcp")return {service_account_json:cloudSecrets.gcp.service_account_json};
-      if(p==="azure")return {connection_string:cloudSecrets.azure.connection_string};
       return {};
     }
 
@@ -5271,23 +5293,6 @@ function __MLB_STUDIO_FACTORY__(){
           cloudField("File Path","text",cloudForm.object_path,mode==="load"?"blank = auto-detect one *.mlbricks.zip":"blank = mlbricks/<bundle>.mlbricks.zip",v=>cloudForm.object_path=v)
         );
         card.appendChild(grid);
-      }else if(p==="aws"||p==="gcp"){
-        const grid=document.createElement("div");grid.className="mlb-cloud-mini-grid";
-        grid.append(
-          cloudField("Bucket","text",cloudForm.bucket,"my-mlbricks-bucket",v=>cloudForm.bucket=v),
-          cloudField(p==="aws"?"Object Key":"Object Name","text",cloudForm.object_path,"models/model.mlbricks.zip",v=>cloudForm.object_path=v)
-        );
-        card.appendChild(grid);
-        if(p==="aws"){
-          card.appendChild(cloudField("Region","text",cloudForm.region,"us-east-1",v=>cloudForm.region=v));
-        }
-      }else if(p==="azure"){
-        const grid=document.createElement("div");grid.className="mlb-cloud-mini-grid";
-        grid.append(
-          cloudField("Container","text",cloudForm.container,"mlbricks",v=>cloudForm.container=v),
-          cloudField("Blob Name","text",cloudForm.object_path,"models/model.mlbricks.zip",v=>cloudForm.object_path=v)
-        );
-        card.appendChild(grid);
       }
     }
 
@@ -5299,10 +5304,7 @@ function __MLB_STUDIO_FACTORY__(){
         repo:cloudForm.repo,
         branch:cloudForm.branch||"main",
         revision:cloudForm.revision||"main",
-        bucket:cloudForm.bucket,
-        container:cloudForm.container,
         object_path:cloudForm.object_path,
-        region:cloudForm.region,
         private:!!cloudForm.private,
         credential_name:cloudCredentialSelection[cloudForm.provider]||"",
         credentials:currentCloudCredentials()
@@ -5498,7 +5500,7 @@ function __MLB_STUDIO_FACTORY__(){
       const cmsg=document.createElement("div");cmsg.className="mlb-cloud-inspector-message "+conn.cls;cmsg.textContent=status.message||"Connection has not been checked yet.";connection.appendChild(cmsg);
       const check=btn("Check Connection","mlb-cloud-inspector-action");
       check.disabled=cloudActivity.status==="running";
-      check.addEventListener("click",()=>requestCloudCommand("cloud_status",{provider,credential_name:cloudCredentialSelection[provider]||"",credentials:currentCloudCredentials(),region:cloudForm.region}));
+      check.addEventListener("click",()=>requestCloudCommand("cloud_status",{provider,credential_name:cloudCredentialSelection[provider]||"",credentials:currentCloudCredentials()}));
       connection.appendChild(check);body.appendChild(connection);
 
       const activity=document.createElement("section");activity.className="mlb-cloud-inspector-card mlb-cloud-activity-card";
@@ -5652,7 +5654,7 @@ function __MLB_STUDIO_FACTORY__(){
       const providerTitle=document.createElement("div");providerTitle.className="mlb-cloud-section-title";providerTitle.innerHTML="<span>☁</span><strong>PROVIDER & CONNECTION</strong>";providerCard.appendChild(providerTitle);
       const providerBar=document.createElement("div");providerBar.className="mlb-cloud-provider-bar";
       const providerField=cloudSelect("Provider",cloudForm.provider,[
-        {value:"huggingface",label:"Hugging Face"},{value:"github",label:"GitHub"},{value:"aws",label:"AWS S3"},{value:"gcp",label:"Google Cloud Storage"},{value:"azure",label:"Azure Blob Storage"}
+        {value:"huggingface",label:"Hugging Face"},{value:"github",label:"GitHub"}
       ],v=>{cloudForm.provider=v;cloudStatus[v]=cloudStatus[v]||{};draw();});
       const status=cloudStatus[cloudForm.provider]||{};
       const connectionField=document.createElement("div");connectionField.className="mlb-cloud-field mlb-cloud-connection-field";
@@ -5660,7 +5662,7 @@ function __MLB_STUDIO_FACTORY__(){
       const indicator=document.createElement("div");indicator.className="mlb-cloud-status "+(status.ok||status.authenticated?"ok":status.message?"warn":"idle");
       const connectionText=document.createElement("span");connectionText.textContent=status.message||providerLabel(cloudForm.provider)+" · not checked";
       indicator.appendChild(connectionText);connectionField.append(connectionLabel,indicator);
-      const check=btn("Check Connection","mlb-cloud-check");check.addEventListener("click",()=>requestCloudCommand("cloud_status",{provider:cloudForm.provider,credential_name:cloudCredentialSelection[cloudForm.provider]||"",credentials:currentCloudCredentials(),region:cloudForm.region}));
+      const check=btn("Check Connection","mlb-cloud-check");check.addEventListener("click",()=>requestCloudCommand("cloud_status",{provider:cloudForm.provider,credential_name:cloudCredentialSelection[cloudForm.provider]||"",credentials:currentCloudCredentials()}));
       providerBar.append(providerField,connectionField,check);providerCard.appendChild(providerBar);container.appendChild(providerCard);
 
       const credentials=document.createElement("section");credentials.className="mlb-cloud-card credentials";
@@ -8740,12 +8742,13 @@ function __MLB_STUDIO_FACTORY__(){
         deferredInteractionDraw=true;
         return;
       }
+      const viewportScroll=captureViewportScroll();
       if(force)deferredInteractionDraw=false;
       if(bottomView==="hub")bottomView="cloud";
       const wsKey=state.active_workspace||"model";
       const oldCanvas=root.querySelector(".mlb-canvas");
       if(oldCanvas && !switchingWorkspace){
-        workspaceScroll[wsKey]={left:oldCanvas.scrollLeft,top:oldCanvas.scrollTop};
+        workspaceScroll[lastCanvasScrollKey||wsKey]={left:oldCanvas.scrollLeft,top:oldCanvas.scrollTop};
       }
       const oldSidebar=root.querySelector(".mlb-sidebar");
       if(oldSidebar){
@@ -8852,7 +8855,7 @@ function __MLB_STUDIO_FACTORY__(){
       top.appendChild(primary);
 
       const acts=document.createElement("div");acts.className="mlb-top-actions";
-      const fullBtn=(!isPopout && payload.allow_full_window!==false)?document.createElement("a"):null;
+      const fullBtn=(!isPopout && payload.allow_full_window!==false)?btn("↗ Full Window"):null;
       if(!runtimeWorkspaceActive){
         const undoBtn=btn("↶ Undo","mlb-dark-btn mlb-history-btn");undoBtn.disabled=undoStack.length===0;undoBtn.title=current(state)?.kind==="custom_edit"?"Undo last edit in this editor":"Undo last model edit";undoBtn.addEventListener("click",undo);
         const redoBtn=btn("↷ Redo","mlb-dark-btn mlb-history-btn");redoBtn.disabled=redoStack.length===0;redoBtn.title=current(state)?.kind==="custom_edit"?"Redo last edit in this editor":"Redo last undone edit";redoBtn.addEventListener("click",redo);
@@ -8878,8 +8881,6 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(fullBtn){
         fullBtn.className="mlb-dark-btn mlb-full-window-btn";
-        fullBtn.textContent="↗ Full Window";
-        fullBtn.href="#";
         fullBtn.title="Open MLB Studio in a separate full-window browser tab";
         fullBtn.addEventListener("click",activateFullWindowLink);
         // Keep Full Window visible in notebook/Kaggle runtime pages too.
@@ -9396,6 +9397,17 @@ function __MLB_STUDIO_FACTORY__(){
 
       }
       main.appendChild(canvas);
+      // Canvas is the vertical scroll owner for design, runtime, Workshop and
+      // Cloud views. Restore it for all of them, with independent memory per
+      // view/tab so entering a new page still starts at its own saved position.
+      const renderedCanvasScrollKey=canvasScrollKey();
+      const canvasPos=workspaceScroll[renderedCanvasScrollKey]||{left:0,top:0};
+      lastCanvasScrollKey=renderedCanvasScrollKey;
+      requestAnimationFrame(()=>{
+        if(!canvas.isConnected)return;
+        canvas.scrollLeft=canvasPos.left||0;
+        canvas.scrollTop=canvasPos.top||0;
+      });
       if(!galleryWorkspace.open && !cloudWorkspace.open && !runtimeWorkspaceActive){
         let edgeDrawGeneration=0;
         const renderConnections=()=>{
@@ -9765,7 +9777,9 @@ function __MLB_STUDIO_FACTORY__(){
       const nextInspectorKey=inspectorRenderKey();
       const inspectorPos=inspectorScrollPositions[nextInspectorKey]||{left:0,top:0};
       lastInspectorRenderKey=nextInspectorKey;
+      restoreViewportScroll(viewportScroll);
       requestAnimationFrame(()=>{
+        restoreViewportScroll(viewportScroll);
         const liveBody=root.querySelector(".mlb-ins-body");
         if(liveBody){
           liveBody.scrollLeft=inspectorPos.left||0;
@@ -9785,7 +9799,7 @@ function __MLB_STUDIO_FACTORY__(){
           const restore=searchFocusRestore;searchFocusRestore=null;
           const liveSearch=root.querySelector(".mlb-search");
           if(liveSearch){
-            try{liveSearch.focus({preventScroll:true});}catch(_){liveSearch.focus();}
+            focusWithoutScroll(liveSearch);
             try{liveSearch.setSelectionRange(restore.start,restore.end);}catch(_){}
           }
         }

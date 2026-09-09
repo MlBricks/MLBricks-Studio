@@ -20,6 +20,49 @@ def test_redraw_guard_only_blocks_free_form_editors():
     assert "input,textarea,select" not in text
 
 
+def test_redraw_preserves_page_and_canvas_scroll_without_hash_navigation():
+    text = _builder_js()
+    css = _builder_css()
+    assert "function captureViewportScroll()" in text
+    assert "function restoreViewportScroll(entries)" in text
+    assert "const viewportScroll=captureViewportScroll();" in text
+    assert "restoreViewportScroll(viewportScroll);" in text
+    assert "function canvasScrollKey()" in text
+    assert "workspaceScroll[lastCanvasScrollKey||wsKey]" in text
+    assert "const renderedCanvasScrollKey=canvasScrollKey();" in text
+    assert "canvas.scrollTop=canvasPos.top||0;" in text
+    assert 'fullBtn.href="#"' not in text
+    assert '?btn("↗ Full Window"):null' in text
+    assert "overflow-anchor:none" in css
+
+
+def test_focus_fallbacks_and_buttons_do_not_trigger_implicit_page_navigation():
+    text = _builder_js()
+    assert "function focusWithoutScroll(element)" in text
+    assert "focusWithoutScroll(area);area.select()" in text
+    assert "focusWithoutScroll(liveSearch);" in text
+    assert 'const chip=document.createElement("button");chip.type="button"' in text
+
+
+def test_intentional_model_actions_scroll_is_preserved():
+    text = _builder_js()
+    assert "if(scrollBuiltModelActionsOnce && outputModel)" in text
+    assert "liveBody.scrollTop=Math.max(0,target.offsetTop-14);" in text
+
+
+def test_build_action_uses_construction_icon_and_centered_content():
+    js = _builder_js()
+    css = _builder_css()
+    assert 'build:\'<svg \'+common+\'>' in js
+    assert 'd="m11.6 6.8 4.8-4.8 5.6 5.6-4.8 4.8z"' in js
+    final_rule = css[css.rindex("/* Build action: resolve older fixed-width rules") :]
+    assert "width:auto!important" in final_rule
+    assert "max-width:none!important" in final_rule
+    assert "justify-content:center!important" in final_rule
+    assert "padding-left:18px!important" in final_rule
+    assert "padding-right:18px!important" in final_rule
+
+
 def test_workspace_switch_forces_immediate_redraw():
     text = _builder_js()
     start = text.index("function switchWorkspace(next)")

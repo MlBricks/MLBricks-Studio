@@ -33,6 +33,31 @@ def test_cloud_backend_emits_staged_progress_and_target_metadata():
     assert 'Cloud transfer cancelled.' in source
 
 
+def test_cloud_workspace_only_exposes_huggingface_and_github():
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "src/mlb_studio/static/builder.js").read_text(encoding="utf-8")
+    source = (root / "src/mlb_studio/builder.py").read_text(encoding="utf-8")
+    cloud_source = (root / "src/mlb_studio/cloud.py").read_text(encoding="utf-8")
+    pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+
+    options_start = js.index('const providerField=cloudSelect("Provider"')
+    options_end = js.index('],v=>{cloudForm.provider=v;', options_start)
+    options = js[options_start:options_end]
+    assert '{value:"huggingface",label:"Hugging Face"}' in options
+    assert '{value:"github",label:"GitHub"}' in options
+    assert 'value:"aws"' not in options
+    assert 'value:"gcp"' not in options
+    assert 'value:"azure"' not in options
+    assert 'AWS S3' not in js
+    assert 'Google Cloud Storage' not in js
+    assert 'Azure Blob Storage' not in js
+    assert 'provider not in {"huggingface", "github"}' in source
+    assert "def s3_client(" not in cloud_source
+    assert "def gcs_status(" not in cloud_source
+    assert "def azure_status(" not in cloud_source
+    assert 'cloud = []' in pyproject
+
+
 def test_huggingface_cloud_push_emits_connection_identity_and_progress(monkeypatch):
     from mlb_studio.builder import Builder
     from mlb_studio import hub
