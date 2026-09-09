@@ -343,56 +343,95 @@ class Builder:
         return copy.deepcopy(((self.local_artifact_index or {}).get("models") or {}).get("entries") or [])
 
     def _hydrate_indexed_prepared_datasets(self):
-        """Register disk dataset metadata only; actual rows stay unloaded.
+        """Reconcile managed dataset metadata without loading dataset rows.
 
-        This makes a saved Studio dataset immediately selectable after a kernel
-        restart. ``get_prepared_dataset`` remains the only place that calls
-        ``datasets.load_from_disk`` and does so only when the user actually uses
-        that dataset.
+        Saved Studio designs can contain an older metadata-only dataset entry with
+        the same name but no disk path.  The managed data index is authoritative
+        for *where* Studio-saved datasets live, so enrich the existing registry
+        entry instead of skipping the indexed copy.  Preserving the existing id is
+        important because model Text Input nodes reference that id.
+
+        ``get_prepared_dataset`` remains the only place that calls
+        ``datasets.load_from_disk`` and therefore startup/state synchronization
+        never loads dataset rows into RAM.
         """
         registry = self.state.setdefault("prepared_datasets", [])
-        seen_names = {self._artifact_name_key(item.get("name")) for item in registry}
-        seen_paths = set()
-        for item in registry:
-            value = item.get("path")
-            if value:
-                try:
-                    seen_paths.add(str(Path(value).expanduser().resolve()))
-                except Exception:
-                    seen_paths.add(str(value))
+
+        def resolved_path(value):
+            if not value:
+                return ""
+            try:
+                return str(Path(value).expanduser().resolve())
+            except Exception:
+                return str(value)
+
+        by_id = {str(item.get("id")): item for item in registry if item.get("id")}
+        by_name = {
+            self._artifact_name_key(item.get("name")): item
+            for item in registry
+            if self._artifact_name_key(item.get("name"))
+        }
+        by_path = {
+            resolved_path(item.get("path")): item
+            for item in registry
+            if item.get("path")
+        }
+
         for record in self._indexed_data_records():
             if record.get("status") != "ready":
                 continue
             path = record.get("path")
             if not path:
                 continue
-            try:
-                resolved = str(Path(path).expanduser().resolve())
-            except Exception:
-                resolved = str(path)
-            name_key = self._artifact_name_key(record.get("name"))
-            if resolved in seen_paths or (name_key and name_key in seen_names):
-                continue
+            resolved = resolved_path(path)
             marker = copy.deepcopy(record.get("metadata") or {})
-            metadata = {
-                "id": str(marker.get("id") or record.get("id") or f"dataset_{uuid.uuid4().hex[:12]}"),
-                "name": str(marker.get("name") or record.get("name") or Path(path).name),
-                "created_at": marker.get("created_at"),
-                "output_node_id": marker.get("output_node_id"),
-                "storage": str(marker.get("storage") or "disk"),
-                "path": resolved,
-                "pipeline": copy.deepcopy(marker.get("pipeline") or {}),
-                "indexed_only": True,
-            }
-            for key in ("splits", "rows", "columns", "tokenizer_name", "hub_repo_id", "hub_url", "hub_revision"):
-                if key in marker:
-                    metadata[key] = copy.deepcopy(marker.get(key))
-                elif key in record:
-                    metadata[key] = copy.deepcopy(record.get(key))
-            registry.append(metadata)
-            seen_paths.add(resolved)
+            record_id = str(marker.get("id") or record.get("id") or "")
+            record_name = str(marker.get("name") or record.get("name") or Path(path).name)
+            name_key = self._artifact_name_key(record_name)
+
+            existing = (
+                by_path.get(resolved)
+                or (by_id.get(record_id) if record_id else None)
+                or (by_name.get(name_key) if name_key else None)
+            )
+
+            if existing is None:
+                existing = {
+                    "id": record_id or f"dataset_{uuid.uuid4().hex[:12]}",
+                    "name": record_name,
+                    "created_at": marker.get("created_at"),
+                    "output_node_id": marker.get("output_node_id"),
+                    "pipeline": copy.deepcopy(marker.get("pipeline") or {}),
+                }
+                registry.append(existing)
+
+            # Keep the browser/design id when present so model references remain
+            # valid, but always repair the managed storage location from the index.
+            existing_id = str(existing.get("id") or record_id or f"dataset_{uuid.uuid4().hex[:12]}")
+            existing["id"] = existing_id
+            if not existing.get("name"):
+                existing["name"] = record_name
+            existing["path"] = resolved
+            in_memory = existing_id in self.prepared_datasets
+            existing["storage"] = "disk+memory" if in_memory else "disk"
+            existing["indexed_only"] = not in_memory
+
+            for key in (
+                "created_at", "output_node_id", "splits", "rows", "columns",
+                "tokenizer_name", "hub_repo_id", "hub_url", "hub_revision", "pipeline",
+            ):
+                indexed_value = marker.get(key, record.get(key))
+                if indexed_value is not None and (key not in existing or existing.get(key) in (None, "", {}, [])):
+                    existing[key] = copy.deepcopy(indexed_value)
+
+            by_id[existing_id] = existing
+            if record_id:
+                by_id.setdefault(record_id, existing)
+            by_path[resolved] = existing
             if name_key:
-                seen_names.add(name_key)
+                by_name[name_key] = existing
+
+        return registry
 
     def _apply_local_workspace_defaults(self):
         """Replace legacy Kaggle-only defaults with this session's workspace paths."""
@@ -1357,35 +1396,63 @@ class Builder:
         return json.loads(json.dumps(self.state.get("prepared_datasets") or []))
 
     def get_prepared_dataset(self, dataset_id_or_name, split=None):
-        """Return a prepared Dataset/DatasetDict by registry id or display name."""
+        """Return a prepared Dataset/DatasetDict by registry id or display name.
+
+        Managed datasets are indexed metadata-first.  If browser state contains a
+        stale design entry after a kernel restart, reconcile it against Studio's
+        dedicated data index before deciding that the rows are unavailable.
+        """
         wanted = str(dataset_id_or_name)
-        metadata = None
-        for item in self.state.get("prepared_datasets") or []:
-            if item.get("id") == wanted or str(item.get("name", "")).lower() == wanted.lower():
-                metadata = item
-                break
+
+        def find_metadata():
+            for item in self.state.get("prepared_datasets") or []:
+                if item.get("id") == wanted or str(item.get("name", "")).lower() == wanted.lower():
+                    return item
+            return None
+
+        metadata = find_metadata()
+        if metadata is None or not metadata.get("path"):
+            # Cheap path: this loads the small JSON index and only shallow-rescans
+            # Studio's managed data directory if its child signature changed.
+            self._ensure_managed_artifact_index_current()
+            self._hydrate_indexed_prepared_datasets()
+            metadata = find_metadata()
+
         if metadata is None:
             raise KeyError(f"Prepared dataset not found: {dataset_id_or_name!r}")
 
         dataset_id = metadata["id"]
         result = self.prepared_datasets.get(dataset_id)
 
-        if result is None and metadata.get("path"):
-            try:
-                from datasets import load_from_disk
-                result = load_from_disk(metadata["path"])
-                self.prepared_datasets[dataset_id] = result
-            except Exception as exc:
-                raise RuntimeError(
-                    f'{metadata["name"]!r} is not in memory and could not be loaded '
-                    f'from {metadata.get("path")!r}: {exc}'
-                ) from exc
+        path_value = metadata.get("path")
+        if result is None and path_value:
+            path_obj = Path(path_value).expanduser()
+            if not path_obj.exists():
+                # The design may point to an old managed path. Refresh the small
+                # index once and let it repair the path by id/name before failing.
+                self._ensure_managed_artifact_index_current()
+                self._hydrate_indexed_prepared_datasets()
+                metadata = find_metadata() or metadata
+                path_value = metadata.get("path")
+
+            if path_value:
+                try:
+                    from datasets import load_from_disk
+                    result = load_from_disk(path_value)
+                    self.prepared_datasets[dataset_id] = result
+                    metadata["indexed_only"] = False
+                    metadata["storage"] = "disk+memory"
+                except Exception as exc:
+                    raise RuntimeError(
+                        f'{metadata["name"]!r} is indexed on disk but could not be loaded '
+                        f'from {path_value!r}: {exc}'
+                    ) from exc
 
         if result is None:
             raise RuntimeError(
-                f'{metadata["name"]!r} is listed in the design but its actual data is '
-                "not in this Python session. Re-run its Data Processing pipeline, or "
-                "enable Save To Disk before saving the design."
+                f'{metadata["name"]!r} is a session-only dataset and its rows are not '
+                "available in this Python session. Re-run its Data Processing pipeline "
+                "and enable Save To Disk if you want it to survive a kernel restart."
             )
 
         if split:
@@ -3755,6 +3822,8 @@ class Builder:
             self.state = incoming
             self.state.setdefault("project", {}).setdefault("local_id", str(config.get("draft_id") or f"project_{uuid.uuid4().hex}"))
             self._apply_local_workspace_defaults()
+            self._ensure_managed_artifact_index_current()
+            self._hydrate_indexed_prepared_datasets()
             emit({
                 "status": "done", "runtime_kind": "persistence", "phase": "load_draft",
                 "overall": 100, "message": f'Draft {(self.state.get("project") or {}).get("name") or "design"} recovered.',
@@ -3885,6 +3954,8 @@ class Builder:
                 self.state = incoming
                 self.state.setdefault("project", {}).setdefault("local_id", f"project_{uuid.uuid4().hex}")
                 self._apply_local_workspace_defaults()
+                self._ensure_managed_artifact_index_current()
+                self._hydrate_indexed_prepared_datasets()
                 result = {"item": {k: item[k] for k in ("id", "kind", "name", "updated_at")}}
                 state_replace = self.to_dict()
             event = {
@@ -4517,6 +4588,8 @@ class Builder:
                     if not command:
                         command = legacy_command
                     self.state = incoming
+                    self._ensure_managed_artifact_index_current()
+                    self._hydrate_indexed_prepared_datasets()
             except Exception as exc:
                 self._publish_bridge_progress({
                     "status": "error",

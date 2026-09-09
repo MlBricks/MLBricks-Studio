@@ -3392,9 +3392,15 @@ function studioChoice(title,message,actions,options={}){
       });
       card.appendChild(grid);
       const foot=document.createElement("div");foot.className="mlb-dataset-result-foot";
-      foot.textContent=meta.storage==="disk+memory"
-        ?("Saved + in memory · "+(meta.path||""))
-        :"Available in Python memory";
+      if(meta.path){
+        foot.textContent=meta.indexed_only
+          ?("Saved on disk · loads on demand · "+meta.path)
+          :meta.storage==="disk+memory"
+            ?("Saved + in memory · "+meta.path)
+            :( "Saved on disk · "+meta.path );
+      }else{
+        foot.textContent="Session dataset · not saved to disk";
+      }
       card.appendChild(foot);
       return card;
     }

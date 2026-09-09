@@ -147,3 +147,67 @@ def test_default_local_repository_scan_uses_indexes_not_environment_roots(tmp_pa
     assert str(tmp_path / "outside.pt") not in paths
     assert any("repo-model" in x for x in paths)
     assert str(data / "repo-data") in paths
+
+
+def test_indexed_dataset_repairs_stale_design_entry_without_loading_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MLBRICKS_STUDIO_HOME", str(tmp_path / ".studio"))
+    _, _, data = _workspace(tmp_path)
+    path = data / "prepared-dataset"
+    _write_dataset(path, "Prepared Dataset")
+
+    builder = Builder()
+    # Simulate browser/draft state arriving after a kernel restart. The design
+    # remembers the logical dataset id/name but not the managed disk location.
+    builder.state["prepared_datasets"] = [{
+        "id": "design_dataset_id",
+        "name": "Prepared Dataset",
+        "splits": {"train": {"rows": 12, "columns": ["input_ids"]}},
+    }]
+    builder.prepared_datasets.clear()
+
+    builder._ensure_managed_artifact_index_current()
+    builder._hydrate_indexed_prepared_datasets()
+
+    assert len(builder.state["prepared_datasets"]) == 1
+    meta = builder.state["prepared_datasets"][0]
+    # Preserve the design id so existing model references do not break.
+    assert meta["id"] == "design_dataset_id"
+    assert Path(meta["path"]) == path
+    assert meta["indexed_only"] is True
+    assert meta["storage"] == "disk"
+    assert "design_dataset_id" not in builder.prepared_datasets
+
+
+def test_get_prepared_dataset_reconciles_index_then_loads_only_on_demand(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MLBRICKS_STUDIO_HOME", str(tmp_path / ".studio"))
+    _, _, data = _workspace(tmp_path)
+    path = data / "prepared-dataset"
+    _write_dataset(path, "Prepared Dataset")
+
+    builder = Builder()
+    builder.state["prepared_datasets"] = [{"id": "design_dataset_id", "name": "Prepared Dataset"}]
+    builder.prepared_datasets.clear()
+
+    loaded = {"train": object(), "validation": object()}
+    calls = []
+
+    def fake_load_from_disk(value):
+        calls.append(str(value))
+        return loaded
+
+    monkeypatch.setitem(sys.modules, "datasets", types.SimpleNamespace(load_from_disk=fake_load_from_disk))
+
+    result = builder.get_prepared_dataset("design_dataset_id")
+
+    assert result is loaded
+    assert calls == [str(path)]
+    meta = builder.state["prepared_datasets"][0]
+    assert meta["id"] == "design_dataset_id"
+    assert Path(meta["path"]) == path
+    assert meta["indexed_only"] is False
+    assert meta["storage"] == "disk+memory"
