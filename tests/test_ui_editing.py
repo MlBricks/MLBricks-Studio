@@ -315,7 +315,7 @@ def test_full_window_source_serialization_is_lazy():
     text = _builder_js()
     assert "window.__MLB_STUDIO_GET_JS_SOURCE__=function()" in text
     tail = text[text.index("window.__MLB_STUDIO_FACTORY__=__MLB_STUDIO_FACTORY__;"):]
-    assert 'window.__MLB_STUDIO_JS_SOURCE__="("+__MLB_STUDIO_FACTORY__.toString()+")();";' in tail
+    assert 'window.__MLB_STUDIO_JS_SOURCE__=(window.__MLB_REACT_BOOTSTRAP_SOURCE__||"")+"("+__MLB_STUDIO_FACTORY__.toString()+")();";' in tail
     assert tail.index("window.__MLB_STUDIO_GET_JS_SOURCE__=function()") < tail.index("__MLB_STUDIO_FACTORY__();")
 
 

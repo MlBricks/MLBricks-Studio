@@ -1,0 +1,10 @@
+{
+  "name": "mlbricks-studio-frontend",
+  "private": true,
+  "version": "1.0.0-beta",
+  "description": "React runtime islands and legacy graph shell for MLBricks Studio",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check src/react-runtime.js && node --check src/legacy-builder.js"
+  }
+}

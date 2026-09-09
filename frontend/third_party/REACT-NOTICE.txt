@@ -1,0 +1,7 @@
+React 16.0.0 and ReactDOM 16.0.1
+Copyright (c) Facebook, Inc. and its affiliates.
+Licensed under the MIT License.
+Project: https://github.com/facebook/react
+
+These production browser bundles are vendored so the published Python package
+can run MLBricks Studio without Node.js, npm, or a CDN at user runtime.

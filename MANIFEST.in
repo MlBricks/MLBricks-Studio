@@ -1,0 +1,5 @@
+# Runtime distributions contain only the pre-built Studio frontend.
+# React/Vite-style development sources live in the Git repository but are
+# intentionally excluded from sdists/wheels and are never needed at install time.
+recursive-include src/mlb_studio/static *.js *.css *.svg *.png *.ico
+prune frontend
