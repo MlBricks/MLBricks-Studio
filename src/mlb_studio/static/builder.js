@@ -2742,6 +2742,13 @@ function __MLB_STUDIO_FACTORY__(){
 
     function applyExecutionProgress(next){
       if(next?.status==="overwrite_required"&&next?.overwrite_request){
+        // The original Python request has finished at this point. Record that
+        // lifecycle transition before opening the confirmation dialog. Without
+        // this assignment the browser still thinks the first Train request is
+        // running, so a confirmed model override is rejected by
+        // startTrainingFromRuntime() and the UI remains stuck at
+        // "Starting training in Python…" forever.
+        execution=cp(next);
         handleOverwriteRequired(next);
         return;
       }

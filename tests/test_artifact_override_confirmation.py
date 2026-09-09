@@ -88,6 +88,11 @@ def test_frontend_contains_override_confirmation_flow():
     assert "overwrite_existing" in source
     assert "requestRunWithOverwrite(true)" in source
     assert "startTrainingFromRuntime(entry,true)" in source
+    # A conflict response terminates the first request before confirmation.
+    # Store overwrite_required in execution first so trainingIsRunning() does
+    # not suppress the confirmed replacement request.
+    assert "execution=cp(next);" in source
+    assert source.index("execution=cp(next);") < source.index("handleOverwriteRequired(next);")
 
 
 def test_run_data_pipeline_public_method_keeps_override_keyword():
