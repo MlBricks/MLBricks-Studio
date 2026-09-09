@@ -1179,49 +1179,6 @@ class Builder:
         """Return (ordered_nodes, errors) for the current Data Processing graph."""
         return validate_data_pipeline(self.state)
 
-    def run_data_pipeline(self, progress_callback=None):
-        """Execute Data Processing, register the result, and publish split metadata."""
-        self._stop_event.clear()
-        self.last_run_error = None
-        last_progress = {}
-
-        def relay(payload):
-            enriched = dict(payload or {})
-            enriched.setdefault("runtime_kind", "data")
-            last_progress.clear()
-            last_progress.update(enriched)
-            if progress_callback:
-                progress_callback(enriched)
-
-        try:
-            # Validate the output identity before downloading/processing anything.
-            # Duplicate names and managed paths are rejected early rather than
-            # creating another copy and discovering the collision afterward.
-            self._preflight_prepared_dataset_output()
-            self.last_data_result = execute_data_pipeline(
-                self.state,
-                progress_callback=relay,
-                stop_event=self._stop_event,
-                credential_resolver=lambda provider, name: self.persistence.get_credentials(provider, name),
-            )
-            metadata = self._register_prepared_dataset(self.last_data_result)
-
-            final_payload = dict(last_progress or {})
-            final_payload.update({
-                "status": "done",
-                "runtime_kind": "data",
-                "overall": 100,
-                "message": f'Data ready: {metadata["name"]}',
-                "prepared_dataset": metadata,
-                "available_datasets": self.available_datasets(),
-            })
-            if progress_callback:
-                progress_callback(final_payload)
-
-            return self.last_data_result
-        except Exception as exc:
-            self._remember_run_error(exc)
-            raise
 
     def _model_output(self, model_id):
         for item in self.state.get("model_outputs") or []:

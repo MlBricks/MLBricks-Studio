@@ -88,3 +88,28 @@ def test_frontend_contains_override_confirmation_flow():
     assert "overwrite_existing" in source
     assert "requestRunWithOverwrite(true)" in source
     assert "startTrainingFromRuntime(entry,true)" in source
+
+
+def test_run_data_pipeline_public_method_keeps_override_keyword():
+    import inspect
+
+    signature = inspect.signature(Builder.run_data_pipeline)
+    assert "overwrite_existing" in signature.parameters
+    assert signature.parameters["overwrite_existing"].default is False
+    assert signature.parameters["overwrite_existing"].kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_builder_has_only_one_run_data_pipeline_definition():
+    import ast
+
+    path = Path(__file__).parents[1] / "src" / "mlb_studio" / "builder.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    builder_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "Builder"
+    )
+    definitions = [
+        node for node in builder_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "run_data_pipeline"
+    ]
+    assert len(definitions) == 1
