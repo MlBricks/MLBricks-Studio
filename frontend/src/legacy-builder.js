@@ -2231,8 +2231,12 @@ function __MLB_STUDIO_FACTORY__(){
       const name=String(req.name||displayKind);
       const paths=Array.isArray(req.paths)?req.paths.filter(Boolean):[];
 
-      // In Full Window mode the visible detached window owns confirmation UI.
-      if(!isPopout&&popoutPeerConnected){
+      // Show the confirmation on whichever Studio surface the user is actively
+      // looking at. Previously any connected Full Window stole confirmations from
+      // the Kaggle/notebook cell, so the cell looked stuck with only a progress
+      // message. Keep the request local when the notebook surface has focus; only
+      // forward it when the detached Full Window is the active surface.
+      if(!isPopout&&popoutPeerConnected&&!studioSurfaceHasFocus()){
         sendPopoutMessage({type:"progress",source:"host",payload:cp(next),ts:Date.now()});
         return;
       }
@@ -3103,6 +3107,26 @@ function __MLB_STUDIO_FACTORY__(){
 
 let studioModalState={overlay:null,cleanup:null};
 function studioDocument(){return (root&&root.ownerDocument)||document;}
+function studioWindow(){const doc=studioDocument();return doc.defaultView||window;}
+function studioSurfaceHasFocus(){
+  try{
+    const doc=studioDocument();
+    const win=studioWindow();
+    if(doc.visibilityState==="hidden")return false;
+    return typeof doc.hasFocus==="function"?doc.hasFocus():typeof win.document?.hasFocus==="function"?win.document.hasFocus():true;
+  }catch(_){return true;}
+}
+function positionStudioModalOverlay(overlay){
+  try{
+    const rect=root.getBoundingClientRect();
+    overlay.style.left=Math.max(0,rect.left)+"px";
+    overlay.style.top=Math.max(0,rect.top)+"px";
+    overlay.style.width=Math.max(0,Math.min(rect.right,studioWindow().innerWidth)-Math.max(0,rect.left))+"px";
+    overlay.style.height=Math.max(0,Math.min(rect.bottom,studioWindow().innerHeight)-Math.max(0,rect.top))+"px";
+  }catch(_){
+    overlay.style.left="0";overlay.style.top="0";overlay.style.width="100vw";overlay.style.height="100vh";
+  }
+}
 function closeStudioModal(value){
   if(!studioModalState.overlay)return;
   const done=studioModalState.cleanup;
@@ -3143,10 +3167,14 @@ function openStudioModal(options={}){
     const actions=doc.createElement('div');actions.className='mlb-modal-actions';dialog.appendChild(actions);
     const actionList=Array.isArray(options.actions)&&options.actions.length?options.actions:[{label:options.okLabel||'OK',value:true,primary:true}];
     let finished=false;
+    const win=studioWindow();
+    const reposition=()=>positionStudioModalOverlay(overlay);
     function finish(value){
       if(finished)return;
       finished=true;
       try{doc.removeEventListener('keydown',onKey,true);}catch(_){ }
+      try{win.removeEventListener('resize',reposition,true);}catch(_){ }
+      try{win.removeEventListener('scroll',reposition,true);}catch(_){ }
       try{overlay.remove();}catch(_){ }
       studioModalState.overlay=null;
       studioModalState.cleanup=null;
@@ -3179,8 +3207,11 @@ function openStudioModal(options={}){
     studioModalState.overlay=overlay;
     studioModalState.cleanup=finish;
     doc.body.appendChild(overlay);
+    reposition();
+    win.addEventListener('resize',reposition,true);
+    win.addEventListener('scroll',reposition,true);
     doc.addEventListener('keydown',onKey,true);
-    setTimeout(()=>{try{(input||actions.querySelector('.primary')||actions.querySelector('button')).focus();if(input&&!options.readonly&&typeof input.select==='function')input.select();}catch(_){ }},0);
+    setTimeout(()=>{reposition();try{(input||actions.querySelector('.primary')||actions.querySelector('button')).focus();if(input&&!options.readonly&&typeof input.select==='function')input.select();}catch(_){ }},0);
   });
 }
 function studioAlert(message, options={}){
