@@ -9,7 +9,7 @@ from mlb_studio.runtime import get_mlbricks_info
 
 
 def test_versions_are_consistent():
-    assert __version__ == "1.0.0b1"
+    assert __version__ == "1.0.0b2"
     assert new_project()["format_version"] == __version__
 
 

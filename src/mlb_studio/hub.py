@@ -250,7 +250,7 @@ def push_model(
         folder = Path(td)
         payload = copy.deepcopy(package)
         payload["format"] = "mlb-studio-model-v1"
-        payload["builder_version"] = "1.0.0b1"
+        payload["builder_version"] = "1.0.0b2"
         payload["hub_repo_id"] = repo_id
 
         has_weights = bool(checkpoint_path and Path(checkpoint_path).exists())
@@ -353,7 +353,7 @@ def push_project(*, repo_id: str, state: dict, private: bool = True, token: str 
         folder = Path(td)
         _write_json(folder / PROJECT_META_FILE, {
             "format": "mlb-studio-project-v1",
-            "builder_version": "1.0.0b1",
+            "builder_version": "1.0.0b2",
             "state": clean,
         })
         (folder / "README.md").write_text(

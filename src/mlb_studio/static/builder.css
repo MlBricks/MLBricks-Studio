@@ -3000,18 +3000,20 @@
   margin:0!important;
 }
 
-/* Build action: resolve older fixed-width rules and optically center the
-   construction icon + label as one unit. */
+/* Build action: magic-wand icon + label are centered horizontally as one unit. */
 .mlb-top-primary>.mlb-top-build-tab{
   width:auto!important;
   min-width:118px!important;
   max-width:none!important;
   padding-left:18px!important;
   padding-right:18px!important;
-  display:inline-flex!important;
+  display:inline-grid!important;
+  grid-auto-flow:column!important;
+  grid-auto-columns:max-content!important;
   align-items:center!important;
   justify-content:center!important;
-  gap:8px!important;
+  justify-items:center!important;
+  column-gap:8px!important;
   text-align:center!important;
 }
 .mlb-top-primary>.mlb-top-build-tab .mlb-action-icon,

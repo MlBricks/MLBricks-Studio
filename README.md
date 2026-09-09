@@ -2,7 +2,7 @@
 
 Visual model studio for building, training, generating, serving, and managing MLBricks models.
 
-> **MLB Studio V1.0 Beta (`1.0.0b1`):** install the primary `mlbricks-studio` distribution (or the short `mlb-studio` alias). It uses `mlbricks-kit==1.0.0b2`. The public Python module is `mlbstudio` (`mlb_studio` remains supported for compatibility).
+> **MLB Studio V1.0 Beta (`1.0.0b2`):** install the primary `mlbricks-studio` distribution (or the short `mlb-studio` alias). It uses `mlbricks-kit==1.0.0b2`. The public Python module is `mlbstudio` (`mlb_studio` remains supported for compatibility).
 
 ## Install
 
@@ -1718,7 +1718,7 @@ The separate-tab launcher is configured for `https://builder.mlbricks.io/`. Depl
 - Generic `Brick` / `Bricks` composition-container APIs are not exposed as Builder palette components; reusable visual compositions live under **My Components** instead.
 
 
-## v1.0.0b1 — SLM Workshop presets
+## v1.0.0b2 — SLM Workshop presets
 
 - **50M SLM** — 10 ESA layers, width 480, 6 ESA heads, context 512, target **~50M parameters**.
 - **50M SLM · SOUP** — 2 SOUP layers, width 448, 8-head ESA mixers, context 512, target **~50M parameters**.

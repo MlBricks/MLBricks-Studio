@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlb-studio"
-version = "1.0.0b1"
+version = "1.0.0b2"
 description = "Short PyPI alias for MLBricks Studio."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,13 +15,13 @@ authors = [
   { name = "Akhtar Hussain" }
 ]
 dependencies = [
-  "mlbricks-studio==1.0.0b1"
+  "mlbricks-studio==1.0.0b2"
 ]
 
 [project.optional-dependencies]
-data = ["mlbricks-studio[data]==1.0.0b1"]
-cloud = ["mlbricks-studio[cloud]==1.0.0b1"]
-serve = ["mlbricks-studio[serve]==1.0.0b1"]
+data = ["mlbricks-studio[data]==1.0.0b2"]
+cloud = ["mlbricks-studio[cloud]==1.0.0b2"]
+serve = ["mlbricks-studio[serve]==1.0.0b2"]
 
 [project.urls]
 Homepage = "https://github.com/MlBricks/MLBricks-Studio"

@@ -2970,7 +2970,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Build the closing script tag by concatenation so builder.js itself never
       // contains a raw script end tag while generated HTML receives a real one.
       const closeScript="</"+"script>";
-      return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MLB Studio</title><link rel="icon" type="image/svg+xml" href="'+faviconHref+'"><link rel="shortcut icon" href="'+faviconHref+'"><style>'+cssText+'</style><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1118}body{padding:0}.mlb-root{width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;min-width:0!important;border-radius:0!important;border:0!important;box-shadow:none!important}</style></head><body><div id="'+targetId+'" class="mlb-root" data-mlb-studio-version="1.0.0b1"></div><script>'+jsText+closeScript+'<script>window.MLBricksBuilder.mount(document.getElementById('+JSON.stringify(targetId)+'),'+safePayload+');'+closeScript+'</body></html>';
+      return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MLB Studio</title><link rel="icon" type="image/svg+xml" href="'+faviconHref+'"><link rel="shortcut icon" href="'+faviconHref+'"><style>'+cssText+'</style><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1118}body{padding:0}.mlb-root{width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;min-width:0!important;border-radius:0!important;border:0!important;box-shadow:none!important}</style></head><body><div id="'+targetId+'" class="mlb-root" data-mlb-studio-version="1.0.0b2"></div><script>'+jsText+closeScript+'<script>window.MLBricksBuilder.mount(document.getElementById('+JSON.stringify(targetId)+'),'+safePayload+');'+closeScript+'</body></html>';
     }
 
     function openFullWindow(){
@@ -3076,7 +3076,7 @@ function __MLB_STUDIO_FACTORY__(){
     function uiIcon(name){
       const common='viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
       const paths={
-        build:'<svg '+common+'><path d="M14.4 4.4 19.6 9.6"/><path d="m12.9 5.9 2.8-2.8 5.2 5.2-2.8 2.8z"/><path d="m15.6 9.4-9.8 9.8a2 2 0 0 0 2.8 2.8l9.8-9.8"/><path d="M12.7 6.1 9.6 3 7 3.8l3.1 3.1"/></svg>',
+        build:'<svg '+common+'><path d="m15 4-1-2-1 2-2 1 2 1 1 2 1-2 2-1-2-1Z"/><path d="m21 12-1-2-1 2-2 1 2 1 1 2 1-2 2-1-2-1Z"/><path d="m8 8-1-2-1 2-2 1 2 1 1 2 1-2 2-1-2-1Z"/><path d="m16.5 11.5-9.75 9.75a2.12 2.12 0 0 1-3-3l9.75-9.75"/><path d="m10.5 11.5 2 2"/></svg>',
         gallery:'<svg '+common+'><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
         fetch:'<svg '+common+'><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.65 3.36 3 7.5 3 1.15 0 2.24-.1 3.2-.3"/><path d="M4.5 11.5v6c0 1.65 3.36 3 7.5 3 1.18 0 2.3-.11 3.28-.32"/><path d="M18 13v7"/><path d="m15.2 17.3 2.8 2.8 2.8-2.8"/></svg>',
         stop:'<svg '+common+'><rect x="6.5" y="6.5" width="11" height="11" rx="1.8"/></svg>',
@@ -5361,7 +5361,7 @@ function studioChoice(title,message,actions,options={}){
       if(!model)return;
       const config={
         format:"mlbricks-model-config",
-        builder_version:"1.0.0b1",
+        builder_version:"1.0.0b2",
         project:cp(state.project||{}),
         model:cp(model),
         selected_dataset:selectedModelDataset(),
@@ -9173,8 +9173,8 @@ function studioChoice(title,message,actions,options={}){
       rememberWorkspaceView();
       return {
         format:"mlb-studio-design",
-        format_version:"1.0.0b1",
-        builder_version:"1.0.0b1",
+        format_version:"1.0.0b2",
+        builder_version:"1.0.0b2",
         saved_at:new Date().toISOString(),
         state:sanitizedProjectState()
       };
@@ -9218,7 +9218,7 @@ function studioChoice(title,message,actions,options={}){
       }
       const payload={
         format:"mlbricks-export",
-        builder_version:"1.0.0b1",
+        builder_version:"1.0.0b2",
         workspace:state.active_workspace,
         project:cp(state.project||{}),
         prepared_datasets:cp(state.prepared_datasets||[]),
@@ -9351,7 +9351,7 @@ function studioChoice(title,message,actions,options={}){
 
       // Top bar
       const top=document.createElement("div");top.className="mlb-topbar";
-      const frontendVersion=root.dataset.mlbricksBuilderVersion||"1.0.0b1";
+      const frontendVersion=root.dataset.mlbricksBuilderVersion||"1.0.0b2";
 
       const topLeft=document.createElement("div");topLeft.className="mlb-top-left";
       const logo=document.createElement("div");logo.className="mlb-logo";
