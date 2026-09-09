@@ -1842,17 +1842,40 @@ def _optimizer(model,config):
     raise ValueError(f"Unsupported optimizer: {name}")
 
 
-def _evaluate(loss_model,raw_model,batcher,*,steps,batch_size,device,precision):
-    if batcher is None:return None
+def _evaluate(
+    loss_model, raw_model, batcher, *, steps, batch_size, device, precision,
+    progress_callback=None, stop_event=None,
+):
+    """Evaluate a bounded number of validation batches with live progress.
+
+    Validation used to be a silent block between the final training step and the
+    terminal event. On short smoke/retrain runs that made Studio sit at 99% while
+    20 validation batches (and then sample generation) were still executing. The
+    work was finite, but the UI looked hung. Keep evaluation bounded and surface
+    each completed batch without loading any additional dataset state.
+    """
+    if batcher is None:
+        return None
+    total=max(1,int(steps))
     raw_model.eval();loss_model.eval();losses=[]
     try:
         with torch.no_grad():
-            for _ in range(max(1,int(steps))):
+            for index in range(total):
+                if stop_event is not None and stop_event.is_set():
+                    raise TrainingStopped("Training stopped.")
                 x,y,_=batcher.batch(batch_size,device)
                 _sync_device(device)
                 with _autocast_context(device,precision):
                     loss=loss_model(x,y)
                 losses.append(float(loss.detach().float().cpu()))
+                if progress_callback is not None:
+                    try:
+                        progress_callback(index+1,total,sum(losses)/len(losses))
+                    except TrainingStopped:
+                        raise
+                    except Exception:
+                        # Telemetry must never make validation fail.
+                        pass
     finally:
         raw_model.train();loss_model.train()
     return sum(losses)/len(losses)
@@ -2103,6 +2126,24 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     validate_every=runtime_int(config.get("validate_every"),100,"Validate Every N Steps",minimum=0)
     val_steps=runtime_int(config.get("validation_steps"),20,"Validation Steps",minimum=1)
     checkpoint_every=runtime_int(config.get("checkpoint_every"),500,"Checkpoint Every N Steps",minimum=0)
+
+    def _train_overall(current_step, current_tokens):
+        """Reserve the last 5% for validation, save and artifact commit.
+
+        The old runtime reported 99% as soon as the last optimizer step ended,
+        even though final validation, sample generation and model serialization
+        were still pending. That made healthy retrains look permanently stuck.
+        """
+        if budget=="tokens":
+            ratio=min(1.0,max(0.0,float(current_tokens)/max(float(max_tokens),1.0)))
+        else:
+            ratio=min(1.0,max(0.0,float(current_step)/max(float(max_steps),1.0)))
+        return min(95,max(2,round(ratio*95)))
+
+    def _is_final_training_point(current_step,current_tokens):
+        if budget=="tokens":
+            return current_tokens>=max_tokens
+        return current_step>=max_steps
     output=Path(str(config.get("output_dir") or "mlbricks_workspace/models"))/_safe_name(model_entry.get("name","model"))
     output.mkdir(parents=True,exist_ok=True)
     (output/'checkpoints').mkdir(exist_ok=True)
@@ -2267,34 +2308,88 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
         }
 
         if do_val and val_batcher is not None:
+            final_validation=_is_final_training_point(step,tokens_seen)
+            validation_base_overall=96 if final_validation else _train_overall(step,tokens_seen)
             progress({
                 "status":"running","runtime_kind":"train","phase":"validation",
-                "overall":min(99,round(step/max_steps*100)) if budget!="tokens" else min(99,round(tokens_seen/max_tokens*100)),
-                **base_event,**mem,"message":f"Validating at step {step}…",
+                "overall":validation_base_overall,
+                **base_event,**mem,
+                "validation_step":0,"validation_steps":val_steps,
+                "message":f"Validating at step {step} · 0/{val_steps} batches…",
             })
+
+            def emit_validation_batch(done,total,running_val):
+                if stop_event.is_set():
+                    raise TrainingStopped("Training stopped.")
+                if final_validation:
+                    # Final validation owns 96-98%. Keep 99% for sample/save.
+                    validation_overall=min(98,96+round(2*done/max(total,1)))
+                else:
+                    validation_overall=validation_base_overall
+                progress({
+                    "status":"running","runtime_kind":"train","phase":"validation",
+                    "overall":validation_overall,
+                    **base_event,**_memory_snapshot(device),
+                    "validation_step":done,"validation_steps":total,
+                    "validation_running_loss":running_val,
+                    "message":f"Validating at step {step} · {done}/{total} batches…",
+                })
+
             last_val=_evaluate(
                 eval_loss_model,raw,val_batcher,steps=val_steps,batch_size=batch,
                 device=device,precision=precision,
+                progress_callback=emit_validation_batch,stop_event=stop_event,
             )
             best_val=min(best_val,last_val)
             last_val_ppl=_perplexity(last_val)
+            base_event.update({"val_loss":last_val,"val_ppl":last_val_ppl})
+
             if _bool(config.get("generate_on_validation",True)):
+                sample_tokens=runtime_int(
+                    config.get("validation_generate_tokens"),64,
+                    "Validation Sample Tokens",minimum=1,
+                )
+                progress({
+                    "status":"running","runtime_kind":"train","phase":"validation_generation",
+                    "overall":98 if final_validation else validation_base_overall,
+                    **base_event,**_memory_snapshot(device),
+                    "validation_step":val_steps,"validation_steps":val_steps,
+                    "validation_generated_tokens":0,
+                    "validation_generate_tokens":sample_tokens,
+                    "message":f"Validation complete · generating sample 0/{sample_tokens} tokens…",
+                })
+
+                def emit_validation_generation(event):
+                    generated_count=int((event or {}).get("generated_tokens") or 0)
+                    progress({
+                        "status":"running","runtime_kind":"train","phase":"validation_generation",
+                        "overall":98 if final_validation else validation_base_overall,
+                        **base_event,**_memory_snapshot(device),
+                        "validation_step":val_steps,"validation_steps":val_steps,
+                        "validation_generated_tokens":generated_count,
+                        "validation_generate_tokens":sample_tokens,
+                        "message":f"Validation complete · generating sample {generated_count}/{sample_tokens} tokens…",
+                    })
+
                 try:
                     sample,_=generate_text(
                         model,tokenizer,config.get("validation_prompt","Once upon a time"),
-                        max_new_tokens=runtime_int(config.get("validation_generate_tokens"),64,"Validation Sample Tokens",minimum=1),
+                        max_new_tokens=sample_tokens,
                         context=context,device=device,precision=precision,temperature=.8,top_k=50,top_p=.95,
-                        seed=seed+step,stop_event=stop_event,
+                        seed=seed+step,stop_event=stop_event,progress=emit_validation_generation,
                     )
-                except Exception as exc: sample=f"[sample generation skipped: {exc}]"
+                except TrainingStopped:
+                    raise
+                except Exception as exc:
+                    sample=f"[sample generation skipped: {exc}]"
             mem=_memory_snapshot(device)
-            base_event.update({"val_loss":last_val,"val_ppl":last_val_ppl})
             progress({
                 "status":"running","runtime_kind":"train","phase":"validation_done",
-                "overall":min(99,round(step/max_steps*100)) if budget!="tokens" else min(99,round(tokens_seen/max_tokens*100)),
+                "overall":98 if final_validation else validation_base_overall,
                 **base_event,
                 "best_val_loss":None if best_val==float('inf') else best_val,
                 "sample_text":sample,"elapsed_seconds":time.perf_counter()-wall_start,**mem,
+                "validation_step":val_steps,"validation_steps":val_steps,
                 "message":f"Validation complete · val loss {last_val:.4f} · val ppl {last_val_ppl:.2f}",
             })
 
@@ -2315,15 +2410,17 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
             },checkpoint_path/'training_state.pt')
             progress({
                 "status":"running","runtime_kind":"train","phase":"checkpoint",
-                "overall":min(99,round(step/max_steps*100)) if budget!="tokens" else min(99,round(tokens_seen/max_tokens*100)),
+                "overall":_train_overall(step,tokens_seen),
                 **base_event,"best_val_loss":None if best_val==float('inf') else best_val,
                 "sample_text":sample,"checkpoint_path":str(checkpoint_path),
                 "elapsed_seconds":time.perf_counter()-wall_start,**_memory_snapshot(device),
                 "message":f"MLBricks checkpoint saved · step {step}",
             })
 
-        if budget=="tokens":overall=min(99,round(tokens_seen/max_tokens*100))
-        else:overall=min(99,round(step/max_steps*100))
+        overall=(
+            98 if (do_val and val_batcher is not None and _is_final_training_point(step,tokens_seen))
+            else _train_overall(step,tokens_seen)
+        )
         mem=_memory_snapshot(device)
         mem_text=(f" · mem {mem['memory_allocated_gb']:.2f} GB" if mem.get('memory_allocated_gb') is not None else "")
         val_text=(f" · val {last_val:.4f} · val ppl {last_val_ppl:.2f}" if last_val is not None else "")
@@ -2337,6 +2434,20 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     final=output/'last'
     mlbricks_save = IMPORT_POOL.resolve_api("lifecycle.save")
     tok_cfg=((dataset_meta or {}).get("pipeline") or {}).get("tokenizer") or {}
+    progress({
+        "status":"running","runtime_kind":"train","phase":"final_save","overall":99,
+        "step":step,"max_steps":max_steps,"tokens_seen":tokens_seen,
+        "tokens_per_sec":tokens_per_sec if 'tokens_per_sec' in locals() else None,
+        "avg_tokens_per_sec":float(run_tokens_seen)/max(gpu_train_seconds,1e-9) if run_tokens_seen else None,
+        "end_to_end_tokens_per_sec":end_to_end_tokens_per_sec if 'end_to_end_tokens_per_sec' in locals() else None,
+        "avg_end_to_end_tokens_per_sec":float(run_tokens_seen)/max(e2e_train_seconds,1e-9) if run_tokens_seen else None,
+        "loss":loss_value,"ppl":_perplexity(loss_value) if loss_value is not None else None,
+        "val_loss":last_val,"val_ppl":last_val_ppl,
+        "best_val_loss":None if best_val==float('inf') else best_val,
+        "compile_seconds":compile_seconds,"elapsed_seconds":time.perf_counter()-wall_start,
+        **_memory_snapshot(device),
+        "message":"Training steps complete · saving final MLBricks model artifact…",
+    })
     final_metadata={
         "kind":"trained_model","step":step,"tokens_seen":tokens_seen,
         "best_val_loss":None if best_val==float('inf') else best_val,
@@ -2348,6 +2459,16 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
         "compile_dynamic":False if compiled.compile_used else None,
     }
     mlbricks_save(raw,final,metadata=final_metadata)
+    progress({
+        "status":"running","runtime_kind":"train","phase":"finalize","overall":99,
+        "step":step,"max_steps":max_steps,"tokens_seen":tokens_seen,
+        "loss":loss_value,"ppl":_perplexity(loss_value) if loss_value is not None else None,
+        "val_loss":last_val,"val_ppl":last_val_ppl,
+        "best_val_loss":None if best_val==float('inf') else best_val,
+        "compile_seconds":compile_seconds,"elapsed_seconds":time.perf_counter()-wall_start,
+        **_memory_snapshot(device),
+        "message":"Model weights saved · finalizing tokenizer and artifact metadata…",
+    })
     tokenizer_dir=final/'tokenizer'
     try:
         tokenizer.save_pretrained(str(tokenizer_dir))

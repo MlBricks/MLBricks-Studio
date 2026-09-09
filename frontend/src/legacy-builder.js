@@ -208,6 +208,8 @@ function __MLB_STUDIO_FACTORY__(){
     let lastPythonDraftHash="";
     let draftSyncInFlight=false;
     let lastProgressRaw="";
+    let lastBridgeEventSeq=0;
+    let lastBridgeEventTs=0;
     let bridgePollTimer=null;
     let bridgeAwaitTimer=null;
     let bridgeLastReady=false;
@@ -849,10 +851,10 @@ function __MLB_STUDIO_FACTORY__(){
       return clean+" "+i;
     }
 
-    function renameCurrentLayout(){
+    async function renameCurrentLayout(){
       const c=current(state);if(!c)return;
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const proposed=win&&typeof win.prompt==="function"?win.prompt("Rename layout:",c.name||state.project?.name||"Layout"):null;
+      const proposed=await studioPrompt("Rename layout", c.name||state.project?.name||"Layout", {title:"Rename Layout", okLabel:"Rename"});
       if(proposed===null)return;
       const name=String(proposed||"").trim().replace(/\s+/g," ");
       if(!name){setStatus("Layout name cannot be empty.");return;}
@@ -882,10 +884,10 @@ function __MLB_STUDIO_FACTORY__(){
       setStatus('Layout renamed to "'+name+'".');draw();
     }
 
-    function renameSelectedComponent(){
+    async function renameSelectedComponent(){
       const n=selectedNode();if(!n)return;
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const proposed=win&&typeof win.prompt==="function"?win.prompt("Rename component:",n.name||"Component"):null;
+      const proposed=await studioPrompt("Rename component", n.name||"Component", {title:"Rename Component", okLabel:"Rename"});
       if(proposed===null)return;
       const name=String(proposed||"").trim().replace(/\s+/g," ");
       if(!name){setStatus(kind+" name cannot be empty.");return;}
@@ -978,9 +980,9 @@ function __MLB_STUDIO_FACTORY__(){
       return (state.gallery?.[kind]||[]).some(x=>x.id!==exceptId&&normalizedUserName(x.name)===wanted);
     }
 
-    function askGalleryName(kind,defaultName,label){
+    async function askGalleryName(kind,defaultName,label){
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const proposed=win&&typeof win.prompt==="function"?win.prompt(label,defaultName||""):null;
+      const proposed=await studioPrompt(label, defaultName||"", {title:"Workshop Name", okLabel:"Save"});
       if(proposed===null)return null;
       const name=String(proposed||"").trim().replace(/\s+/g," ");
       if(!name){setStatus("Workshop name cannot be empty.");return null;}
@@ -988,11 +990,11 @@ function __MLB_STUDIO_FACTORY__(){
       return name;
     }
 
-    function saveCurrentToGallery(){
+    async function saveCurrentToGallery(){
       const c=current(state);if(!c)return;
       if(c.kind==="custom_edit"){
         const def=state.custom_components?.[c.definition_id];
-        const name=askGalleryName("components",def?.name||c.name,"Save Module / API Component to Workshop as:");
+        const name=await askGalleryName("components",def?.name||c.name,"Save Module / API Component to Workshop as:");
         if(!name)return;
         const snapshot=customGallerySnapshot(def,c);snapshot.name=name;
         state.gallery.components.push({
@@ -1006,7 +1008,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
       if(state.active_workspace==="data"){
         const pipeline=current(state);if(!pipeline)return;
-        const name=askGalleryName("data",pipeline.name||"Data Pipeline","Save data pipeline to Workshop as:");
+        const name=await askGalleryName("data",pipeline.name||"Data Pipeline","Save data pipeline to Workshop as:");
         if(!name)return;
         state.gallery.data.push({
           id:uid("gallery_data"),name,kind:"data",saved_at:new Date().toISOString(),
@@ -1019,7 +1021,7 @@ function __MLB_STUDIO_FACTORY__(){
         setStatus("Open Model Builder or Data Processing to save the current design to Workshop.");return;
       }
       const model=modelRootComponent();if(!model)return;
-      const name=askGalleryName("models",state.project?.name||model.name||"My Model","Save model to Workshop as:");
+      const name=await askGalleryName("models",state.project?.name||model.name||"My Model","Save model to Workshop as:");
       if(!name)return;
       state.gallery.models.push({
         id:uid("gallery_model"),name,kind:"model",saved_at:new Date().toISOString(),
@@ -1147,11 +1149,11 @@ function __MLB_STUDIO_FACTORY__(){
       if(def)editCustomDefinition(def);
     }
 
-    function removeGalleryEntry(kind,id){
+    async function removeGalleryEntry(kind,id){
       const entry=(state.gallery?.[kind]||[]).find(x=>x.id===id);
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
       const label=entry?.name||"this Workshop item";
-      if(win&&typeof win.confirm==="function"&&!win.confirm('Remove "'+label+'" from Workshop?'))return;
+      if(!(await studioConfirm('Remove "'+label+'" from Workshop?', {title:"Remove From Workshop", okLabel:"Remove", cancelLabel:"Cancel", variant:"warning"})))return;
       checkpoint("Remove Workshop item");
       state.gallery[kind]=(state.gallery[kind]||[]).filter(x=>x.id!==id);
       persistGallery();setStatus(label+" removed from Workshop.");draw();
@@ -2221,7 +2223,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     let overwritePromptActive=false;
-    function handleOverwriteRequired(next){
+    async function handleOverwriteRequired(next){
       const req=next?.overwrite_request||{};
       const kind=String(req.kind||next.runtime_kind||"artifact").toLowerCase();
       const action=String(req.action||"override").toLowerCase();
@@ -2253,7 +2255,7 @@ function __MLB_STUDIO_FACTORY__(){
           "\n\nOverride it? Studio will keep the existing artifact as a temporary backup and restore it automatically if the replacement fails.";
       }
       let approved=false;
-      try{approved=!!(win&&typeof win.confirm==="function"&&win.confirm(detail));}catch(_){}
+      try{approved=await studioConfirm(detail,{title:(kind==="model"&&action==="retrain")?"Retrain Existing Model":(kind==="model"&&action==="fresh_start")?"Start Fresh":"Override Existing Artifact",okLabel:(kind==="model"&&action==="retrain")?"Retrain":(kind==="model"&&action==="fresh_start")?"Start Fresh":"Override",cancelLabel:"Cancel",variant:(kind==="model"&&action==="fresh_start")?"danger":"warning"});}catch(_){}
       overwritePromptActive=false;
 
       if(approved){
@@ -2286,7 +2288,32 @@ function __MLB_STUDIO_FACTORY__(){
       setStatus(cancelled.message);
     }
 
+    function acceptExecutionProgressSequence(next){
+      const seq=Number(next?.event_seq||0);
+      if(!Number.isFinite(seq)||seq<=0)return true;
+      const ts=Number(next?.ts||0);
+
+      // Full Window can receive the same Python event through the host message
+      // channel and the direct opener-widget fast lane. Never let a delayed
+      // lower-sequence event overwrite a terminal 100% event with an older 99%
+      // validation snapshot. A freshly restarted kernel resets its sequence to
+      // 1, so allow that reset only when its timestamp is clearly newer.
+      if(seq<lastBridgeEventSeq){
+        const kernelRestart=(seq<=5&&Number.isFinite(ts)&&ts>lastBridgeEventTs+1);
+        if(kernelRestart){
+          lastBridgeEventSeq=0;
+          lastBridgeEventTs=0;
+        }else return false;
+      }
+      if(seq===lastBridgeEventSeq)return false;
+      lastBridgeEventSeq=seq;
+      if(Number.isFinite(ts)&&ts>0)lastBridgeEventTs=Math.max(lastBridgeEventTs,ts);
+      return true;
+    }
+
     function applyExecutionProgress(next){
+      if(!next||typeof next!=="object")return;
+      if(!acceptExecutionProgressSequence(next))return;
       if((next?.status==="overwrite_required"||next?.status==="artifact_action_required")&&next?.overwrite_request){
         // The original Python request has finished at this point. Record that
         // lifecycle transition before opening the confirmation dialog. Without
@@ -2298,7 +2325,6 @@ function __MLB_STUDIO_FACTORY__(){
         handleOverwriteRequired(next);
         return;
       }
-      if(!next||typeof next!=="object")return;
       if(next.runtime_kind==="import"){
         if(!isPopout)sendPopoutMessage({type:"progress",source:"host",payload:cp(next),ts:Date.now()});
         const type=String(next.component_type||next.component_import?.component_type||"");
@@ -3074,6 +3100,132 @@ function __MLB_STUDIO_FACTORY__(){
 
     function selectedNode(){return current(state).nodes.find(n=>n.id===selected)||null;}
     function setStatus(s){status=s;}
+
+let studioModalState={overlay:null,cleanup:null};
+function studioDocument(){return (root&&root.ownerDocument)||document;}
+function closeStudioModal(value){
+  if(!studioModalState.overlay)return;
+  const done=studioModalState.cleanup;
+  studioModalState.overlay=null;
+  studioModalState.cleanup=null;
+  if(typeof done==="function")done(value);
+}
+function openStudioModal(options={}){
+  return new Promise(resolve=>{
+    try{closeStudioModal(null);}catch(_){ }
+    const doc=studioDocument();
+    const overlay=doc.createElement('div');
+    overlay.className='mlb-modal-backdrop'+(options.variant?(' '+String(options.variant)):'');
+    overlay.setAttribute('role','presentation');
+    const dialog=doc.createElement('div');
+    dialog.className='mlb-modal';
+    dialog.setAttribute('role','dialog');
+    dialog.setAttribute('aria-modal','true');
+    const title=doc.createElement('div');title.className='mlb-modal-title';title.textContent=String(options.title||'MLBricks Studio');dialog.appendChild(title);
+    const body=doc.createElement('div');body.className='mlb-modal-body';dialog.appendChild(body);
+    if(options.message){
+      const msg=doc.createElement('div');msg.className='mlb-modal-message';msg.textContent=String(options.message);body.appendChild(msg);
+    }
+    if(options.details){
+      const details=doc.createElement('pre');details.className='mlb-modal-details';details.textContent=String(options.details);body.appendChild(details);
+    }
+    let input=null;
+    if(options.input){
+      if(options.inputLabel){const label=doc.createElement('label');label.className='mlb-modal-label';label.textContent=String(options.inputLabel);body.appendChild(label);}
+      input=doc.createElement(options.multiline?'textarea':'input');
+      input.className='mlb-modal-input';
+      if(!options.multiline)input.type='text';
+      if(options.placeholder)input.placeholder=String(options.placeholder);
+      input.value=String(options.defaultValue||'');
+      if(options.readonly)input.readOnly=true;
+      body.appendChild(input);
+    }
+    const actions=doc.createElement('div');actions.className='mlb-modal-actions';dialog.appendChild(actions);
+    const actionList=Array.isArray(options.actions)&&options.actions.length?options.actions:[{label:options.okLabel||'OK',value:true,primary:true}];
+    let finished=false;
+    function finish(value){
+      if(finished)return;
+      finished=true;
+      try{doc.removeEventListener('keydown',onKey,true);}catch(_){ }
+      try{overlay.remove();}catch(_){ }
+      studioModalState.overlay=null;
+      studioModalState.cleanup=null;
+      resolve(value);
+    }
+    function onKey(ev){
+      if(ev.key==='Escape'){ev.preventDefault();finish(options.input?null:false);return;}
+      if(ev.key==='Enter' && !ev.shiftKey){
+        const tag=doc.activeElement&&doc.activeElement.tagName;
+        if(tag==='TEXTAREA')return;
+        const primary=actions.querySelector('.primary');
+        if(primary){ev.preventDefault();primary.click();}
+      }
+    }
+    actionList.forEach((spec,idx)=>{
+      const btn=doc.createElement('button');
+      btn.type='button';
+      const primary=!!spec.primary || idx===actionList.length-1 && !actionList.some(a=>a.primary);
+      btn.className='mlb-modal-btn '+(primary?'primary':'secondary')+' '+String(spec.className||'');
+      btn.textContent=String(spec.label||spec.value||'OK');
+      btn.addEventListener('click',()=>{
+        let value=spec.value;
+        if(value==='__INPUT__')value=input?String(input.value):'';
+        finish(value);
+      });
+      actions.appendChild(btn);
+    });
+    overlay.addEventListener('click',ev=>{if(ev.target===overlay && options.closeOnBackdrop!==false)finish(options.input?null:false);});
+    overlay.appendChild(dialog);
+    studioModalState.overlay=overlay;
+    studioModalState.cleanup=finish;
+    doc.body.appendChild(overlay);
+    doc.addEventListener('keydown',onKey,true);
+    setTimeout(()=>{try{(input||actions.querySelector('.primary')||actions.querySelector('button')).focus();if(input&&!options.readonly&&typeof input.select==='function')input.select();}catch(_){ }},0);
+  });
+}
+function studioAlert(message, options={}){
+  return openStudioModal({
+    title:options.title||'Notification',
+    message:message,
+    details:options.details||'',
+    variant:options.variant||'info',
+    okLabel:options.okLabel||'OK'
+  });
+}
+function studioConfirm(message, options={}){
+  return openStudioModal({
+    title:options.title||'Confirm',
+    message:message,
+    details:options.details||'',
+    variant:options.variant||'warning',
+    actions:[
+      {label:options.cancelLabel||'Cancel',value:false,className:'secondary'},
+      {label:options.okLabel||'OK',value:true,className:'primary',primary:true}
+    ]
+  }).then(v=>!!v);
+}
+function studioPrompt(message, defaultValue='', options={}){
+  return openStudioModal({
+    title:options.title||'Input Required',
+    message:message,
+    details:options.details||'',
+    variant:options.variant||'info',
+    input:true,
+    defaultValue:defaultValue,
+    placeholder:options.placeholder||'',
+    inputLabel:options.inputLabel||'',
+    readonly:!!options.readonly,
+    multiline:!!options.multiline,
+    actions:[
+      {label:options.cancelLabel||'Cancel',value:null,className:'secondary'},
+      {label:options.okLabel||'OK',value:'__INPUT__',className:'primary',primary:true}
+    ]
+  });
+}
+function studioChoice(title,message,actions,options={}){
+  return openStudioModal({title:title||'Choose',message:message||'',details:options.details||'',variant:options.variant||'info',actions:actions||[]});
+}
+
 
     // The footer is a compact workspace summary, never an error console. Runtime
     // failures already have dedicated surfaces (Training/Generation Status, data
@@ -4448,11 +4600,8 @@ function __MLB_STUDIO_FACTORY__(){
       // Last-resort Kaggle-safe behavior: select/show the secret so Ctrl+C works.
       try{
         const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-        if(win&&typeof win.prompt==="function"){
-          win.prompt("Copy "+label+" (Ctrl+C, Enter):",value);
-          setStatus("Copy "+label+" from the opened box.");
-          return false;
-        }
+        studioPrompt("Copy "+label+" (Ctrl+C, then OK)", value, {title:"Copy "+label, okLabel:"OK", cancelLabel:"Close", readonly:true}).then(()=>setStatus("Copy "+label+" from the opened box."));
+        return false;
       }catch(_){ }
       setStatus("Clipboard blocked. Select the "+label+" value and press Ctrl+C.");
       return false;
@@ -4980,13 +5129,10 @@ function __MLB_STUDIO_FACTORY__(){
       return true;
     }
 
-    function deletePreparedDataset(meta){
+    async function deletePreparedDataset(meta){
       if(!meta)return;
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const ok=!win||typeof win.confirm!=="function"||win.confirm(
-        'Delete "'+meta.name+'" from the Studio Data Repository?\n\n'+
-        'This removes the Studio registry entry and in-memory dataset. Files already saved on disk or in cloud storage are not deleted.'
-      );
+      const ok=await studioConfirm('Delete "'+meta.name+'" from the Studio Data Repository?', {title:"Delete Dataset", details:'This removes the Studio registry entry and in-memory dataset. Files already saved on disk or in cloud storage are not deleted.', okLabel:"Delete", cancelLabel:"Cancel", variant:"danger"});
       if(!ok)return;
       checkpoint("Delete Dataset "+meta.name);
       const datasetId=meta.id;
@@ -5008,7 +5154,7 @@ function __MLB_STUDIO_FACTORY__(){
       draw();
     }
 
-    function deleteBuiltModel(entry){
+    async function deleteBuiltModel(entry){
       entry=liveBuiltModel(entry);
       if(!entry)return;
       const modelId=String(entry.id||"");
@@ -5023,10 +5169,7 @@ function __MLB_STUDIO_FACTORY__(){
         return;
       }
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const ok=!win||typeof win.confirm!=="function"||win.confirm(
-        'Delete "'+entry.name+'" from the Studio Model Repository?\n\n'+
-        'This removes the Studio registry entry, stops its API server if running, and releases its in-memory runtime cache. Saved model/checkpoint files on disk or in cloud storage are not deleted.'
-      );
+      const ok=await studioConfirm('Delete "'+entry.name+'" from the Studio Model Repository?', {title:"Delete Model", details:'This removes the Studio registry entry, stops its API server if running, and releases its in-memory runtime cache. Saved model/checkpoint files on disk or in cloud storage are not deleted.', okLabel:"Delete", cancelLabel:"Cancel", variant:"danger"});
       if(!ok)return;
       checkpoint("Delete Model "+entry.name);
       // Keep the card/state until Python confirms deletion. Optimistically
@@ -5716,12 +5859,12 @@ function __MLB_STUDIO_FACTORY__(){
     function localRepositoryKindLabel(kind){
       return {model:"MODEL DESIGN",data:"DATA PIPELINE",project:"PROJECT",component:"COMPONENT",pipeline:"PIPELINE",template:"TEMPLATE"}[String(kind||"")]||String(kind||"DESIGN").toUpperCase();
     }
-    function saveCurrentDesignToLocalRepository(kindOverride=""){
+    async function saveCurrentDesignToLocalRepository(kindOverride=""){
       const kind=kindOverride||((state.active_workspace==="data")?"data":"model");
       const defaultName=kind==="project"?(state.project?.name||"MLBricks Project"):
         kind==="data"?(current(state)?.name||"Data Processing"):(state.project?.name||modelRootComponent()?.name||"Model Design");
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const proposed=win&&typeof win.prompt==="function"?win.prompt("Save design to Local Repository as:",defaultName):defaultName;
+      const proposed=await studioPrompt("Save design to Local Repository as:", defaultName, {title:"Save To Local Repository", okLabel:"Save"});
       if(proposed===null)return;
       const name=String(proposed||"").trim();
       if(!name){setStatus("Local Repository name cannot be empty.");return;}
@@ -6208,8 +6351,8 @@ function __MLB_STUDIO_FACTORY__(){
       });
     }
 
-    function askUniqueCustomName(defaultName, titleText){
-      let proposed=prompt(titleText||"Module / API Component name:",defaultName||"");
+    async function askUniqueCustomName(defaultName, titleText){
+      let proposed=await studioPrompt(titleText||"Module / API Component name:", defaultName||"", {title:"Module / API Component Name", okLabel:"Continue"});
       if(proposed===null) return null;
       proposed=String(proposed).trim().replace(/\s+/g," ");
       if(!proposed){
@@ -6218,7 +6361,7 @@ function __MLB_STUDIO_FACTORY__(){
       }
       if(customNameExists(proposed)){
         setStatus('An unrelated Module/API Component named "'+proposed+'" already exists.');
-        alert('An unrelated Module/API Component named "'+proposed+'" already exists. Choose another name. Parent and nested child Modules may share a display name.');
+        studioAlert('An unrelated Module/API Component named "'+proposed+'" already exists. Choose another name. Parent and nested child Modules may share a display name.', {title:"Name Already Exists", variant:"warning"});
         return null;
       }
       return proposed;
@@ -7152,8 +7295,8 @@ function __MLB_STUDIO_FACTORY__(){
       return params;
     }
 
-    function createAPICustom(){
-      const name=askUniqueCustomName("API Component","New API component name:");
+    async function createAPICustom(){
+      const name=await askUniqueCustomName("API Component","New API component name:");
       if(!name){draw();return;}
       beginCustomEditorTransaction();
       rememberWorkspaceView();state.active_workspace="model";
@@ -7577,10 +7720,10 @@ function __MLB_STUDIO_FACTORY__(){
       [["API Nodes",steps.length],["Reusable Objects",apiObjectCandidates(def).length],["Connections",(current(state)?.edges||[]).length]].forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";summary.appendChild(r);});body.appendChild(summary);
     }
 
-    function removeAPIFunction(step){
+    async function removeAPIFunction(step){
       const c=current(state);if(!c||!step)return;
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      if(win&&typeof win.confirm==="function"&&!win.confirm('Remove function "'+(step.name||"Function")+'" from this API Component?'))return;
+      if(!(await studioConfirm('Remove function "'+(step.name||"Function")+'" from this API Component?', {title:"Remove API Function", okLabel:"Remove", cancelLabel:"Cancel", variant:"warning"})))return;
       checkpoint("Remove API function");
       const removedBinding=ensureAPIStepObjectIds(step);
       const removedObjectIds=new Set([removedBinding.object_id,removedBinding.result_object_id].filter(Boolean));
@@ -7624,8 +7767,8 @@ function __MLB_STUDIO_FACTORY__(){
       appendCustomSaveActions(body);
     }
 
-    function createCustom(){
-      const name=askUniqueCustomName("My Module","New module name:");
+    async function createCustom(){
+      const name=await askUniqueCustomName("My Module","New module name:");
       if(!name){draw();return;}
 
       beginCustomEditorTransaction();
@@ -7776,11 +7919,11 @@ function __MLB_STUDIO_FACTORY__(){
       setStatus("Editing "+def.name+".");draw();
     }
 
-    function renameCustomDefinition(def){
+    async function renameCustomDefinition(def){
       if(!def)return;
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
       const kind=String(def.implementation||"graph")==="api"?"API Component":"Module";
-      const proposed=win&&typeof win.prompt==="function"?win.prompt("Rename "+kind+":",def.name||kind):null;
+      const proposed=await studioPrompt("Rename "+kind, def.name||kind, {title:"Rename "+kind, okLabel:"Rename"});
       if(proposed===null)return;
       const name=String(proposed||"").trim().replace(/\s+/g," ");
       if(!name){setStatus(kind+" name cannot be empty.");return;}
@@ -7794,10 +7937,10 @@ function __MLB_STUDIO_FACTORY__(){
       customActionMenuId=null;setStatus(kind+' renamed to "'+name+'".');draw();
     }
 
-    function removeCustomFromPalette(def){
+    async function removeCustomFromPalette(def){
       if(!def)return;
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      if(win&&typeof win.confirm==="function"&&!win.confirm('Remove "'+def.name+'" from the Component Library? Existing model instances will remain unchanged.'))return;
+      if(!(await studioConfirm('Remove "'+def.name+'" from the Component Library?', {title:"Remove From Component Library", details:"Existing model instances will remain unchanged.", okLabel:"Remove", cancelLabel:"Cancel", variant:"warning"})))return;
       checkpoint("Remove custom item from Component Library");
       def.palette_hidden=true;def.palette_installed=false;customActionMenuId=null;
       setStatus(def.name+" removed from the Component Library. It remains available in Workshop if it was saved there.");draw();
@@ -7968,7 +8111,7 @@ function __MLB_STUDIO_FACTORY__(){
       container.appendChild(actions);
     }
 
-    function saveCustom(asNew){
+    async function saveCustom(asNew){
       const c=current(state),def=state.custom_components[c.definition_id];if(!def)return;
       const sourceComponentDraftId=componentDraftId(def);
       const returnInfo=c.parent_edit_return||null;
@@ -8005,7 +8148,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       let savedDef=def,savedView=c;
       if(asNew){
-        const name=askUniqueCustomName(def.name+" Copy","Save as new Module/API Component:");
+        const name=await askUniqueCustomName(def.name+" Copy","Save as new Module/API Component:");
         if(!name){draw();return;}
         const id=uid("custom");
         savedDef={
@@ -9019,11 +9162,9 @@ function __MLB_STUDIO_FACTORY__(){
       setStatus("JSON design saved.");draw();
     }
 
-    function saveDesignChoice(){
+    async function saveDesignChoice(){
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
-      const choice=(win&&typeof win.prompt==="function")
-        ? String(win.prompt('Save project as "bin" or "json":','bin')||"").trim().toLowerCase()
-        : "bin";
+      const choice=String((await studioChoice("Save Project As","Choose the export format for this project.",[{label:"Cancel",value:"",className:"secondary"},{label:"Binary (.bin)",value:"bin",className:"primary",primary:true},{label:"JSON (.json)",value:"json",className:"secondary"}],{variant:"info"}))||"").trim().toLowerCase();
       if(!choice){setStatus("Save cancelled.");return;}
       if(choice==="bin"||choice==="binary"||choice==="b")return saveDesignBin();
       if(choice==="json"||choice==="j")return saveDesign();
@@ -9077,16 +9218,14 @@ function __MLB_STUDIO_FACTORY__(){
         '• Load opens .mlbricks.json or .mlbricks.bin files.',
         '• Select a node to edit config and read what it does in Inspector.',
       ].join('\n');
-      if(win&&typeof win.alert==="function")win.alert(help);
+      studioAlert(help,{title:"MLBricks Studio Help",okLabel:"Close",variant:"info",multiline:true});
       setStatus("Help opened.");
     }
 
-    function openBuilderSettings(){
+    async function openBuilderSettings(){
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
       const currentName=state.project?.name||"Untitled Model";
-      const nextName=win&&typeof win.prompt==="function"
-        ? win.prompt("Project name:",currentName)
-        : currentName;
+      const nextName=await studioPrompt("Project name", currentName, {title:"Project Settings", okLabel:"Save"});
       if(nextName===null){setStatus("Settings unchanged.");return;}
       const cleaned=String(nextName||"").trim();
       if(!cleaned){setStatus("Project name cannot be empty.");return;}
@@ -9131,7 +9270,7 @@ function __MLB_STUDIO_FACTORY__(){
             setStatus((isBin?"Binary":"JSON")+" design loaded: "+file.name);
             draw();
           }catch(err){
-            alert("Could not load design: "+err.message);setStatus("Design load failed.");draw();
+            studioAlert("Could not load design: "+err.message,{title:"Design Load Failed",variant:"danger"});setStatus("Design load failed.");draw();
           }finally{input.remove();}
         };
         reader.readAsArrayBuffer(file);

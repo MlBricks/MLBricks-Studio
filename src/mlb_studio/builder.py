@@ -2117,6 +2117,10 @@ class Builder:
         # directory has not been modified at all.
         if retrain_output is not None:
             replacement_backup = None
+            emit({
+                "status":"running","runtime_kind":"train","phase":"retrain_commit","overall":99,
+                "message":"Retraining finished · committing the new model artifact atomically…",
+            })
             try:
                 if not retrain_output.exists():
                     raise RuntimeError("Retraining completed without producing a model artifact.")
@@ -2131,6 +2135,10 @@ class Builder:
                         retrain_parent.rmdir()
                     except OSError:
                         self._remove_local_artifact_path(retrain_parent)
+                emit({
+                    "status":"running","runtime_kind":"train","phase":"retrain_committed","overall":99,
+                    "message":"Retrained model committed · updating Studio runtime and index…",
+                })
             except Exception:
                 if replacement_backup:
                     self._rollback_local_directory_overrides([replacement_backup])
