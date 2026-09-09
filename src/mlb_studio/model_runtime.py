@@ -1315,6 +1315,7 @@ class TensorGraph(nn.Module):
             if component_type == "esa": algorithms.append("ESA Thunder prefill + Lightning decode")
             elif component_type == "bolt": algorithms.append("BOLT fixed C/rho cache decode")
             elif component_type == "soup": algorithms.append("SOUP recurrent generation")
+            elif component_type == "learned_position": algorithms.append("Cyclic learned-position continuation")
             elif component_type == "custom" and isinstance(module,TensorGraph):
                 algorithms.extend(module.recurrent_generation_algorithms())
         return list(dict.fromkeys(algorithms))
@@ -1385,7 +1386,19 @@ class TensorGraph(nn.Module):
                 else: output,state=module.decode_step(output,state,position=run["position"])
                 next_states.append(state)
             elif component_type in {"learned_position","sinusoidal_position"}:
-                output=module(output,start_pos=int(run["position"]))
+                start_pos=int(run["position"])
+                if component_type=="learned_position":
+                    # Recurrent state mixers can decode beyond the training
+                    # context without replaying it. Absolute learned-position
+                    # tables are finite, so cycle their index rather than doing
+                    # a full 512-token rebuild for every overflow token.
+                    params=node.get("params") or {}
+                    max_positions=int(
+                        params.get("max_seq_len") or params.get("max_length")
+                        or params.get("num_embeddings") or 0
+                    )
+                    if max_positions>0: start_pos%=max_positions
+                output=module(output,start_pos=start_pos)
             elif component_type == "lm_head" and self._terminal_generation_head(nid):
                 # The full-sequence hidden states are useful to earlier layers,
                 # but generation only needs vocabulary scores for the last one.
@@ -1875,7 +1888,8 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
         with torch.inference_mode(),_autocast_context(device,precision):
             if supported:
                 x=torch.tensor([active_ids],dtype=torch.long,device=device)
-                logits,cache=recurrent_model.prefill(x,capacity=context)
+                recurrent_capacity=max(context,len(active_ids)+max_new_tokens)
+                logits,cache=recurrent_model.prefill(x,capacity=recurrent_capacity)
             else:
                 cache=None
                 x=torch.tensor([active_ids],dtype=torch.long,device=device)
@@ -1915,17 +1929,10 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
                     })
                 if terminal: break
 
-                if supported and len(active_ids)<=context:
+                if supported:
                     logits,cache=recurrent_model.decode_step(
                         next_token,cache,position=len(active_ids)-1
                     )
-                elif supported:
-                    # Preserve Studio's rolling-context semantics after capacity
-                    # is reached.  Shorter generations stay entirely on the hot
-                    # one-token path; overflow rebuilds from the retained window.
-                    active_ids=active_ids[-context:]
-                    x=torch.tensor([active_ids],dtype=torch.long,device=device)
-                    logits,cache=recurrent_model.prefill(x,capacity=context)
                 else:
                     active_ids=active_ids[-context:]
                     x=torch.tensor([active_ids],dtype=torch.long,device=device)

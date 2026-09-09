@@ -32,6 +32,7 @@ class _CachedModel(nn.Module):
         self.prefill_calls = 0
         self.decode_calls = 0
         self.forward_calls = 0
+        self.prefill_capacity = None
 
     def recurrent_generation_support(self):
         return True, None
@@ -41,6 +42,7 @@ class _CachedModel(nn.Module):
 
     def prefill(self, ids, *, capacity):
         self.prefill_calls += 1
+        self.prefill_capacity = capacity
         return _next_logits(3), {"position": ids.size(1), "capacity": capacity}
 
     def decode_step(self, token, cache, *, position):
@@ -69,6 +71,7 @@ def test_generate_text_uses_prefill_once_and_streams_live_without_terminal_backl
     assert model.prefill_calls == 1
     assert model.decode_calls == 2
     assert model.forward_calls == 0
+    assert model.prefill_capacity == 16
     assert events[0]["phase"] == "prefill"
     token_events = [event for event in events if event["phase"] == "generate"]
     assert token_events
@@ -78,6 +81,22 @@ def test_generate_text_uses_prefill_once_and_streams_live_without_terminal_backl
     assert token_events[-1]["generated_tokens"] < count
     assert all(event["generation_mode"] == "recurrent-cache" for event in events)
     assert token_events[-1]["generated_text"] in text
+
+
+def test_recurrent_generation_continues_past_context_without_reprefill():
+    model = _CachedModel()
+    text, count = generate_text(
+        model, _Tokenizer(), "prompt", max_new_tokens=6, context=3,
+        device=torch.device("cpu"), precision="fp32",
+        temperature=1.0, top_k=1, top_p=1.0,
+    )
+
+    assert count == 6
+    assert text == "1 2 3 3 3 3 3 3"
+    assert model.prefill_calls == 1
+    assert model.prefill_capacity == 8
+    assert model.decode_calls == 5
+    assert model.forward_calls == 0
 
 
 class _FakeBolt(nn.Module):
