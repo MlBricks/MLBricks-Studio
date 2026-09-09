@@ -22,6 +22,11 @@ from .security import safe_torch_load
 from .version import __version__
 
 
+# Tokenizers are immutable during Studio inference. Reusing the already parsed
+# tokenizer avoids repeated Hugging Face startup work on every cold generation.
+_TOKENIZER_CACHE: dict[str, Any] = {}
+
+
 class ModelCompileError(RuntimeError):
     pass
 
@@ -1532,18 +1537,34 @@ def _graph_vocab(model_graph):
     return max(sizes) if sizes else 0
 
 
-def _tokenizer_for(meta, *, local_only_first=True):
+def _tokenizer_for(meta, *, local_only_first=True, tokenizer_path=None):
     tok_cfg=((meta or {}).get("pipeline") or {}).get("tokenizer") or {}
     name=tok_cfg.get("tokenizer_name") or "gpt2"
+    preferred=None
+    if tokenizer_path:
+        try:
+            candidate=Path(str(tokenizer_path)).expanduser()
+            if candidate.exists(): preferred=str(candidate.resolve())
+        except Exception:
+            preferred=None
+    cache_key=preferred or str(name)
+    cached=_TOKENIZER_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         from transformers import AutoTokenizer
     except ImportError as exc:
         raise RuntimeError("Training/generation needs transformers. Install transformers in the notebook.") from exc
     errors=[]
-    if local_only_first:
+    tok=None
+    if preferred:
+        try:
+            tok=AutoTokenizer.from_pretrained(preferred,local_files_only=True)
+        except Exception as exc:
+            errors.append(exc)
+    if tok is None and local_only_first:
         try: tok=AutoTokenizer.from_pretrained(name,local_files_only=True)
         except Exception as exc: errors.append(exc); tok=None
-    else: tok=None
     if tok is None:
         try: tok=AutoTokenizer.from_pretrained(name)
         except Exception as exc:
@@ -1553,6 +1574,10 @@ def _tokenizer_for(meta, *, local_only_first=True):
         if tok.eos_token_id is not None: tok.pad_token=tok.eos_token
         elif tok.unk_token_id is not None: tok.pad_token=tok.unk_token
         else: tok.add_special_tokens({"pad_token":"<|pad|>"})
+    _TOKENIZER_CACHE[cache_key]=tok
+    # Also cache by canonical tokenizer name when a saved tokenizer directory was
+    # used. A later runtime with the same tokenizer can reuse it immediately.
+    _TOKENIZER_CACHE.setdefault(str(name),tok)
     return tok
 
 
@@ -1577,7 +1602,7 @@ def compile_builder_model(state, model_entry, dataset_meta, runtime, *, progress
             "phase":"tokenizer","overall":0,
             "message":f"Loading tokenizer for {device}…",
         })
-    tokenizer=_tokenizer_for(dataset_meta)
+    tokenizer=_tokenizer_for(dataset_meta, tokenizer_path=(model_entry or {}).get("tokenizer_path"))
     graph_vocab=_graph_vocab(graph)
     tokenizer_vocab=len(tokenizer)
     effective_vocab=max(graph_vocab,tokenizer_vocab)
@@ -1849,7 +1874,7 @@ def _sample_next(logits,temperature,top_k,top_p,generator=None):
     return selected if candidate_ids is None else candidate_ids.gather(-1,selected)
 
 
-def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precision,temperature=.8,top_k=50,top_p=.95,seed=42,progress=None,stop_event=None):
+def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precision,temperature=.8,top_k=50,top_p=.95,seed=42,progress=None,stop_event=None,stream_every_token=False):
     ids=tokenizer.encode(str(prompt),add_special_tokens=True)
     if not ids: ids=[tokenizer.eos_token_id or tokenizer.pad_token_id or 0]
     generated=list(ids)
@@ -1917,7 +1942,7 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
                     (tokenizer.eos_token_id is not None and next_id==tokenizer.eos_token_id)
                     or i+1==max_new_tokens
                 )
-                if progress and not terminal and (i==0 or now-last_stream_at>=stream_interval_seconds):
+                if progress and not terminal and (stream_every_token or i==0 or now-last_stream_at>=stream_interval_seconds):
                     last_stream_at=now
                     progress({
                         "status":"running","runtime_kind":"generate","phase":"generate",
@@ -2253,15 +2278,76 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
 
 
 def load_trained_for_generation(*,state,model_entry,dataset_meta,config,checkpoint_path=None,progress=None):
-    # Rebuild using the selected generation runtime, then restore weights through
-    # the current public MLBricks lifecycle API. Legacy Builder .pt checkpoints
-    # remain loadable for backward compatibility.
-    compiled,tokenizer=compile_builder_model(
-        state,model_entry,dataset_meta,config,progress=progress,for_training=False
-    )
+    """Load a trained runtime with a fast path for unified MLBricks artifacts.
+
+    Studio training saves ``raw`` TensorGraph itself with ``mlbricks.save``.  The
+    older generation path rebuilt the entire 50M+ graph, then called
+    ``mlbricks.load`` (which loaded a second full graph), and finally copied the
+    second graph's state_dict into the first.  On Windows/CPU this can dominate
+    first-token latency by tens of seconds.
+
+    Unified artifacts already contain the complete trained module graph, so the
+    normal eager/auto generation path can load that graph directly, cast/move it
+    once, and reuse it in Builder's runtime cache.  Explicit backend overrides
+    still use the reconstruction path because they intentionally re-instantiate
+    components with a different backend.
+    """
     path=Path(str(checkpoint_path or model_entry.get("checkpoint_path") or model_entry.get("path") or ""))
     if not path.exists():
         raise RuntimeError("Trained model artifact was not found. Train the model in this session or select a valid MLBricks model artifact.")
+
+    backend=str(config.get("backend") or "auto").lower()
+    unified=path.is_dir() and (path/"model.pt").exists()
+    direct_ok=unified and backend in {"", "auto"}
+
+    if direct_ok:
+        device=resolve_device(config.get("device","auto"))
+        precision,dtype=resolve_precision(config.get("precision","auto"),device)
+        if progress:
+            progress({
+                "status":"running","runtime_kind":"generate","phase":"tokenizer","overall":0,
+                "message":f"Loading tokenizer for {device}…",
+            })
+        tokenizer=_tokenizer_for(
+            dataset_meta, tokenizer_path=(model_entry or {}).get("tokenizer_path")
+        )
+        if progress:
+            progress({
+                "status":"running","runtime_kind":"generate","phase":"weights","overall":0,
+                "message":f"Loading trained model directly from {path.name or path}…",
+            })
+        try:
+            mlbricks_load=IMPORT_POOL.resolve_api("lifecycle.load")
+        except ImportError as exc:
+            raise RuntimeError("Current MLBricks installation does not expose mlbricks.load().") from exc
+        loaded=mlbricks_load(path,device=device,strict=True)
+        if not isinstance(loaded,nn.Module):
+            raise RuntimeError(f"Loaded MLBricks artifact is not a torch.nn.Module: {type(loaded)!r}")
+        # mlbricks.load already places the model on the requested device. Cast
+        # floating tensors once to the generation precision instead of creating
+        # and moving a second graph first.
+        loaded.to(device=device,dtype=dtype)
+        graph=copy.deepcopy((model_entry or {}).get("architecture") or _root_model(state))
+        effective_vocab=max(_graph_vocab(graph),len(tokenizer))
+        params=sum(p.numel() for p in loaded.parameters())
+        inference_model=loaded
+        compile_used=False
+        if str(config.get("execution_mode") or "eager")=="compiled":
+            if not hasattr(torch,"compile"):
+                raise RuntimeError("Compiled execution was selected, but torch.compile is unavailable in this PyTorch build.")
+            inference_model=torch.compile(
+                loaded,mode=str(config.get("compile_mode") or "default"),dynamic=None,fullgraph=False
+            )
+            compile_used=True
+        return CompiledModel(
+            inference_model,loaded,None,device,precision,effective_vocab,
+            params,compile_used,None,
+        ),tokenizer
+
+    # Compatibility path for legacy checkpoints and explicit backend overrides.
+    compiled,tokenizer=compile_builder_model(
+        state,model_entry,dataset_meta,config,progress=progress,for_training=False
+    )
 
     if progress:
         progress({

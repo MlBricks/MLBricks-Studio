@@ -234,20 +234,20 @@ def test_amp_training_keeps_fp32_master_parameters():
     assert "raw.to(device=device,dtype=parameter_dtype)" in block
 
 
-def test_generation_cache_compares_resolved_runtime_properties():
+def test_generation_cache_prefers_resident_python_model():
     source = (
         Path(__file__).resolve().parents[1]
         / "src" / "mlb_studio" / "builder.py"
     ).read_text(encoding="utf-8")
-    start = source.index("    def generate_model(")
+    start = source.index("    def _resident_generation_runtime(")
     end = source.index("    def start_model_server(", start)
     block = source[start:end]
-    assert "desired_device = resolve_device" in block
-    assert "desired_precision, _ = resolve_precision" in block
-    assert "str(compiled.device) == str(desired_device)" in block
-    assert "str(compiled.precision) == str(desired_precision)" in block
-    assert '"phase":"cache_reuse"' in block
-    assert "runtime_changed" not in block
+    assert "desired_device = resident.device" in block
+    assert "requested_precision" in block
+    assert '"phase":"resident_reuse"' in block
+    assert "no checkpoint reload" in block
+    assert "load_trained_for_generation" in block
+    assert block.index("_resident_generation_runtime(model_id, config") < block.index("load_trained_for_generation(")
 
 
 def test_generation_start_clears_stale_output():

@@ -37,3 +37,32 @@ def test_busy_bridge_queues_recover_instead_of_dropping_click(tmp_path, monkeypa
         time.sleep(0.03)
 
     assert calls == ["persistence_save_draft", "persistence_load_draft"]
+
+
+def test_generate_bypasses_active_background_bridge_worker(tmp_path, monkeypatch):
+    monkeypatch.setenv("MLBRICKS_STUDIO_HOME", str(tmp_path))
+    builder = Builder()
+    builder._active_bridge_action = "persistence_save_draft"
+
+    class AliveThread:
+        @staticmethod
+        def is_alive():
+            return True
+
+    builder._run_thread = AliveThread()
+    widgets = {
+        "state": Dummy(json.dumps(builder.to_dict())),
+        "command": Dummy(json.dumps({"action":"generate", "model_id":"model-hot", "generation_config":{"prompt":"hello"}})),
+        "progress": Dummy(""),
+    }
+    builder._bridge_widgets = widgets
+    calls = []
+    builder._start_hot_bridge_generation = lambda command: calls.append(command) or True
+
+    builder._start_bridge_run()
+
+    assert len(calls) == 1
+    assert calls[0]["action"] == "generate"
+    assert calls[0]["generation_config"]["prompt"] == "hello"
+    assert widgets["command"].value == "{}"
+    assert builder._bridge_pending_requests == []

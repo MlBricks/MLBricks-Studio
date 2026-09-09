@@ -130,6 +130,13 @@ function __MLB_STUDIO_FACTORY__(){
     const bridge=payload.bridge||null;
     const isPopout=!!(bridge&&(bridge.mode==="broadcast"||bridge.mode==="popout"));
     const popoutChannelName=(bridge&&bridge.channel)||("mlb-studio-"+(payload.instance_id||root.id||"session"));
+    // about:blank Full Window inherits the notebook origin. Keep the real host
+    // widget class names so the visible popout can mirror Python progress
+    // directly from the opener even when the hidden notebook tab's timers are
+    // throttled by the browser. Broadcast/MessagePort remains the fallback.
+    const hostBridge=(payload.host_bridge&&typeof payload.host_bridge==="object")?payload.host_bridge:null;
+    let openerProgressControl=null;
+    let openerProgressTimer=null;
     let popoutChannel=null;
     let popoutHostConnected=!isPopout;
     let popoutPeerWindow=null;
@@ -1790,17 +1797,27 @@ function __MLB_STUDIO_FACTORY__(){
         execution={status:"error",runtime_kind:action,overall:0,message:"Kernel bridge is offline. Re-run the Builder cell, then try again.",nodes:{}};
         applyExecutionProgress(execution);setStatus(execution.message);return;
       }
+      const residentFastLane=action==="generate";
       const command={action,model_id:entry.id,ts:Date.now()};
-      if(!setBridgeState()||!setBridgeCommand(command)){
+      if(residentFastLane)command.generation_config=cp(entry.generation_config||{});
+
+      // Generation is a chat-style hot path. The Python Builder already owns
+      // the trained nn.Module/tokenizer in RAM/VRAM, so do not serialize and
+      // resend the complete visual project for every response. Only the prompt
+      // and sampling/runtime controls travel with the command.
+      if(isPopout)pendingBroadcastSkipState=residentFastLane;
+      const stateReady=residentFastLane?true:setBridgeState();
+      if(!stateReady||!setBridgeCommand(command)){
+        if(isPopout)pendingBroadcastSkipState=false;
         setStatus("Could not send runtime configuration to Python.");return;
       }
       const button=bridgeControl(bridge.run,"button");
-      if(!button){setStatus("Python runtime control was not found.");return;}
+      if(!button){if(isPopout)pendingBroadcastSkipState=false;setStatus("Python runtime control was not found.");return;}
       const progressInput=bridgeControl(bridge.progress,"textarea");
       lastProgressRaw=progressInput?.value||lastProgressRaw;
-      execution={status:"running",runtime_kind:action,phase:"starting",overall:0,message:action==="train"?"Starting training in Python…":"Starting generation in Python…",nodes:{}};
+      execution={status:"running",runtime_kind:action,phase:"starting",overall:0,message:action==="train"?"Starting training in Python…":"Preparing resident generation…",nodes:{}};
       applyExecutionProgress(execution);setStatus(execution.message);
-      setTimeout(()=>{clickBridgeButton(button);},350);
+      setTimeout(()=>{clickBridgeButton(button);},20);
     }
 
     function requestLocalCommand(action,config={}){
@@ -2515,12 +2532,53 @@ function __MLB_STUDIO_FACTORY__(){
       }catch(_){}
     }
 
+    function pollOpenerBridgeProgress(){
+      if(!isPopout||!hostBridge?.progress)return false;
+      try{
+        if(!window.opener||window.opener.closed)return false;
+        if(!openerProgressControl||openerProgressControl.isConnected===false){
+          const doc=window.opener.document;
+          const host=doc?.querySelector?.("."+hostBridge.progress)||null;
+          openerProgressControl=(host?.matches?.("textarea")?host:host?.querySelector?.("textarea"))||null;
+          // Some notebook shells wrap widgets in a shadow root. This lookup is
+          // only performed until the control is found, then the element is cached.
+          if(!openerProgressControl&&doc)
+            openerProgressControl=deepQuery(doc,"."+hostBridge.progress+" textarea")||deepQuery(doc,"textarea."+hostBridge.progress);
+        }
+        const raw=openerProgressControl?.value||"";
+        if(!raw||raw===lastProgressRaw)return !!openerProgressControl;
+        lastProgressRaw=raw;
+        if(bridgeAwaitTimer){clearTimeout(bridgeAwaitTimer);bridgeAwaitTimer=null;}
+        const parsed=JSON.parse(raw);
+        applyExecutionProgress(parsed);
+        if(parsed.message)setStatus(parsed.message);
+        return true;
+      }catch(_){
+        // Cross-origin hosted Full Window cannot read opener DOM; normal
+        // MessagePort/BroadcastChannel progress continues to work.
+        openerProgressControl=null;
+        return false;
+      }
+    }
+
     function startBridgePolling(){
       if(!bridge)return;
+      if(isPopout&&hostBridge?.progress&&!openerProgressTimer){
+        // Run in the visible Full Window, not the hidden notebook page. Chrome
+        // heavily throttles background-tab setInterval; this keeps token text
+        // visibly streaming while Python generates.
+        openerProgressTimer=setInterval(pollOpenerBridgeProgress,50);
+        pollOpenerBridgeProgress();
+      }
       bridgeLastProbeAt=Date.now();
       // Startup uses direct selectors only. Never traverse notebook frames or
       // shadow DOM from a timer; that was the source of multi-second Kaggle freezes.
       updateKernelBadge(false,false);
+      const progressInput=bridgeControl(bridge.progress,"textarea");
+      if(progressInput&&!progressInput.__mlbLiveProgressBound){
+        progressInput.__mlbLiveProgressBound=true;
+        progressInput.addEventListener("input",pollBridgeProgress);
+      }
       if(bridgePollTimer)return;
       bridgePollTimer=setInterval(()=>{
         const now=Date.now();
@@ -2674,6 +2732,9 @@ function __MLB_STUDIO_FACTORY__(){
         inspector_tab:inspectorTab,
         zoom:zoom
       };
+      // Preserve the real notebook widget selectors for direct progress mirroring
+      // before replacing them with popout placeholders.
+      popPayload.host_bridge=cp(payload.bridge||{});
       // Use distinct placeholder bridge ids in the popout so Run and Stop remain
       // distinguishable while commands are proxied back to the notebook host.
       popPayload.bridge={
@@ -3832,7 +3893,7 @@ function __MLB_STUDIO_FACTORY__(){
         lr:next.lr??null,elapsed_seconds:next.elapsed_seconds??null,compile_seconds:next.compile_seconds??null,
         message:next.message||"",checkpoint_path:next.checkpoint_path||null,
         generation_mode:next.generation_mode||null,generation_algorithms:next.generation_algorithms||null,
-        fallback_reason:next.fallback_reason||null
+        fallback_reason:next.fallback_reason||null,runtime_source:next.runtime_source||null
       };
       if(!history.length||history[history.length-1].key!==key)history.push(event);
       if(history.length>250)history.splice(0,history.length-250);
@@ -3862,6 +3923,7 @@ function __MLB_STUDIO_FACTORY__(){
           generation_mode:event.generation_mode||entry.generation_live?.generation_mode||null,
           generation_algorithms:event.generation_algorithms||entry.generation_live?.generation_algorithms||[],
           fallback_reason:event.fallback_reason||entry.generation_live?.fallback_reason||null,
+          runtime_source:event.runtime_source||entry.generation_live?.runtime_source||null,
           message:event.message,generated_text:next.generated_text||entry.generation_live?.generated_text||entry.last_generation||""
         };
         if(next.generated_text)entry.last_generation=next.generated_text;
@@ -3870,7 +3932,8 @@ function __MLB_STUDIO_FACTORY__(){
 
     function scheduleRuntimeStatusDraw(){
       if(!runtimePanel||runtimePanel.tab!=="status"||runtimeStatusRedrawTimer)return;
-      runtimeStatusRedrawTimer=setTimeout(()=>{runtimeStatusRedrawTimer=null;draw();},120);
+      const delay=execution.runtime_kind==="generate"?33:120;
+      runtimeStatusRedrawTimer=setTimeout(()=>{runtimeStatusRedrawTimer=null;draw();},delay);
     }
 
     function runtimeTabButton(label,tab,entry,mode){
@@ -3916,7 +3979,7 @@ function __MLB_STUDIO_FACTORY__(){
       if(execution.runtime_kind==="generate"&&runtimePanel?.modelId===entry.id){
         return {...live,status:execution.status||live.status,phase:execution.phase||live.phase,overall:Number(execution.overall??live.overall??0),
           generated_tokens:execution.generated_tokens??live.generated_tokens,message:execution.message||live.message,
-          generated_text:execution.generated_text||live.generated_text};
+          generated_text:execution.generated_text||live.generated_text,runtime_source:execution.runtime_source||live.runtime_source};
       }return live;
     }
 
@@ -4031,7 +4094,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       const logs=runtimeSection("Generation Log");renderEventLog(logs,history,"Generation has not started yet.");main.appendChild(logs);
       const runtime=runtimeSection("Runtime Used");const rg=document.createElement("div");rg.className="mlb-validation-status-grid";const dev=selectedRuntimeDevice(config);
-      rg.append(statusMetric("Device",dev.label),statusMetric("Backend",config.backend),statusMetric("Execution",config.execution_mode),statusMetric("Compile",config.execution_mode==="compiled"?config.compile_mode:"Not used"),statusMetric("Precision",config.precision),statusMetric("Generation Path",live.generation_mode||"Pending"),statusMetric("Algorithms",(live.generation_algorithms||[]).join(" · ")||"Compatibility path"),statusMetric("Generated At",entry.generated_at||"—"));runtime.appendChild(rg);main.appendChild(runtime);
+      rg.append(statusMetric("Device",dev.label),statusMetric("Backend",config.backend),statusMetric("Execution",config.execution_mode),statusMetric("Compile",config.execution_mode==="compiled"?config.compile_mode:"Not used"),statusMetric("Precision",config.precision),statusMetric("Model Source",live.runtime_source==="resident"?"Resident RAM/VRAM":live.runtime_source==="loaded"?"Loaded once":"Pending"),statusMetric("Generation Path",live.generation_mode||"Pending"),statusMetric("Algorithms",(live.generation_algorithms||[]).join(" · ")||"Compatibility path"),statusMetric("Generated At",entry.generated_at||"—"));runtime.appendChild(rg);main.appendChild(runtime);
 
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Generation Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Generated</span><strong>"+Number(live.generated_tokens||0)+" / "+Number(config.max_new_tokens||0)+"</strong></div><div><span>Weights</span><strong>"+(entry.weights_ready?"Available":"Missing")+"</strong></div>";side.appendChild(summary);
       side.appendChild(generationActionButton(entry));

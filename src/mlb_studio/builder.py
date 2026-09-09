@@ -21,6 +21,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
+from collections import deque
 from collections.abc import Mapping
 
 from .graph import (
@@ -212,8 +213,19 @@ class Builder:
                         node[key] = "ElasticBit"
         self._instance_id = f"mlb_{uuid.uuid4().hex}"
         self._run_thread = None
+        # Generation normally uses the main runtime worker.  If a notebook-only
+        # background autosave/import is occupying that worker, a tiny dedicated
+        # hot-path thread is allowed to use the already-resident model instead of
+        # making an interactive response wait behind disk/UI housekeeping.
+        self._hot_generation_thread = None
+        self._hot_generation_model_id = None
         self._stop_event = threading.Event()
         self._bridge_widgets = None
+        # Sequenced local-app progress queue: preserve token events instead of
+        # overwriting them in the single textarea bridge before the browser polls.
+        self._progress_events = deque(maxlen=4096)
+        self._progress_event_seq = 0
+        self._progress_event_lock = threading.Lock()
         self._app_server = None
         self._app_thread = None
         self._app_url = None
@@ -1136,18 +1148,99 @@ class Builder:
         if progress_callback: progress_callback(payload)
         return update
 
+    def _resident_generation_runtime(self, model_id, config, *, emit=None):
+        """Return an inference view of a model that is already resident in RAM/VRAM.
+
+        The Python object produced by training is the authoritative hot runtime.
+        Generation must not serialize/rebuild/reload that model just because the
+        Generation panel says ``Auto``.  ``Auto`` therefore means *keep the
+        resident device/precision/backend*.  A checkpoint load is only required
+        when no live Python model exists, or when the user explicitly asks for a
+        different construction-time backend.
+        """
+        cached = self.trained_models.get(model_id)
+        if not cached:
+            return None
+        resident = cached.get("compiled")
+        tokenizer = cached.get("tokenizer")
+        if resident is None or tokenizer is None or getattr(resident, "raw_model", None) is None:
+            return None
+
+        from .model_runtime import CompiledModel, resolve_device, resolve_precision
+        import torch
+
+        previous_runtime = cached.get("runtime") or {}
+        requested_backend = str(config.get("backend") or "auto").strip().lower()
+        resident_backend = str(previous_runtime.get("backend") or "auto").strip().lower()
+        # Backend changes can alter component construction. Never pretend an
+        # existing graph changed backend; explicit changes take the cold path.
+        if requested_backend not in {"", "auto"} and requested_backend != resident_backend:
+            return None
+
+        requested_device = str(config.get("device") or "auto").strip().lower()
+        desired_device = resident.device if requested_device in {"", "auto"} else resolve_device(requested_device)
+        raw = resident.raw_model
+        if str(desired_device) != str(resident.device):
+            # Moving the already-trained object is dramatically cheaper and safer
+            # than loading a second 50M+ graph from disk. Keep FP32 master weights
+            # intact; generation precision is handled by autocast below.
+            raw.to(device=desired_device)
+            resident.device = desired_device
+            resident.model = raw
+            cached.pop("generation_compiled", None)
+
+        requested_precision = str(config.get("precision") or "auto").strip().lower()
+        if requested_precision in {"", "auto"}:
+            desired_precision = str(resident.precision)
+        else:
+            desired_precision, _ = resolve_precision(requested_precision, desired_device)
+
+        execution = str(config.get("execution_mode") or "eager").strip().lower()
+        inference_model = raw
+        compile_used = False
+        compile_error = None
+        if execution == "compiled":
+            if not hasattr(torch, "compile"):
+                raise RuntimeError("Compiled execution was selected, but torch.compile is unavailable in this PyTorch build.")
+            mode = str(config.get("compile_mode") or "default")
+            generation_compiled = cached.setdefault("generation_compiled", {})
+            inference_model = generation_compiled.get(mode)
+            if inference_model is None:
+                if emit:
+                    emit({
+                        "status":"running","runtime_kind":"generate","phase":"compile",
+                        "overall":0,"runtime_source":"resident",
+                        "message":f"Compiling resident model in RAM/VRAM ({mode})…",
+                    })
+                inference_model = torch.compile(raw, mode=mode, dynamic=None, fullgraph=False)
+                generation_compiled[mode] = inference_model
+            compile_used = True
+
+        compiled = CompiledModel(
+            inference_model, raw, resident.training_model, desired_device,
+            desired_precision, resident.vocab_size, resident.parameter_count,
+            compile_used, compile_error,
+        )
+        cached["compiled"] = compiled
+        cached["runtime"] = dict(config)
+        cached["resident"] = True
+        if emit:
+            emit({
+                "status":"running","runtime_kind":"generate","phase":"resident_reuse",
+                "overall":0,"runtime_source":"resident",
+                "message":f"Using resident model already in {'VRAM' if desired_device.type == 'cuda' else 'RAM'} on {desired_device} · no checkpoint reload",
+            })
+        return compiled, tokenizer
+
     def generate_model(self, model_id, *, progress_callback=None):
         """Generate tokens from a trained Builder language model."""
         if progress_callback:
             progress_callback({
                 "status":"running","runtime_kind":"generate","phase":"runtime_import",
                 "overall":0,"model_id":model_id,
-                "message":"Loading the generation runtime…",
+                "message":"Preparing generation runtime…",
             })
-        from .model_runtime import (
-            load_trained_for_generation, generate_text,
-            resolve_device, resolve_precision,
-        )
+        from .model_runtime import load_trained_for_generation, generate_text
         entry = self._model_output(model_id)
         if not entry.get("weights_ready"):
             raise RuntimeError("This model has no trained/loaded weights yet.")
@@ -1161,55 +1254,24 @@ class Builder:
                 enriched = dict(payload or {})
                 enriched.setdefault("model_id", model_id)
                 progress_callback(enriched)
-        cached = self.trained_models.get(model_id)
-        if cached is not None:
-            compiled, tokenizer = cached["compiled"], cached["tokenizer"]
-            previous_runtime = cached.get("runtime") or {}
-            desired_device = resolve_device(config.get("device", "auto"))
-            desired_precision, _ = resolve_precision(
-                config.get("precision", "auto"), desired_device
-            )
-            desired_execution = str(config.get("execution_mode") or "eager")
-            previous_backend = str(previous_runtime.get("backend") or "auto")
-            desired_backend = str(config.get("backend") or "auto")
 
-            # Compare resolved execution properties, not raw config spellings.
-            # Training fp16 + cuda:0 and generation auto + auto can resolve to
-            # the same runtime and reuse the live trained model already in VRAM.
-            cache_compatible = (
-                str(compiled.device) == str(desired_device)
-                and str(compiled.precision) == str(desired_precision)
-                and previous_backend == desired_backend
-            )
-            if desired_execution == "compiled":
-                cache_compatible = (
-                    cache_compatible
-                    and compiled.model is not compiled.raw_model
-                    and str(previous_runtime.get("compile_mode") or "default")
-                    == str(config.get("compile_mode") or "default")
-                )
-            else:
-                cache_compatible = cache_compatible and compiled.model is compiled.raw_model
-
-            if not cache_compatible:
-                compiled, tokenizer = load_trained_for_generation(
-                    state=self.state, model_entry=entry, dataset_meta=meta, config=config,
-                    checkpoint_path=entry.get("checkpoint_path"), progress=emit,
-                )
-                self.trained_models[model_id] = {"compiled":compiled,"tokenizer":tokenizer,"runtime":dict(config)}
-            else:
-                cached["runtime"] = dict(config)
-                emit({
-                    "status":"running","runtime_kind":"generate","phase":"cache_reuse",
-                    "overall":0,
-                    "message":f"Reusing trained model already on {compiled.device}…",
-                })
+        resident = self._resident_generation_runtime(model_id, config, emit=emit)
+        if resident is not None:
+            compiled, tokenizer = resident
         else:
             compiled, tokenizer = load_trained_for_generation(
                 state=self.state, model_entry=entry, dataset_meta=meta, config=config,
-                checkpoint_path=entry.get("checkpoint_path"), progress=emit,
+                checkpoint_path=entry.get("checkpoint_path") or entry.get("path"), progress=emit,
             )
-            self.trained_models[model_id] = {"compiled":compiled,"tokenizer":tokenizer,"runtime":dict(config)}
+            self.trained_models[model_id] = {
+                "compiled": compiled, "tokenizer": tokenizer,
+                "runtime": dict(config), "resident": True,
+            }
+            emit({
+                "status":"running","runtime_kind":"generate","phase":"resident_ready",
+                "overall":0,"runtime_source":"loaded",
+                "message":f"Model loaded once and kept resident on {compiled.device} for following responses",
+            })
         from .model_runtime import runtime_int, runtime_float
         context = runtime_int(
             entry.get("context_length") or self.state.get("project",{}).get("context_length"),
@@ -1225,6 +1287,9 @@ class Builder:
             top_p=runtime_float(config.get("top_p"),0.95,"Top P",minimum=0.0,maximum=1.0),
             seed=runtime_int(config.get("seed"),42,"Seed"),
             progress=emit, stop_event=self._stop_event,
+            # Local app has a lossless event queue, so emit each token. Notebook
+            # mode remains coalesced to avoid ipywidgets transport backlog.
+            stream_every_token=self._app_server is not None,
         )
         entry["last_generation"] = text
         entry["generated_at"] = datetime.now(timezone.utc).isoformat()
@@ -1269,17 +1334,14 @@ class Builder:
         emit("Loading trained model for API server…",10)
 
         compiled=tokenizer=None
-        cached=self.trained_models.get(model_id)
-        if cached:
-            previous=cached.get("runtime") or {}
-            keys=("device","backend","execution_mode","compile_mode","precision")
-            if all(str(previous.get(k,"auto"))==str(runtime.get(k,"auto")) for k in keys):
-                compiled,tokenizer=cached.get("compiled"),cached.get("tokenizer")
+        resident=self._resident_generation_runtime(model_id,runtime,emit=None)
+        if resident is not None:
+            compiled,tokenizer=resident
         if compiled is None or tokenizer is None:
             compiled,tokenizer=load_trained_for_generation(
                 state=self.state,model_entry=entry,dataset_meta=meta,config=runtime,
                 checkpoint_path=entry.get("checkpoint_path") or entry.get("path"),progress=None)
-            self.trained_models[model_id]={"compiled":compiled,"tokenizer":tokenizer,"runtime":dict(runtime)}
+            self.trained_models[model_id]={"compiled":compiled,"tokenizer":tokenizer,"runtime":dict(runtime),"resident":True}
 
         emit("Starting HTTP inference server…",55)
         server=ModelHTTPRuntime(
@@ -3072,14 +3134,47 @@ class Builder:
     def _publish_bridge_progress(self, payload):
         widgets = self._bridge_widgets or {}
         progress = widgets.get("progress")
-        if progress is None:
-            return
-        enriched = dict(payload)
+        enriched = dict(payload or {})
         enriched["ts"] = time.time()
+        with self._progress_event_lock:
+            self._progress_event_seq += 1
+            enriched["event_seq"] = self._progress_event_seq
+            try:
+                raw = json.dumps(enriched, default=str)
+                safe_event = json.loads(raw)
+            except Exception:
+                raw = json.dumps({
+                    "status":"error", "runtime_kind":"bridge", "overall":0,
+                    "message":"Studio could not serialize a runtime progress event.",
+                    "ts":time.time(), "event_seq":self._progress_event_seq,
+                })
+                safe_event = json.loads(raw)
+            self._progress_events.append(safe_event)
+        if progress is not None:
+            try:
+                progress.value = raw
+            except Exception:
+                pass
+
+    def _progress_events_after(self, after=0, limit=512):
         try:
-            progress.value = json.dumps(enriched)
+            after = max(0, int(after or 0))
         except Exception:
-            pass
+            after = 0
+        limit = max(1, min(1024, int(limit or 512)))
+        with self._progress_event_lock:
+            events = [
+                event for event in self._progress_events
+                if int(event.get("event_seq", 0)) > after
+            ][:limit]
+            latest = self._progress_event_seq
+            oldest = int(self._progress_events[0].get("event_seq", latest)) if self._progress_events else latest
+        return {
+            "events": events,
+            "last_seq": int(events[-1].get("event_seq", after)) if events else after,
+            "latest_seq": latest,
+            "dropped": bool(after and after < max(0, oldest - 1)),
+        }
 
     @staticmethod
     def _bridge_action_from_raw(command_raw):
@@ -3095,6 +3190,7 @@ class Builder:
         action, command = self._bridge_action_from_raw(command_raw)
         navigation = {"persistence_prepare_draft", "persistence_prepare_item", "persistence_load_draft", "persistence_load_item"}
         background = {"persistence_save_draft", "ensure_component_import"}
+        interactive_runtime = {"train", "generate", "serve_start", "serve_stop"}
         request = {
             "state_raw": state_raw or "{}",
             "command_raw": command_raw or "{}",
@@ -3121,6 +3217,19 @@ class Builder:
                 ]
                 self._bridge_pending_requests.append(request)
                 return True
+            if action in interactive_runtime:
+                # User-triggered Train/Generate/Serve work must never sit behind
+                # stale autosave/import chores. The currently running worker is
+                # allowed to finish, then this request is next. Coalesce duplicate
+                # runtime clicks for the same model/action while it is queued.
+                self._bridge_pending_requests = [
+                    item for item in self._bridge_pending_requests
+                    if item.get("action") not in background
+                    and not (item.get("action") == action and item.get("model_id") == command.get("model_id"))
+                ]
+                request["model_id"] = command.get("model_id")
+                self._bridge_pending_requests.insert(0, request)
+                return True
             if action == "ensure_component_import":
                 ctype = request["component_type"]
                 if any(
@@ -3130,6 +3239,59 @@ class Builder:
                     return False
             self._bridge_pending_requests.append(request)
             return True
+
+    def _start_hot_bridge_generation(self, command):
+        """Run resident generation without waiting for notebook housekeeping.
+
+        Full Window and notebook mode share one hidden Run button.  Autosave or
+        lazy component-import work can legitimately still be finishing when the
+        user presses Generate.  Those jobs do not touch the resident nn.Module,
+        so generation gets a dedicated fast lane rather than spending seconds (or
+        minutes) queued behind them.  Training/model deletion/memory cleanup are
+        intentionally *not* bypassed by the caller.
+        """
+        model_id = command.get("model_id")
+        thread = self._hot_generation_thread
+        if thread is not None and thread.is_alive():
+            self._publish_bridge_progress({
+                "status":"error","runtime_kind":"generate","phase":"busy","overall":0,
+                "model_id":model_id,
+                "message":"A generation response is already running for the resident model.",
+            })
+            return False
+
+        if isinstance(command.get("generation_config"), dict):
+            generation_entry = self._model_output(model_id)
+            generation_entry["generation_config"] = copy.deepcopy(command["generation_config"])
+
+        self._stop_event.clear()
+        self._hot_generation_model_id = model_id
+
+        def hot_worker():
+            try:
+                self.generate_model(model_id, progress_callback=self._publish_bridge_progress)
+            except Exception as exc:
+                if type(exc).__name__ in {"TrainingStopped", "PipelineStopped"}:
+                    self._publish_bridge_progress({
+                        "status":"stopped","runtime_kind":"generate","phase":"generate","overall":0,
+                        "model_id":model_id,"message":"Generation stopped.",
+                    })
+                else:
+                    self.last_run_error = exc
+                    self._publish_bridge_progress({
+                        "status":"error","runtime_kind":"generate","phase":"generate","overall":0,
+                        "model_id":model_id,"message":f"{type(exc).__name__}: {exc}",
+                    })
+            finally:
+                self._hot_generation_model_id = None
+
+        self._hot_generation_thread = threading.Thread(
+            target=hot_worker,
+            name=f"mlb-studio-generate-{self._instance_id}",
+            daemon=True,
+        )
+        self._hot_generation_thread.start()
+        return True
 
     def _schedule_bridge_queue_drain(self, delay=0.04):
         with self._bridge_queue_lock:
@@ -3186,15 +3348,28 @@ class Builder:
 
         if self._run_thread is not None and self._run_thread.is_alive():
             # Capture the exact command/state now. The previous implementation
-            # discarded the click while a background import/autosave was active,
-            # which made Workshop Recover/Open feel random in Full Window mode.
+            # discarded the click while a background import/autosave was active.
             state_raw = getattr(state_widget, "value", "{}") if state_widget is not None else "{}"
             command_raw = getattr(command_widget, "value", "{}") if command_widget is not None else "{}"
+            preview_action, preview_command = self._bridge_action_from_raw(command_raw)
             if command_widget is not None:
                 try:
                     command_widget.value = "{}"
                 except Exception:
                     pass
+
+            # Generation is latency-sensitive and state-independent.  Do not let
+            # notebook housekeeping become part of model response latency.  The
+            # resident model can safely run while these background jobs finish.
+            generation_safe_background = {
+                "persistence_save_draft", "ensure_component_import",
+                "ensure_external_import", "validate_user_function",
+                "validate_user_class",
+            }
+            if preview_action == "generate" and self._active_bridge_action in generation_safe_background:
+                self._start_hot_bridge_generation(preview_command)
+                return
+
             self._queue_bridge_widget_request(state_raw, command_raw)
             self._schedule_bridge_queue_drain()
             return
@@ -3223,6 +3398,11 @@ class Builder:
             "persistence_list", "persistence_delete_draft", "persistence_delete_item",
             "persistence_save_credentials", "persistence_delete_credentials",
             "runtime_clear_memory",
+            # Generation carries its tiny prompt/sampling config in command_raw.
+            # Do not deserialize/replace the entire Studio project for every chat
+            # response; that would sever the Python-hot-path UX from the resident
+            # model object and adds needless JSON traffic.
+            "generate",
         }
         if state_widget is not None and action not in state_independent_actions:
             try:
@@ -3246,6 +3426,12 @@ class Builder:
         self.last_run_error = None
 
         model_id = command.get("model_id")
+        if action == "generate" and isinstance(command.get("generation_config"), dict):
+            # Fast lane: synchronize only the values generation actually needs.
+            # The resident nn.Module/tokenizer stay attached to this Builder
+            # instance in self.trained_models and are never serialized to JS.
+            generation_entry = self._model_output(model_id)
+            generation_entry["generation_config"] = copy.deepcopy(command["generation_config"])
         self._active_bridge_action = action
 
         def worker():
@@ -3664,6 +3850,33 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
     const stop = document.querySelector('.'+bridge.stop);
     const progress = document.querySelector('.'+bridge.progress);
     let progressBusy = false;
+    let progressSeq = 0;
+    const progressQueue = [];
+    let progressDrainScheduled = false;
+
+    function deliverProgressEvent(event) {{
+      progress.value = JSON.stringify(event || {{}});
+      progress.dispatchEvent(new Event('input', {{bubbles:true}}));
+    }}
+
+    function drainProgressQueue() {{
+      progressDrainScheduled = false;
+      let budget = 3;
+      while (budget-- > 0 && progressQueue.length) deliverProgressEvent(progressQueue.shift());
+      if (progressQueue.length) {{
+        progressDrainScheduled = true;
+        requestAnimationFrame(drainProgressQueue);
+      }}
+    }}
+
+    function enqueueProgressEvents(events) {{
+      if (!Array.isArray(events) || !events.length) return;
+      progressQueue.push(...events);
+      if (!progressDrainScheduled) {{
+        progressDrainScheduled = true;
+        requestAnimationFrame(drainProgressQueue);
+      }}
+    }}
 
     async function postJson(url, payload) {{
       const response = await fetch(url, {{
@@ -3695,16 +3908,35 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
       if (progressBusy) return;
       progressBusy = true;
       try {{
-        const response = await fetch('/api/progress?ts='+Date.now(), {{cache:'no-store'}});
+        const response = await fetch('/api/progress-events?after='+progressSeq+'&ts='+Date.now(), {{cache:'no-store'}});
         if (response.ok) {{
-          const raw = await response.text();
-          if (raw) progress.value = raw;
+          const payload = await response.json();
+          const events = Array.isArray(payload.events) ? payload.events : [];
+          if (events.length) {{
+            progressSeq = Number(payload.last_seq || events[events.length-1].event_seq || progressSeq);
+            enqueueProgressEvents(events);
+          }}
         }}
-      }} catch (_) {{}}
+      }} catch (_) {{
+        try {{
+          const response = await fetch('/api/progress?ts='+Date.now(), {{cache:'no-store'}});
+          if (response.ok) {{
+            const raw = await response.text();
+            if (raw) {{
+              const event = JSON.parse(raw);
+              const seq = Number(event.event_seq || progressSeq);
+              if (!seq || seq > progressSeq) {{
+                progressSeq = seq || progressSeq;
+                enqueueProgressEvents([event]);
+              }}
+            }}
+          }}
+        }} catch (_) {{}}
+      }}
       finally {{ progressBusy = false; }}
     }}
     pollProgress();
-    setInterval(pollProgress, 100);
+    setInterval(pollProgress, 50);
   }})();
   </script>
 </body>
@@ -3721,7 +3953,7 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
         import http.server
         import socketserver
         import webbrowser
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, parse_qs
 
         if self._app_server is not None:
             if self._app_url and open_browser:
@@ -3804,6 +4036,15 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
                 if path == "/api/progress":
                     progress = (builder._bridge_widgets or {}).get("progress")
                     self._send(200, getattr(progress, "value", "{}"), "application/json; charset=utf-8")
+                    return
+                if path == "/api/progress-events":
+                    query = parse_qs(urlparse(self.path).query)
+                    try:
+                        after = int((query.get("after") or [0])[0])
+                    except Exception:
+                        after = 0
+                    batch = builder._progress_events_after(after)
+                    self._send(200, json.dumps(batch), "application/json; charset=utf-8")
                     return
                 self._send(404, "Not found")
 

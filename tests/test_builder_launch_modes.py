@@ -31,6 +31,7 @@ def test_local_app_serves_full_page_without_full_window_control():
         assert '"allow_full_window":false' in page or "allow_full_window&quot;:false" in page
         assert "/api/run" in page
         assert "/api/progress" in page
+        assert "/api/progress-events" in page
         assert urllib.request.urlopen(url + "favicon.svg", timeout=5).status == 200
     finally:
         builder.stop_app()
@@ -66,5 +67,42 @@ def test_local_app_python_bridge_runs_commands():
         assert result is not None
         assert result.get("status") == "done"
         assert result.get("runtime_kind") == "persistence"
+    finally:
+        builder.stop_app()
+
+
+def test_local_app_progress_event_queue_is_lossless():
+    from mlb_studio import Builder
+
+    builder = Builder()
+    url = builder.app(open_browser=False, block=False)
+    try:
+        builder._publish_bridge_progress({
+            "status": "running",
+            "runtime_kind": "generate",
+            "generated_tokens": 1,
+            "generated_text": "a",
+        })
+        builder._publish_bridge_progress({
+            "status": "running",
+            "runtime_kind": "generate",
+            "generated_tokens": 2,
+            "generated_text": "ab",
+        })
+        builder._publish_bridge_progress({
+            "status": "done",
+            "runtime_kind": "generate",
+            "generated_tokens": 2,
+            "generated_text": "ab",
+        })
+        raw = urllib.request.urlopen(url + "api/progress-events?after=0", timeout=5).read().decode("utf-8")
+        payload = json.loads(raw)
+        generated = [
+            event.get("generated_tokens")
+            for event in payload.get("events", [])
+            if event.get("runtime_kind") == "generate"
+        ]
+        assert generated[-3:] == [1, 2, 2]
+        assert payload["last_seq"] >= 3
     finally:
         builder.stop_app()

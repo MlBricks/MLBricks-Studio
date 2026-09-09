@@ -133,3 +133,140 @@ def test_bolt_generation_cache_is_fixed_capacity_and_reused():
     assert state["c"].shape[2] == 10
     assert state["c"].data_ptr() == c_ptr
     assert state["rho"].data_ptr() == rho_ptr
+
+
+def test_generate_text_can_emit_every_token_for_local_live_transport():
+    model = _CachedModel()
+    events = []
+    text, count = generate_text(
+        model,
+        _Tokenizer(),
+        "prompt",
+        max_new_tokens=4,
+        context=16,
+        device=torch.device("cpu"),
+        precision="fp32",
+        temperature=1.0,
+        top_k=1,
+        top_p=1.0,
+        progress=events.append,
+        stream_every_token=True,
+    )
+    assert count == 4
+    token_events = [event for event in events if event["phase"] == "generate"]
+    assert [event["generated_tokens"] for event in token_events] == [1, 2, 3]
+    assert token_events[-1]["generated_text"] in text
+
+
+def test_unified_artifact_load_skips_visual_graph_rebuild(monkeypatch, tmp_path):
+    import mlb_studio.model_runtime as runtime
+
+    artifact = tmp_path / "model"
+    artifact.mkdir()
+    (artifact / "model.pt").write_bytes(b"placeholder")
+
+    class _LoadTokenizer:
+        pad_token_id = 0
+        eos_token_id = None
+
+        def __len__(self):
+            return 8
+
+    loaded = nn.Linear(2, 2)
+    monkeypatch.setattr(runtime, "_tokenizer_for", lambda *args, **kwargs: _LoadTokenizer())
+    monkeypatch.setattr(runtime.IMPORT_POOL, "resolve_api", lambda name: (lambda *args, **kwargs: loaded))
+
+    def _must_not_rebuild(*args, **kwargs):
+        raise AssertionError("unified model.pt should load directly, not rebuild the Studio graph")
+
+    monkeypatch.setattr(runtime, "compile_builder_model", _must_not_rebuild)
+
+    compiled, tokenizer = runtime.load_trained_for_generation(
+        state={},
+        model_entry={
+            "architecture": {"nodes": [], "edges": []},
+            "path": str(artifact),
+        },
+        dataset_meta={},
+        config={
+            "device": "cpu",
+            "precision": "fp32",
+            "backend": "auto",
+            "execution_mode": "eager",
+        },
+    )
+
+    assert compiled.raw_model is loaded
+    assert len(tokenizer) == 8
+
+
+def test_resident_generation_reuses_live_python_model_without_checkpoint_load(monkeypatch):
+    import mlb_studio.model_runtime as runtime
+    from mlb_studio.builder import Builder
+
+    raw = nn.Linear(4, 4)
+    tokenizer = _Tokenizer()
+    resident = runtime.CompiledModel(
+        raw, raw, None, torch.device("cpu"), "fp32", 8,
+        sum(p.numel() for p in raw.parameters()), False, None,
+    )
+    builder = object.__new__(Builder)
+    builder.trained_models = {
+        "model-1": {
+            "compiled": resident,
+            "tokenizer": tokenizer,
+            "runtime": {
+                "device": "auto",
+                "backend": "auto",
+                "execution_mode": "eager",
+                "precision": "auto",
+            },
+        }
+    }
+    events = []
+
+    compiled, reused_tokenizer = builder._resident_generation_runtime(
+        "model-1",
+        {
+            "device": "auto",
+            "backend": "auto",
+            "execution_mode": "eager",
+            "precision": "auto",
+        },
+        emit=events.append,
+    )
+
+    assert compiled.raw_model is raw
+    assert compiled.model is raw
+    assert reused_tokenizer is tokenizer
+    assert builder.trained_models["model-1"]["compiled"].raw_model is raw
+    assert events[-1]["phase"] == "resident_reuse"
+    assert "no checkpoint reload" in events[-1]["message"]
+
+
+def test_generation_fast_lane_does_not_resend_whole_studio_state():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
+    start = js.index("function requestRuntimeCommand")
+    end = js.index("function requestLocalCommand", start)
+    block = js[start:end]
+    assert 'const residentFastLane=action==="generate"' in block
+    assert "command.generation_config=cp(entry.generation_config||{})" in block
+    assert "const stateReady=residentFastLane?true:setBridgeState()" in block
+
+    py = (root / "src" / "mlb_studio" / "builder.py").read_text(encoding="utf-8")
+    state_start = py.index("state_independent_actions = {")
+    state_end = py.index("        }", state_start)
+    assert '"generate"' in py[state_start:state_end]
+
+
+def test_full_window_mirrors_progress_directly_from_notebook_opener():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
+    assert "popPayload.host_bridge=cp(payload.bridge||{})" in js
+    assert "function pollOpenerBridgeProgress()" in js
+    assert "openerProgressTimer=setInterval(pollOpenerBridgeProgress,50)" in js
