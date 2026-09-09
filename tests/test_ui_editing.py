@@ -50,11 +50,12 @@ def test_intentional_model_actions_scroll_is_preserved():
     assert "liveBody.scrollTop=Math.max(0,target.offsetTop-14);" in text
 
 
-def test_build_action_uses_construction_icon_and_centered_content():
+def test_build_action_uses_hammer_icon_and_centered_content():
     js = _builder_js()
     css = _builder_css()
     assert 'build:\'<svg \'+common+\'>' in js
-    assert 'd="m11.6 6.8 4.8-4.8 5.6 5.6-4.8 4.8z"' in js
+    assert 'd="m12.9 5.9 2.8-2.8 5.2 5.2-2.8 2.8z"' in js
+    assert 'd="m15.6 9.4-9.8 9.8a2 2 0 0 0 2.8 2.8l9.8-9.8"' in js
     final_rule = css[css.rindex("/* Build action: resolve older fixed-width rules") :]
     assert "width:auto!important" in final_rule
     assert "max-width:none!important" in final_rule

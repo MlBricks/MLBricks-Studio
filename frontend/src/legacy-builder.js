@@ -2508,8 +2508,8 @@ function __MLB_STUDIO_FACTORY__(){
 
       const stat=root.querySelector(".mlb-statusbar .right");
       if(stat){
-        const footerStatus=execution.runtime_kind==="cloud"?cloudBottomStatus(cloudActivity):(execution.message||status);
-        stat.textContent="● "+footerStatus;
+        const footerRaw=execution.runtime_kind==="cloud"?cloudBottomStatus(cloudActivity):(execution.message||status);
+        stat.textContent="● "+footerStatusText(footerRaw,execution);
       }
 
       const run=root.querySelector(".mlb-run");
@@ -2928,7 +2928,7 @@ function __MLB_STUDIO_FACTORY__(){
     function uiIcon(name){
       const common='viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
       const paths={
-        build:'<svg '+common+'><path d="m13.2 5.2 5.6 5.6"/><path d="m11.6 6.8 4.8-4.8 5.6 5.6-4.8 4.8z"/><path d="m14.4 10.4-8.7 8.7a2.1 2.1 0 0 0 3 3l8.7-8.7"/></svg>',
+        build:'<svg '+common+'><path d="M14.4 4.4 19.6 9.6"/><path d="m12.9 5.9 2.8-2.8 5.2 5.2-2.8 2.8z"/><path d="m15.6 9.4-9.8 9.8a2 2 0 0 0 2.8 2.8l9.8-9.8"/><path d="M12.7 6.1 9.6 3 7 3.8l3.1 3.1"/></svg>',
         gallery:'<svg '+common+'><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
         fetch:'<svg '+common+'><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.65 3.36 3 7.5 3 1.15 0 2.24-.1 3.2-.3"/><path d="M4.5 11.5v6c0 1.65 3.36 3 7.5 3 1.18 0 2.3-.11 3.28-.32"/><path d="M18 13v7"/><path d="m15.2 17.3 2.8 2.8 2.8-2.8"/></svg>',
         stop:'<svg '+common+'><rect x="6.5" y="6.5" width="11" height="11" rx="1.8"/></svg>',
@@ -2956,6 +2956,26 @@ function __MLB_STUDIO_FACTORY__(){
 
     function selectedNode(){return current(state).nodes.find(n=>n.id===selected)||null;}
     function setStatus(s){status=s;}
+
+    // The footer is a compact workspace summary, never an error console. Runtime
+    // failures already have dedicated surfaces (Training/Generation Status, data
+    // progress, Cloud Info, server status, logs). Keeping raw exceptions here was
+    // especially harmful for CUDA OOM/traceback text because the fixed footer could
+    // paint a multi-kilobyte message across the entire application.
+    let lastSafeFooterStatus="Ready";
+    function footerLooksLikeError(value){
+      const text=String(value||"");
+      return /(?:\b(?:error|exception|traceback|failed|failure)\b|runtimeerror|memoryerror|out of memory|cuda error|cudnn error|componentimporterror|modulenotfounderror)/i.test(text);
+    }
+    function footerStatusText(value,run=execution){
+      const text=String(value==null?"":value).replace(/\s+/g," ").trim();
+      const runtimeFailed=String(run?.status||"").toLowerCase()==="error";
+      if(runtimeFailed||footerLooksLikeError(text))return lastSafeFooterStatus||"Ready";
+      if(!text)return lastSafeFooterStatus||"Ready";
+      const compact=text.length>110?text.slice(0,107)+"…":text;
+      lastSafeFooterStatus=compact;
+      return compact;
+    }
 
     function apiInfo(node){
       if(node.type==="custom") return {public_name:"Custom Layer",parameters:[],available:true};
@@ -4145,6 +4165,33 @@ function __MLB_STUDIO_FACTORY__(){
       section.appendChild(log);
     }
 
+    function renderTrainingEventLog(section,history,emptyText){
+      const log=document.createElement("div");log.className="mlb-training-log mlb-training-log-structured";
+      const events=(history||[]).slice(-100);
+      if(!events.length){log.innerHTML="<div class='mlb-log-empty'>"+escapeRuntimeText(emptyText)+"</div>";section.appendChild(log);return;}
+      const head=document.createElement("div");head.className="mlb-training-log-head";
+      ["Status","Tok/s","E2E Tok/s","Loss","PPL"].forEach(label=>{const cell=document.createElement("span");cell.textContent=label;head.appendChild(cell);});
+      log.appendChild(head);
+      events.forEach(ev=>{
+        const hasMetrics=ev.step!=null||ev.tokens_per_sec!=null||ev.end_to_end_tokens_per_sec!=null||ev.loss!=null||ev.ppl!=null;
+        let status="Status";
+        if(ev.step!=null)status="Step "+ev.step;
+        else if(ev.phase){const phase=String(ev.phase).replace(/[_-]+/g," ");status=phase.charAt(0).toUpperCase()+phase.slice(1);}
+        else if(ev.status)status=String(ev.status).toUpperCase();
+        if(!hasMetrics){
+          const note=document.createElement("div");note.className="mlb-training-log-note "+(ev.status||"");
+          const label=document.createElement("strong");label.textContent=status;
+          const message=document.createElement("span");message.textContent=ev.message||"Runtime event";
+          note.append(label,message);log.appendChild(note);return;
+        }
+        const row=document.createElement("div");row.className="mlb-training-log-metric-row "+(ev.status||"");
+        const values=[status,ev.tokens_per_sec==null?"—":Math.round(Number(ev.tokens_per_sec)).toLocaleString(),ev.end_to_end_tokens_per_sec==null?"—":Math.round(Number(ev.end_to_end_tokens_per_sec)).toLocaleString(),ev.loss==null?"—":Number(ev.loss).toFixed(4),ev.ppl==null?"—":Number(ev.ppl).toFixed(2)];
+        values.forEach((value,index)=>{const cell=document.createElement(index===0?"strong":"span");cell.textContent=value;row.appendChild(cell);});
+        log.appendChild(row);
+      });
+      section.appendChild(log);
+    }
+
     function renderTrainingStatus(main,side,entry){
       const config=entry.training_config||{},live=trainingLive(entry),history=runtimeHistory(entry,"train");
       const dataset=preparedDatasetById(entry.selected_dataset_id)||null;
@@ -4197,7 +4244,7 @@ function __MLB_STUDIO_FACTORY__(){
       sample.innerHTML="<div><strong>VALIDATION GENERATION</strong><span>"+(config.generate_on_validation?("Prompt: "+escapeRuntimeText(config.validation_prompt||"")):"Disabled in Training Setup")+"</span></div><pre>"+escapeRuntimeText(entry.latest_validation_sample||"No validation sample generated yet.")+"</pre>";
       validation.appendChild(sample);main.appendChild(validation);
 
-      const logs=runtimeSection("Training Log");renderEventLog(logs,history,"Training has not started yet.");main.appendChild(logs);
+      const logs=runtimeSection("Training Log");renderTrainingEventLog(logs,history,"Training has not started yet.");main.appendChild(logs);
       const cp=runtimeSection("Checkpoints + Output");const cg=document.createElement("div");cg.className="mlb-validation-status-grid";
       cg.append(statusMetric("Checkpoint Every",(config.checkpoint_every||0)+" steps"),
         statusMetric("Latest Checkpoint",entry.latest_checkpoint_path||entry.checkpoint_path||live.checkpoint_path||"—"),statusMetric("Weights",entry.weights_ready?"Available":"Not yet"),
@@ -9040,31 +9087,59 @@ function __MLB_STUDIO_FACTORY__(){
             primary.appendChild(runtimeIndicator);
           }
         }else{
-          const run=state.active_workspace==="model"
-            ?actionBtn(
-                modelRuntimeBusy
-                  ?(execution.runtime_kind==="train"?"Training":"Generating")
-                  :"Build",
-                "mlb-run mlb-build mlb-top-build-tab"+(modelRuntimeBusy?" runtime-busy "+execution.runtime_kind:""),
-                modelRuntimeBusy?"activity":"build"
-              )
-            :actionBtn(
-                dataFetchBusy?("Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%"):"Fetch Data",
-                "mlb-run mlb-build mlb-top-build-tab"+(dataFetchBusy?" runtime-busy data":""),
-                dataFetchBusy?"activity":"fetch"
-              );
-          run.disabled=modelRuntimeBusy||dataFetchBusy;
-          run.addEventListener("click",()=>{
-            if(galleryWorkspace.open){closeGallery();return;}
-            if(cloudWorkspace.open){closeCloudWorkspace();return;}
-            (state.active_workspace==="model"?requestModelBuild:requestRun)();
-          });
-          primary.appendChild(run);
-          if(state.active_workspace==="data"||modelRuntimeBusy){
-            const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
-            stopBtn.addEventListener("click",requestStop);
-            stopBtn.style.display=(dataFetchBusy||modelRuntimeBusy)?"inline-flex":"none";
-            primary.appendChild(stopBtn);
+          // Workshop is a browsing surface: there is no graph/pipeline to execute
+          // while it is open. Hide Build / Fetch Data (and their Stop control)
+          // instead of leaving a misleading action in the header.
+          if(!galleryWorkspace.open){
+            const run=state.active_workspace==="model"
+              ?actionBtn(
+                  modelRuntimeBusy
+                    ?(execution.runtime_kind==="train"?"Training":"Generating")
+                    :"Build",
+                  "mlb-run mlb-build mlb-top-build-tab"+(modelRuntimeBusy?" runtime-busy "+execution.runtime_kind:""),
+                  modelRuntimeBusy?"activity":"build"
+                )
+              :actionBtn(
+                  dataFetchBusy?("Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%"):"Fetch Data",
+                  "mlb-run mlb-build mlb-top-build-tab"+(dataFetchBusy?" runtime-busy data":""),
+                  dataFetchBusy?"activity":"fetch"
+                );
+            // A busy Training/Generation chip is also navigation back to the
+            // live runtime page. Users may leave the runtime page to inspect the
+            // graph while the job continues, so never turn that chip into a
+            // disabled dead-end. Data Fetch remains non-clickable while busy.
+            run.disabled=dataFetchBusy;
+            if(modelRuntimeBusy){
+              run.title=execution.runtime_kind==="train"
+                ?"Open live Training Status"
+                :"Open live Generation Status";
+              run.addEventListener("click",()=>{
+                const mode=execution.runtime_kind==="generate"?"generate":"train";
+                const entry=builtModelById(execution.model_id)||builtModelById(outputDirectorySelection)||null;
+                if(!entry){setStatus("The active runtime model could not be found.");return;}
+                ensureRuntimeConfigs(entry);
+                galleryWorkspace.open=false;
+                cloudWorkspace.open=false;
+                runtimePanel={mode,modelId:entry.id,tab:"status"};
+                bottomExpanded=false;
+                selected=null;
+                outputDirectorySelection=entry.id;
+                setStatus(mode==="train"?"Training status opened.":"Generation status opened.");
+                draw();
+              });
+            }else{
+              run.addEventListener("click",()=>{
+                if(cloudWorkspace.open){closeCloudWorkspace();return;}
+                (state.active_workspace==="model"?requestModelBuild:requestRun)();
+              });
+            }
+            primary.appendChild(run);
+            if(state.active_workspace==="data"||modelRuntimeBusy){
+              const stopBtn=actionBtn("Stop","mlb-stop mlb-center-stop","stop");
+              stopBtn.addEventListener("click",requestStop);
+              stopBtn.style.display=(dataFetchBusy||modelRuntimeBusy)?"inline-flex":"none";
+              primary.appendChild(stopBtn);
+            }
           }
           const galleryBtn=actionBtn("Workshop","mlb-dark-btn mlb-top-gallery-btn"+(galleryWorkspace.open?" active":""),"gallery");
           galleryBtn.title="Open prebuilt Models, Components and Data";
@@ -9989,7 +10064,7 @@ function __MLB_STUDIO_FACTORY__(){
         const e=builtModelById(runtimePanel.modelId);
         if(e){const cfg=runtimePanel.mode==="train"?e.training_config:(runtimePanel.mode==="serve"?e.serve_config:e.generation_config);statusDevice=selectedRuntimeDevice(cfg).label;}
       }
-      stat.innerHTML='<span>Workspace: '+workspaceName()+'</span><span>Backend: '+(state.active_workspace==="data"?"Builder Data API":"MLBricks Runtime")+'</span><span>Device: '+statusDevice+'</span><span class="right mlb-ready">● '+status+"</span>";
+      stat.innerHTML='<span>Workspace: '+workspaceName()+'</span><span>Backend: '+(state.active_workspace==="data"?"Builder Data API":"MLBricks Runtime")+'</span><span>Device: '+statusDevice+'</span><span class="right mlb-ready">● '+footerStatusText(status,execution)+"</span>";
       root.appendChild(stat);
 
       // Number inputs are created in several independent workspaces (model,

@@ -125,6 +125,34 @@
     }):h('div',{className:'mlb-log-empty'},props.emptyText)));
   },function(a,b){return a===b;});
 
+  function trainingEventStatus(ev){
+    if(ev.step!=null)return 'Step '+ev.step;
+    if(ev.phase){var phase=String(ev.phase).replace(/[_-]+/g,' ');return phase.charAt(0).toUpperCase()+phase.slice(1);}
+    if(ev.status)return String(ev.status).toUpperCase();
+    return 'Status';
+  }
+
+  var TrainingEventLog=connected(function(s){return s.history||[];},function(history,props){
+    var events=history.slice(-100);
+    return h(Section,{title:'Training Log'},h('div',{className:'mlb-training-log mlb-training-log-structured'},events.length?[
+      h('div',{className:'mlb-training-log-head',key:'head'},
+        h('span',null,'Status'),h('span',null,'Tok/s'),h('span',null,'E2E Tok/s'),h('span',null,'Loss'),h('span',null,'PPL'))
+    ].concat(events.map(function(ev,index){
+      var hasMetrics=ev.step!=null||ev.tokens_per_sec!=null||ev.end_to_end_tokens_per_sec!=null||ev.loss!=null||ev.ppl!=null;
+      var key=ev.key||String(ev.event_seq||index);
+      var status=trainingEventStatus(ev);
+      if(!hasMetrics){
+        return h('div',{className:'mlb-training-log-note '+(ev.status||''),key:key},h('strong',null,status),h('span',null,ev.message||'Runtime event'));
+      }
+      return h('div',{className:'mlb-training-log-metric-row '+(ev.status||''),key:key},
+        h('strong',null,status),
+        h('span',null,ev.tokens_per_sec==null?'—':fmtInt(ev.tokens_per_sec)),
+        h('span',null,ev.end_to_end_tokens_per_sec==null?'—':fmtInt(ev.end_to_end_tokens_per_sec)),
+        h('span',null,ev.loss==null?'—':fmtFloat(ev.loss,4)),
+        h('span',null,ev.ppl==null?'—':fmtFloat(ev.ppl,2)));
+    })):h('div',{className:'mlb-log-empty'},props.emptyText)));
+  },function(a,b){return a===b;});
+
   var TrainingCheckpoint=connected(function(s){var e=s.entry||{},l=s.live||{},c=s.config||{};return {
     every:(c.checkpoint_every||0)+' steps',path:e.latest_checkpoint_path||e.checkpoint_path||l.checkpoint_path||'—',weights:e.weights_ready?'Available':'Not yet',status:e.training_status||'untrained',trainedAt:e.trained_at||'—'
   };},function(x){return h(Section,{title:'Checkpoints + Output'},h(Grid,{className:'mlb-validation-status-grid'},
@@ -148,7 +176,7 @@
         metric(function(s){return (s.live||{}).elapsed_seconds;},'Elapsed',fmtDuration)(store,'elapsed')
       ))),
     h(TrainingValidation,{store:store}),
-    h(EventLog,{store:store,title:'Training Log',emptyText:'Training has not started yet.'}),
+    h(TrainingEventLog,{store:store,emptyText:'Training has not started yet.'}),
     h(TrainingCheckpoint,{store:store})
   );}
 
