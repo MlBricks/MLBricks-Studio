@@ -3625,7 +3625,7 @@ function __MLB_STUDIO_FACTORY__(){
         backend:"auto",
         execution_mode:"eager",
         compile_mode:"reduce-overhead",
-        precision:"fp16",
+        precision:"auto",
         output_dir:localPaths.models||((localDefaultRoot.replace(/[\\/]+$/,"")||".")+"/mlbricks/models"),
       };
     }
@@ -3642,7 +3642,7 @@ function __MLB_STUDIO_FACTORY__(){
         backend:"auto",
         execution_mode:"eager",
         compile_mode:"reduce-overhead",
-        precision:"fp16",
+        precision:"auto",
       };
     }
 

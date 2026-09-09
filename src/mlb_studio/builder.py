@@ -16,6 +16,7 @@ import re
 import copy
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -41,6 +42,98 @@ _STATIC = Path(__file__).parent / "static"
 _FRONTEND_ASSETS_EMITTED = False
 _FRONTEND_ASSETS_LOCK = threading.Lock()
 _FRONTEND_BUNDLE_CACHE = None
+_WINDOWS_CUDA_PROBE_CACHE = None
+_MACOS_MPS_PROBE_CACHE = None
+
+
+def _probe_windows_torch_cuda():
+    """Return CUDA devices visible to this Python environment on Windows.
+
+    Windows normally has neither ``/dev/nvidia*`` device files nor CUDA
+    visibility environment variables. Probe in a child interpreter so the
+    selector is accurate without importing torch (and initializing CUDA) in
+    Studio's long-lived UI process.
+    """
+    global _WINDOWS_CUDA_PROBE_CACHE
+    if platform.system().lower() != "windows":
+        return None
+    if _WINDOWS_CUDA_PROBE_CACHE is not None:
+        return copy.deepcopy(_WINDOWS_CUDA_PROBE_CACHE)
+
+    code = (
+        "import json, torch; "
+        "available=bool(torch.cuda.is_available()); "
+        "devices=[]; "
+        "[(lambda p,i: devices.append({"
+        "'index':i,'name':torch.cuda.get_device_name(i),"
+        "'compute_capability':'.'.join(map(str,torch.cuda.get_device_capability(i))),"
+        "'total_memory':int(p.total_memory)"
+        "}))(torch.cuda.get_device_properties(i),i) "
+        "for i in range(torch.cuda.device_count())] if available else None; "
+        "print(json.dumps({"
+        "'probed':True,'available':available,'devices':devices,"
+        "'cuda_version':torch.version.cuda,'torch_version':torch.__version__"
+        "}))"
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode != 0:
+            raise RuntimeError((completed.stderr or completed.stdout or "CUDA probe failed").strip())
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        result = json.loads(lines[-1])
+        if not isinstance(result, dict):
+            raise ValueError("CUDA probe returned an invalid payload")
+    except Exception as exc:
+        result = {"probed": False, "available": False, "devices": [], "error": str(exc)}
+
+    _WINDOWS_CUDA_PROBE_CACHE = result
+    return copy.deepcopy(result)
+
+
+def _probe_macos_torch_mps():
+    """Return whether this Python environment can use Apple Metal via MPS."""
+    global _MACOS_MPS_PROBE_CACHE
+    if platform.system().lower() != "darwin":
+        return None
+    if _MACOS_MPS_PROBE_CACHE is not None:
+        return copy.deepcopy(_MACOS_MPS_PROBE_CACHE)
+
+    code = (
+        "import json, torch; "
+        "mps=getattr(torch.backends,'mps',None); "
+        "built=bool(mps and mps.is_built()); "
+        "available=bool(mps and mps.is_available()); "
+        "print(json.dumps({"
+        "'probed':True,'built':built,'available':available,"
+        "'torch_version':torch.__version__"
+        "}))"
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError((completed.stderr or completed.stdout or "MPS probe failed").strip())
+        lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+        result = json.loads(lines[-1])
+        if not isinstance(result, dict):
+            raise ValueError("MPS probe returned an invalid payload")
+    except Exception as exc:
+        result = {"probed": False, "built": False, "available": False, "error": str(exc)}
+
+    _MACOS_MPS_PROBE_CACHE = result
+    return copy.deepcopy(result)
 
 def _compressed_frontend_bundle():
     """Return gzip+base64 frontend assets, cached for this Python process."""
@@ -215,21 +308,40 @@ class Builder:
         except Exception:
             torch_version = None
 
-        # Do not run nvidia-smi during Builder construction. Even a bounded
-        # subprocess can stall hosted notebooks while drivers wake up. Use only
-        # cheap environment/device-file hints for the initial selector; the real
-        # runtime performs authoritative CUDA discovery when execution starts.
+        # Hosted Linux notebooks use cheap environment/device-file hints. Local
+        # Windows sessions have neither of those in the common case, so query
+        # the same Python environment in an isolated child process. This keeps
+        # torch out of Studio's UI process while making Windows GPU discovery
+        # authoritative instead of relying on a generic hardware hint.
         cuda_version = None
         cuda_hint = False
+        cuda_probe = _probe_windows_torch_cuda()
+        if cuda_probe and cuda_probe.get("probed"):
+            cuda_version = cuda_probe.get("cuda_version")
+            for item in cuda_probe.get("devices") or []:
+                index = int(item.get("index", len(devices) - 2))
+                name = str(item.get("name") or f"CUDA device {index}")
+                devices.append({
+                    "id": f"cuda:{index}",
+                    "label": f"GPU {index} — {name}",
+                    "kind": "cuda",
+                    "index": index,
+                    "name": name,
+                    "available": True,
+                    "compute_capability": item.get("compute_capability"),
+                    "total_memory": item.get("total_memory"),
+                })
+
         visible = str(os.environ.get("CUDA_VISIBLE_DEVICES", "")).strip()
         nvidia_visible = str(os.environ.get("NVIDIA_VISIBLE_DEVICES", "")).strip()
-        if visible and visible not in {"-1", "none", "None"}:
-            cuda_hint = True
-        elif nvidia_visible and nvidia_visible.lower() not in {"none", "void"}:
-            cuda_hint = True
-        elif Path("/dev/nvidia0").exists():
-            cuda_hint = True
-        if cuda_hint:
+        if not (cuda_probe and cuda_probe.get("probed")):
+            if visible and visible not in {"-1", "none", "None"}:
+                cuda_hint = True
+            elif nvidia_visible and nvidia_visible.lower() not in {"none", "void"}:
+                cuda_hint = True
+            elif Path("/dev/nvidia0").exists():
+                cuda_hint = True
+        if cuda_hint and not any(item.get("kind") == "cuda" for item in devices):
             devices.append({
                 "id": "cuda:0",
                 "label": "GPU — CUDA device",
@@ -238,6 +350,16 @@ class Builder:
                 "name": "CUDA device",
                 "available": True,
                 "provisional": True,
+            })
+
+        mps_probe = _probe_macos_torch_mps()
+        if mps_probe and mps_probe.get("available"):
+            devices.append({
+                "id": "mps",
+                "label": "GPU — Apple Metal (MPS)",
+                "kind": "mps",
+                "name": "Apple Metal Performance Shaders",
+                "available": True,
             })
 
         hf_info = {
@@ -256,6 +378,9 @@ class Builder:
             "precisions": ["auto", "fp32", "fp16", "bf16"],
             "torch_version": torch_version,
             "cuda_version": cuda_version,
+            "cuda_probe_error": (cuda_probe or {}).get("error"),
+            "mps_available": bool((mps_probe or {}).get("available")),
+            "mps_probe_error": (mps_probe or {}).get("error"),
             "huggingface": hf_info,
         }
 
@@ -953,6 +1078,12 @@ class Builder:
 
     def train_model(self, model_id, *, progress_callback=None):
         """Compile and really train a supported Builder language model."""
+        if progress_callback:
+            progress_callback({
+                "status":"running","runtime_kind":"train","phase":"runtime_import",
+                "overall":0,"model_id":model_id,
+                "message":"Loading the PyTorch training runtime…",
+            })
         from .model_runtime import train_builder_model
         entry = self._model_output(model_id)
         dataset_id = entry.get("selected_dataset_id")
@@ -966,7 +1097,19 @@ class Builder:
         # A previous completed training run can keep a compiled model alive on the
         # accelerator. Release inactive runtime caches before compiling the next
         # training model so a second run does not inherit stale VRAM pressure.
-        self._release_cached_runtime_models(preserve_server_models=True, reset_compiler=True)
+        cached_runtimes = [
+            value for key, value in self.trained_models.items()
+            if key not in self._model_servers
+        ]
+        if cached_runtimes:
+            reset_compiler = any(
+                bool(getattr((item or {}).get("compiled"), "compile_used", False))
+                for item in cached_runtimes
+            )
+            self._release_cached_runtime_models(
+                preserve_server_models=True,
+                reset_compiler=reset_compiler,
+            )
         self._stop_event.clear()
         def emit(payload):
             if progress_callback:

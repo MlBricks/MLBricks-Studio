@@ -104,3 +104,119 @@ def test_builder_startup_does_not_call_nvidia_smi():
     assert "nvidia-smi" in block
     assert "subprocess.run(" not in block
     assert 'Path("/dev/nvidia0").exists()' in block
+
+
+def test_windows_runtime_capabilities_show_torch_visible_cuda_devices(monkeypatch):
+    import mlb_studio.builder as builder_module
+
+    monkeypatch.setattr(builder_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        builder_module,
+        "_probe_windows_torch_cuda",
+        lambda: {
+            "probed": True,
+            "available": True,
+            "cuda_version": "12.8",
+            "devices": [{
+                "index": 0,
+                "name": "NVIDIA GeForce RTX 2050",
+                "compute_capability": "8.6",
+                "total_memory": 4 * 1024**3,
+            }],
+        },
+    )
+
+    capabilities = builder_module.Builder._detect_runtime_capabilities(
+        object.__new__(builder_module.Builder)
+    )
+    gpu = next(item for item in capabilities["devices"] if item["kind"] == "cuda")
+    assert gpu["id"] == "cuda:0"
+    assert gpu["label"] == "GPU 0 — NVIDIA GeForce RTX 2050"
+    assert gpu["compute_capability"] == "8.6"
+    assert capabilities["cuda_version"] == "12.8"
+
+
+def test_windows_cpu_only_torch_does_not_advertise_unusable_cuda(monkeypatch):
+    import mlb_studio.builder as builder_module
+
+    monkeypatch.setattr(builder_module.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        builder_module,
+        "_probe_windows_torch_cuda",
+        lambda: {
+            "probed": True,
+            "available": False,
+            "cuda_version": None,
+            "devices": [],
+        },
+    )
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+
+    capabilities = builder_module.Builder._detect_runtime_capabilities(
+        object.__new__(builder_module.Builder)
+    )
+    assert all(item["kind"] != "cuda" for item in capabilities["devices"])
+
+
+def test_macos_runtime_capabilities_show_available_mps_device(monkeypatch):
+    import mlb_studio.builder as builder_module
+
+    monkeypatch.setattr(builder_module.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(builder_module, "_probe_windows_torch_cuda", lambda: None)
+    monkeypatch.setattr(
+        builder_module,
+        "_probe_macos_torch_mps",
+        lambda: {"probed": True, "built": True, "available": True},
+    )
+
+    capabilities = builder_module.Builder._detect_runtime_capabilities(
+        object.__new__(builder_module.Builder)
+    )
+    gpu = next(item for item in capabilities["devices"] if item["kind"] == "mps")
+    assert gpu["id"] == "mps"
+    assert gpu["label"] == "GPU — Apple Metal (MPS)"
+    assert capabilities["mps_available"] is True
+
+
+def test_macos_without_torch_mps_does_not_advertise_gpu(monkeypatch):
+    import mlb_studio.builder as builder_module
+
+    monkeypatch.setattr(builder_module.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(builder_module, "_probe_windows_torch_cuda", lambda: None)
+    monkeypatch.setattr(
+        builder_module,
+        "_probe_macos_torch_mps",
+        lambda: {"probed": True, "built": False, "available": False},
+    )
+
+    capabilities = builder_module.Builder._detect_runtime_capabilities(
+        object.__new__(builder_module.Builder)
+    )
+    assert all(item["kind"] != "mps" for item in capabilities["devices"])
+    assert capabilities["mps_available"] is False
+
+
+def test_runtime_defaults_use_device_aware_precision():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "mlb_studio" / "static" / "builder.js"
+    ).read_text(encoding="utf-8")
+    training_start = source.index("function defaultTrainingConfig")
+    generation_start = source.index("function defaultGenerationConfig", training_start)
+    merge_start = source.index("function mergeRuntimeDefaults", generation_start)
+    assert 'precision:"auto"' in source[training_start:generation_start]
+    assert 'precision:"auto"' in source[generation_start:merge_start]
+
+
+def test_training_reports_runtime_import_before_lazy_model_runtime_import():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "mlb_studio" / "builder.py"
+    ).read_text(encoding="utf-8")
+    start = source.index("    def train_model(")
+    end = source.index("    def generate_model(", start)
+    block = source[start:end]
+    assert block.index('"phase":"runtime_import"') < block.index(
+        "from .model_runtime import train_builder_model"
+    )
+    assert "if cached_runtimes:" in block

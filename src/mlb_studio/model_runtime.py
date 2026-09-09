@@ -161,6 +161,11 @@ def resolve_precision(name: str | None, device: torch.device) -> tuple[str, torc
     value = str(name or "auto").strip().lower()
     if value == "auto":
         value = "fp16" if device.type == "cuda" else "fp32"
+    # Float16 CPU kernels are frequently unsupported or dramatically slower
+    # than float32. Saved GPU-oriented projects may still request fp16 after
+    # Auto falls back to CPU, so make that fallback safe and usable.
+    if device.type == "cpu" and value == "fp16":
+        value = "fp32"
     mapping = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
     if value not in mapping:
         raise ValueError(f"Unsupported precision: {name!r}")
@@ -1553,6 +1558,12 @@ def compile_builder_model(state, model_entry, dataset_meta, runtime, *, progress
     )
     device=resolve_device(runtime.get("device","auto"))
     precision,dtype=resolve_precision(runtime.get("precision","fp16"),device)
+    if progress:
+        progress({
+            "status":"running","runtime_kind":"train" if for_training else "generate",
+            "phase":"tokenizer","overall":0,
+            "message":f"Loading tokenizer for {device}…",
+        })
     tokenizer=_tokenizer_for(dataset_meta)
     graph_vocab=_graph_vocab(graph)
     tokenizer_vocab=len(tokenizer)
@@ -1603,7 +1614,10 @@ def compile_builder_model(state, model_entry, dataset_meta, runtime, *, progress
                 "Open Training Setup and set Backend to 'pytorch', or install/build the native MLBricks extension."
             ) from exc
         raise
-    raw.to(device)
+    # Apply the resolved runtime precision to floating parameters and buffers.
+    # Node presets are commonly stored as fp16 for GPU use; without dtype here,
+    # an Auto-to-CPU fallback could leave the whole model in slow CPU float16.
+    raw.to(device=device,dtype=dtype)
     params=sum(p.numel() for p in raw.parameters())
     inference_model=raw
     training_model=_CausalLMTrainingGraph(raw) if for_training else None
