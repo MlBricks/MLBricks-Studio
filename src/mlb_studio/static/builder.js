@@ -2139,6 +2139,24 @@ function __MLB_STUDIO_FACTORY__(){
       return setNativeValue(input,JSON.stringify(command||{}));
     }
 
+    function dispatchAtomicDataRequest(command){
+      const supportsAtomic=isPopout?!!hostBridge?.request:!!bridge?.request;
+      if(!supportsAtomic)return false;
+      const envelope={
+        request_id:"data:"+String(payload.instance_id||root.id||"studio")+":"+Date.now()+":"+Math.random().toString(36).slice(2,8),
+        state:bridgeStatePayload(),
+        command:cp(command||{action:"data",ts:Date.now()})
+      };
+      if(isPopout){
+        if(!popoutHostConnected)return false;
+        return sendPopoutMessage({type:"atomic_data",source:"popout",envelope,ts:Date.now()});
+      }
+      let input=bridgeControl(bridge.request,"textarea",false,false);
+      if(!input)input=bridgeControl(bridge.request,"textarea",true,true);
+      if(!input)return false;
+      return setNativeValue(input,JSON.stringify(envelope));
+    }
+
     function markExecutionLocally(kind,message){
       const nodes={};
       (current(state).nodes||[]).forEach(n=>{
@@ -2487,36 +2505,17 @@ function __MLB_STUDIO_FACTORY__(){
 
       if(!ensureBridgeForAction()){
         execution={
-          status:"error",
-          overall:0,
-          message:"Kernel bridge is offline. Re-run the Builder cell, then click Run.",
+          status:"error",runtime_kind:"data",overall:0,
+          message:"Kernel bridge is offline. Re-run the Builder cell, then click Fetch Data.",
           nodes:{}
         };
         applyExecutionProgress(execution);
         setStatus(execution.message);
-        return;
-      }
-
-      if(!setBridgeState()){
-        execution={
-          status:"error",overall:0,
-          message:"Could not send the current design to Python.",
-          nodes:{}
-        };
-        applyExecutionProgress(execution);
-        setStatus(execution.message);
-        return;
-      }
-
-
-      const runButton=bridgeControl(bridge.run,"button");
-      if(!runButton){
-        setStatus("Python Run control was not found. Re-run the Builder cell.");
         return;
       }
 
       // Ignore the bridge's old idle payload. The next changed payload must
-      // come from Python after this click.
+      // come from Python after this request.
       const progressInput=bridgeControl(bridge.progress,"textarea");
       lastProgressRaw=progressInput?.value||lastProgressRaw;
 
@@ -2528,58 +2527,84 @@ function __MLB_STUDIO_FACTORY__(){
         status:"running",
         runtime_kind:"data",
         overall:0,
-        message:"Fetching data with Python pipeline…",
+        message:"Sending data pipeline to Python…",
         nodes:queued
       };
       applyExecutionProgress(execution);
       setStatus(execution.message);
-
       if(bridgeAwaitTimer)clearTimeout(bridgeAwaitTimer);
 
-      // Let the state textarea comm flush first. Immediately before clicking the
-      // shared Python Run button, explicitly select the data command. The command
-      // widget is also used by Workshop persistence, cloud actions and background
-      // component imports; relying on its previous/default value made Fetch Data
-      // intermittently execute the wrong action after using another Studio area.
-      setTimeout(()=>{
-        if(!setBridgeCommand({action:"data",ts:Date.now()})){
-          execution={
-            status:"error",runtime_kind:"data",overall:0,
-            message:"Could not select the Python data pipeline command.",
-            nodes:queued
-          };
-          applyExecutionProgress(execution);
-          setStatus(execution.message);
-          return;
-        }
-        const ok=clickBridgeButton(runButton);
-        if(!ok){
-          execution={
-            status:"error",runtime_kind:"data",overall:0,
-            message:"Could not activate the Python data control.",
-            nodes:queued
-          };
-          applyExecutionProgress(execution);
-          return;
-        }
+      const command={action:"data",ts:Date.now()};
 
+      // Preferred path: state + command travel through ONE observed widget.
+      // Kaggle/Jupyter otherwise synchronize the hidden state textarea and the
+      // hidden Run button independently, so Python can receive the click before
+      // it receives the current pipeline. That race looked like "Fetching…"
+      // followed by an unrelated/stale pipeline failure.
+      if(dispatchAtomicDataRequest(command)){
         bridgeAwaitTimer=setTimeout(()=>{
-          if(
-            execution.status==="running" &&
-            (execution.message==="Starting Python pipeline…" ||
-             execution.message==="Sending pipeline to Python…")
-          ){
+          if(execution.status==="running"&&execution.runtime_kind==="data"&&execution.overall===0&&
+             execution.message==="Sending data pipeline to Python…"){
             execution={
-              status:"error",
-              overall:0,
-              message:"Python kernel did not acknowledge Run. Re-run the Builder cell and confirm Kernel Connected.",
+              status:"error",runtime_kind:"data",overall:0,
+              message:"Python did not acknowledge the data request. Re-run the Builder cell and confirm Kernel Connected.",
               nodes:queued
             };
             applyExecutionProgress(execution);
             setStatus(execution.message);
             updateKernelBadge();
           }
-        },3000);
+        },6000);
+        return;
+      }
+
+      // Compatibility fallback for older installed Python bridges. Keep the
+      // state->command->button delay because those are three separate widget
+      // comms and hosted notebooks do not guarantee immediate synchronization.
+      if(!setBridgeState()){
+        execution={
+          status:"error",runtime_kind:"data",overall:0,
+          message:"Could not send the current data design to Python.",
+          nodes:queued
+        };
+        applyExecutionProgress(execution);
+        setStatus(execution.message);
+        return;
+      }
+
+      const runButton=bridgeControl(bridge.run,"button");
+      if(!runButton){
+        execution={status:"error",runtime_kind:"data",overall:0,message:"Python Fetch Data control was not found.",nodes:queued};
+        applyExecutionProgress(execution);setStatus(execution.message);return;
+      }
+
+      setTimeout(()=>{
+        if(!setBridgeCommand(command)){
+          execution={
+            status:"error",runtime_kind:"data",overall:0,
+            message:"Could not select the Python data pipeline command.",nodes:queued
+          };
+          applyExecutionProgress(execution);setStatus(execution.message);return;
+        }
+        // Give the dedicated command textarea time to reach the Python model
+        // before dispatching the separate Button comm.
+        setTimeout(()=>{
+          if(!clickBridgeButton(runButton)){
+            execution={status:"error",runtime_kind:"data",overall:0,message:"Could not activate the Python data control.",nodes:queued};
+            applyExecutionProgress(execution);setStatus(execution.message);return;
+          }
+          bridgeAwaitTimer=setTimeout(()=>{
+            if(execution.status==="running"&&execution.runtime_kind==="data"&&execution.overall===0&&
+               execution.message==="Sending data pipeline to Python…"){
+              execution={
+                status:"error",runtime_kind:"data",overall:0,
+                message:"Python kernel did not acknowledge Fetch Data. Re-run the Builder cell and confirm Kernel Connected.",
+                nodes:queued
+              };
+              applyExecutionProgress(execution);setStatus(execution.message);updateKernelBadge();
+            }
+          },6000);
+        },220);
       },350);
     }
 
@@ -3120,6 +3145,17 @@ function __MLB_STUDIO_FACTORY__(){
         if(stopButton)clickBridgeButton(stopButton);
         return;
       }
+      if(msg.type==="atomic_data"){
+        if(!ensureBridgeForAction()){
+          sendHostReply(sourceWindow,{type:"progress",payload:{status:"error",runtime_kind:"data",overall:0,message:"Notebook Python bridge is offline."},ts:Date.now()});
+          return;
+        }
+        let requestInput=bridge?.request?bridgeControl(bridge.request,"textarea",false,false):null;
+        if(!requestInput&&bridge?.request)requestInput=bridgeControl(bridge.request,"textarea",true,true);
+        if(requestInput&&setNativeValue(requestInput,JSON.stringify(msg.envelope||{})))return;
+        sendHostReply(sourceWindow,{type:"progress",payload:{status:"error",runtime_kind:"data",overall:0,message:"Atomic Data Fetch bridge is unavailable. Re-run the Builder cell."},ts:Date.now()});
+        return;
+      }
       if(msg.type==="command"){
         const skipStateSync=!!msg.skip_state_sync;
         if(!skipStateSync&&msg.state?.components){state=cp(msg.state);ensureWorkspaces();}
@@ -3225,6 +3261,7 @@ function __MLB_STUDIO_FACTORY__(){
         channel:popoutChannelName,
         state:"__popout_state__",
         command:"__popout_command__",
+        request:"__popout_request__",
         run:"__popout_run__",
         stop:"__popout_stop__",
         progress:"__popout_progress__"

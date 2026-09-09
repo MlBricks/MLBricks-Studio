@@ -3190,7 +3190,7 @@ class Builder:
         action, command = self._bridge_action_from_raw(command_raw)
         navigation = {"persistence_prepare_draft", "persistence_prepare_item", "persistence_load_draft", "persistence_load_item"}
         background = {"persistence_save_draft", "ensure_component_import"}
-        interactive_runtime = {"train", "generate", "serve_start", "serve_stop"}
+        interactive_runtime = {"data", "train", "generate", "serve_start", "serve_stop"}
         request = {
             "state_raw": state_raw or "{}",
             "command_raw": command_raw or "{}",
@@ -3610,6 +3610,63 @@ class Builder:
         )
         self._run_thread.start()
 
+    def _dispatch_bridge_request_envelope(self, raw):
+        """Atomically dispatch one browser request carrying state + command.
+
+        Standard ipywidgets synchronize each hidden widget independently. On
+        hosted notebooks (especially Kaggle), updating the state textarea and
+        then clicking a separate hidden Button can race: Python may receive the
+        click before the new project state. Data Fetch is state-sensitive, so
+        the browser now sends both pieces through one observed textarea. The
+        observer runs in Python and starts/queues the exact snapshot without a
+        second browser comm.
+        """
+        try:
+            envelope = json.loads(raw or "{}")
+        except Exception as exc:
+            self._publish_bridge_progress({
+                "status": "error", "runtime_kind": "data", "phase": "dispatch",
+                "overall": 0, "nodes": {},
+                "message": f"Could not read atomic Studio request: {exc}",
+            })
+            return False
+        if not isinstance(envelope, dict):
+            return False
+
+        state_payload = envelope.get("state")
+        command = envelope.get("command") or {"action": "data"}
+        if not isinstance(command, dict):
+            command = {"action": "data"}
+        action = str(command.get("action") or "data").lower()
+        if action != "data":
+            return False
+        if not isinstance(state_payload, dict) or not state_payload.get("components"):
+            self._publish_bridge_progress({
+                "status": "error", "runtime_kind": "data", "phase": "dispatch",
+                "overall": 0, "nodes": {},
+                "message": "Data Fetch request did not include a valid Data Processing design.",
+            })
+            return False
+
+        widgets = self._bridge_widgets or {}
+        state_widget = widgets.get("state")
+        command_widget = widgets.get("command")
+        if state_widget is None or command_widget is None:
+            return False
+
+        # We are already in Python here, so these assignments are synchronous.
+        # _start_bridge_run() therefore observes exactly this state/command pair.
+        state_widget.value = json.dumps(state_payload)
+        command_widget.value = json.dumps(command)
+        self._publish_bridge_progress({
+            "status": "running", "runtime_kind": "data", "phase": "dispatch",
+            "overall": 0, "nodes": {},
+            "message": "Data request accepted by Python…",
+            "request_id": envelope.get("request_id"),
+        })
+        self._start_bridge_run()
+        return True
+
     def _setup_widget_bridge(self):
         """Create a bridge using only standard ipywidgets (no custom frontend module)."""
         try:
@@ -3628,6 +3685,7 @@ class Builder:
         )
         state_widget = widgets.Textarea(value=json.dumps(self.state), layout=hidden)
         command_widget = widgets.Textarea(value="{}", layout=hidden)
+        request_widget = widgets.Textarea(value="", layout=hidden)
         run_widget = widgets.Button(description="", layout=hidden)
         stop_widget = widgets.Button(description="", layout=hidden)
         progress_widget = widgets.Textarea(
@@ -3638,22 +3696,45 @@ class Builder:
         classes = {
             "state": f"mlb-state-bridge-{suffix}",
             "command": f"mlb-command-bridge-{suffix}",
+            "request": f"mlb-request-bridge-{suffix}",
             "run": f"mlb-run-bridge-{suffix}",
             "stop": f"mlb-stop-bridge-{suffix}",
             "progress": f"mlb-progress-bridge-{suffix}",
         }
         state_widget.add_class(classes["state"])
         command_widget.add_class(classes["command"])
+        request_widget.add_class(classes["request"])
         run_widget.add_class(classes["run"])
         stop_widget.add_class(classes["stop"])
         progress_widget.add_class(classes["progress"])
 
+        def on_atomic_request(change):
+            raw = str((change or {}).get("new") or "")
+            if not raw:
+                return
+            # Clear first so retrying an identical request still emits a change.
+            try:
+                request_widget.value = ""
+            except Exception:
+                pass
+            try:
+                self._dispatch_bridge_request_envelope(raw)
+            except Exception as exc:
+                self.last_run_error = exc
+                self._publish_bridge_progress({
+                    "status": "error", "runtime_kind": "data", "phase": "dispatch",
+                    "overall": 0, "nodes": {},
+                    "message": f"{type(exc).__name__}: {exc}",
+                })
+
+        request_widget.observe(on_atomic_request, names="value")
         run_widget.on_click(lambda _: self._start_bridge_run())
         stop_widget.on_click(lambda _: self.stop())
 
         self._bridge_widgets = {
             "state": state_widget,
             "command": command_widget,
+            "request": request_widget,
             "run": run_widget,
             "stop": stop_widget,
             "progress": progress_widget,
@@ -4144,6 +4225,7 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
                 box = widgets.HBox([
                     bridge_widgets["state"],
                     bridge_widgets["command"],
+                    bridge_widgets["request"],
                     bridge_widgets["run"],
                     bridge_widgets["stop"],
                     bridge_widgets["progress"],

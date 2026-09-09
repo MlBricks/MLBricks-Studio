@@ -66,3 +66,22 @@ def test_generate_bypasses_active_background_bridge_worker(tmp_path, monkeypatch
     assert calls[0]["generation_config"]["prompt"] == "hello"
     assert widgets["command"].value == "{}"
     assert builder._bridge_pending_requests == []
+
+
+def test_data_fetch_is_prioritized_ahead_of_background_bridge_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("MLBRICKS_STUDIO_HOME", str(tmp_path))
+    builder = Builder()
+    state = json.dumps(builder.to_dict())
+    builder._bridge_pending_requests = [
+        {"state_raw": state, "command_raw": json.dumps({"action":"persistence_save_draft"}), "action":"persistence_save_draft", "component_type":""},
+        {"state_raw": state, "command_raw": json.dumps({"action":"ensure_component_import", "component_type":"esa"}), "action":"ensure_component_import", "component_type":"esa"},
+    ]
+
+    queued = builder._queue_bridge_widget_request(
+        state,
+        json.dumps({"action":"data", "ts":123}),
+    )
+
+    assert queued is True
+    assert builder._bridge_pending_requests[0]["action"] == "data"
+    assert all(item["action"] not in {"persistence_save_draft", "ensure_component_import"} for item in builder._bridge_pending_requests[1:])
