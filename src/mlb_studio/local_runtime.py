@@ -48,6 +48,9 @@ def detect_local_kind(path: str | Path) -> dict[str, Any]:
             try:
                 payload = json.loads((p / 'metadata.json').read_text(encoding='utf-8'))
                 if payload.get('format') == 'mlbricks.model':
+                    artifact_meta = payload.get('metadata') or {}
+                    if str(artifact_meta.get('kind') or '').lower() == 'training_checkpoint':
+                        return {'kind': 'training_checkpoint', 'label': 'Training Checkpoint'}
                     return {'kind': 'model_artifact', 'label': 'MLBricks Model'}
             except Exception:
                 # Still treat the canonical model.pt + metadata.json layout as
@@ -257,6 +260,11 @@ def scan_local_files(roots: list[str] | None = None, *, max_entries: int = 300, 
                 dirs[:] = []
                 continue
             current_kind = detect_local_kind(current_path)['kind']
+            if current_kind == 'training_checkpoint':
+                # Intermediate Studio training checkpoints are resume/recovery
+                # artifacts, not separate models for Gallery/Local Repository.
+                dirs[:] = []
+                continue
             if current_kind in {'dataset_dir', 'bundle_dir', 'model_artifact'}:
                 add(current_path, root)
                 dirs[:] = []

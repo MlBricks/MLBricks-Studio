@@ -1718,22 +1718,22 @@ function __MLB_STUDIO_FACTORY__(){
       return execution.status==="running" && execution.runtime_kind==="train";
     }
 
-    function startTrainingFromRuntime(entry){
+    function startTrainingFromRuntime(entry,overwriteExisting=false){
       entry=liveBuiltModel(entry);
       if(!entry || trainingIsRunning())return;
       entry.training_status="starting";
-      entry.training_history=[];
+      if(!overwriteExisting)entry.training_history=[];
       entry.training_live={
         status:"running",phase:"starting",overall:0,step:0,max_steps:entry.training_config?.max_steps??null,
         tokens_seen:0,tokens_per_sec:null,avg_tokens_per_sec:null,end_to_end_tokens_per_sec:null,avg_end_to_end_tokens_per_sec:null,loss:null,ppl:null,val_loss:null,val_ppl:null,
         memory_allocated_gb:null,memory_reserved_gb:null,memory_peak_gb:null,memory_total_gb:null,
-        elapsed_seconds:null,compile_seconds:null,message:"Starting training in Python…"
+        elapsed_seconds:null,compile_seconds:null,message:overwriteExisting?"Override confirmed. Replacing existing model artifact…":"Starting training in Python…"
       };
       const alreadyStatus=runtimePanel?.mode==="train"&&runtimePanel?.modelId===entry.id&&runtimePanel?.tab==="status";
       runtimePanel={mode:"train",modelId:entry.id,tab:"status"};
       if(alreadyStatus)refreshReactRuntimeStatus(entry,"train");
       else draw();
-      setTimeout(()=>requestRuntimeCommand("train",entry),20);
+      setTimeout(()=>requestRuntimeCommand("train",entry,{overwriteExisting}),20);
     }
 
     function trainingActionButton(entry,valid){
@@ -2167,22 +2167,28 @@ function __MLB_STUDIO_FACTORY__(){
       return setNativeValue(input,JSON.stringify(command||{}));
     }
 
-    function dispatchAtomicDataRequest(command){
+    function dispatchAtomicStateRequest(command,kind="studio",popoutType="atomic_request"){
       const supportsAtomic=isPopout?!!hostBridge?.request:!!bridge?.request;
       if(!supportsAtomic)return false;
+      const action=String(command?.action||kind||"studio");
       const envelope={
-        request_id:"data:"+String(payload.instance_id||root.id||"studio")+":"+Date.now()+":"+Math.random().toString(36).slice(2,8),
+        request_id:action+":"+String(payload.instance_id||root.id||"studio")+":"+Date.now()+":"+Math.random().toString(36).slice(2,8),
         state:bridgeStatePayload(),
-        command:cp(command||{action:"data",ts:Date.now()})
+        command:cp(command||{action,ts:Date.now()})
       };
       if(isPopout){
         if(!popoutHostConnected)return false;
-        return sendPopoutMessage({type:"atomic_data",source:"popout",envelope,ts:Date.now()});
+        if(popoutType==="atomic_data")return sendPopoutMessage({type:"atomic_data",source:"popout",envelope,ts:Date.now()});
+        return sendPopoutMessage({type:"atomic_request",source:"popout",envelope,ts:Date.now()});
       }
       let input=bridgeControl(bridge.request,"textarea",false,false);
       if(!input)input=bridgeControl(bridge.request,"textarea",true,true);
       if(!input)return false;
       return setNativeValue(input,JSON.stringify(envelope));
+    }
+
+    function dispatchAtomicDataRequest(command){
+      return dispatchAtomicStateRequest(command||{action:"data",ts:Date.now()},"data","atomic_data");
     }
 
     function markExecutionLocally(kind,message){
@@ -2311,7 +2317,7 @@ function __MLB_STUDIO_FACTORY__(){
       },40);
     }
 
-    function requestRuntimeCommand(action,entry){
+    function requestRuntimeCommand(action,entry,options={}){
       entry=liveBuiltModel(entry);
       if(!entry)return;
       if(action==="generate"&&trainingLocksGeneration(entry)){
@@ -2324,7 +2330,19 @@ function __MLB_STUDIO_FACTORY__(){
       }
       const residentFastLane=action==="generate";
       const command={action,model_id:entry.id,ts:Date.now()};
+      if(options?.overwriteExisting)command.overwrite_existing=true;
       if(residentFastLane)command.generation_config=cp(entry.generation_config||{});
+
+      const progressInput=bridgeControl(bridge.progress,"textarea");
+      lastProgressRaw=progressInput?.value||lastProgressRaw;
+      execution={status:"running",runtime_kind:action,phase:"starting",overall:0,model_id:entry.id,message:action==="train"?"Starting training in Python…":"Preparing resident generation…",nodes:{}};
+      applyExecutionProgress(execution);setStatus(execution.message);
+
+      // Training is state-sensitive just like Data Fetch. Send the exact project
+      // snapshot + command atomically so Kaggle cannot start a retrain against an
+      // older model/training configuration. Generation remains state-independent
+      // because it uses the resident Python model and sends only sampling config.
+      if(action==="train" && dispatchAtomicStateRequest(command,"train"))return;
 
       // Generation is a chat-style hot path. The Python Builder already owns
       // the trained nn.Module/tokenizer in RAM/VRAM, so do not serialize and
@@ -2338,10 +2356,6 @@ function __MLB_STUDIO_FACTORY__(){
       }
       const button=bridgeControl(bridge.run,"button");
       if(!button){if(isPopout)pendingBroadcastSkipState=false;setStatus("Python runtime control was not found.");return;}
-      const progressInput=bridgeControl(bridge.progress,"textarea");
-      lastProgressRaw=progressInput?.value||lastProgressRaw;
-      execution={status:"running",runtime_kind:action,phase:"starting",overall:0,message:action==="train"?"Starting training in Python…":"Preparing resident generation…",nodes:{}};
-      applyExecutionProgress(execution);setStatus(execution.message);
       setTimeout(()=>{clickBridgeButton(button);},20);
     }
 
@@ -2518,7 +2532,9 @@ function __MLB_STUDIO_FACTORY__(){
       setTimeout(()=>{clickBridgeButton(button);},300);
     }
 
-    function requestRun(){
+    function requestRun(){return requestRunWithOverwrite(false);}
+
+    function requestRunWithOverwrite(overwriteExisting=false){
       if(state.active_workspace!=="data"){
         setStatus("Model execution is not compiled yet. Run is currently available for Data Processing.");
         draw();
@@ -2563,6 +2579,7 @@ function __MLB_STUDIO_FACTORY__(){
       if(bridgeAwaitTimer)clearTimeout(bridgeAwaitTimer);
 
       const command={action:"data",ts:Date.now()};
+      if(overwriteExisting)command.overwrite_existing=true;
 
       // Preferred path: state + command travel through ONE observed widget.
       // Kaggle/Jupyter otherwise synchronize the hidden state textarea and the
@@ -2678,7 +2695,56 @@ function __MLB_STUDIO_FACTORY__(){
       if(bar)bar.style.width=pct+"%";
     }
 
+    let overwritePromptActive=false;
+    function handleOverwriteRequired(next){
+      const req=next?.overwrite_request||{};
+      const kind=String(req.kind||next.runtime_kind||"artifact").toLowerCase();
+      const displayKind=kind==="dataset"?"Dataset":kind==="model"?"Model":"Artifact";
+      const name=String(req.name||displayKind);
+      const paths=Array.isArray(req.paths)?req.paths.filter(Boolean):[];
+
+      // In Full Window mode the visible detached window owns confirmation UI.
+      // The hidden notebook host only forwards the request so the user never
+      // receives two confirmation dialogs for one collision.
+      if(!isPopout&&popoutPeerConnected){
+        sendPopoutMessage({type:"progress",source:"host",payload:cp(next),ts:Date.now()});
+        return;
+      }
+      if(overwritePromptActive)return;
+      overwritePromptActive=true;
+      const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
+      const locationText=paths.length?"\n\nExisting location:\n"+paths.join("\n"):"";
+      const detail=displayKind+" \""+name+"\" already exists."+locationText+
+        "\n\nOverride it? Studio will keep the existing artifact as a temporary backup and restore it automatically if the replacement fails.";
+      let approved=false;
+      try{approved=!!(win&&typeof win.confirm==="function"&&win.confirm(detail));}catch(_){}
+      overwritePromptActive=false;
+
+      if(approved){
+        setStatus("Override confirmed for "+displayKind.toLowerCase()+" \""+name+"\".");
+        if(kind==="dataset"||next.runtime_kind==="data"){
+          requestRunWithOverwrite(true);
+          return;
+        }
+        if(kind==="model"||next.runtime_kind==="train"){
+          const entry=builtModelById(next.model_id||runtimePanel?.modelId);
+          if(entry){startTrainingFromRuntime(entry,true);return;}
+        }
+      }
+
+      const cancelled={
+        status:"stopped",runtime_kind:next.runtime_kind||kind,phase:"overwrite_cancelled",overall:0,
+        model_id:next.model_id||null,message:"Override cancelled. Existing "+displayKind.toLowerCase()+" was left unchanged.",nodes:next.nodes||{}
+      };
+      applyExecutionProgress(cancelled);
+      setStatus(cancelled.message);
+    }
+
     function applyExecutionProgress(next){
+      if(next?.status==="overwrite_required"&&next?.overwrite_request){
+        handleOverwriteRequired(next);
+        return;
+      }
       if(!next||typeof next!=="object")return;
       if(next.runtime_kind==="import"){
         if(!isPopout)sendPopoutMessage({type:"progress",source:"host",payload:cp(next),ts:Date.now()});
@@ -2921,6 +2987,21 @@ function __MLB_STUDIO_FACTORY__(){
         }
         if(next.message)setStatus(next.message);
         if(runtimePanel?.mode==="serve")setTimeout(draw,80);
+      }
+
+      if(next.runtime_kind==="maintenance"){
+        if(next.status==="done"&&next.phase==="delete_model"){
+          const modelId=String(next.maintenance_result?.model_id||next.model_id||"");
+          if(modelId){
+            state.model_outputs=(state.model_outputs||[]).filter(item=>String(item.id)!==modelId);
+            if(runtimePanel?.modelId===modelId)runtimePanel=null;
+            if(outputDirectorySelection===modelId)outputDirectorySelection=null;
+            selected=null;
+          }
+        }
+        if(next.message)setStatus(next.message);
+        if(next.status==="done"||next.status==="error"||next.status==="stopped")setTimeout(()=>draw(true),40);
+        return;
       }
 
       if(next.prepared_dataset){
@@ -3173,15 +3254,17 @@ function __MLB_STUDIO_FACTORY__(){
         if(stopButton)clickBridgeButton(stopButton);
         return;
       }
-      if(msg.type==="atomic_data"){
+      if(msg.type==="atomic_data"||msg.type==="atomic_request"){
+        const action=String(msg.envelope?.command?.action||"data");
+        const runtimeKind=action.startsWith("delete_")?"maintenance":action;
         if(!ensureBridgeForAction()){
-          sendHostReply(sourceWindow,{type:"progress",payload:{status:"error",runtime_kind:"data",overall:0,message:"Notebook Python bridge is offline."},ts:Date.now()});
+          sendHostReply(sourceWindow,{type:"progress",payload:{status:"error",runtime_kind:runtimeKind,overall:0,message:"Notebook Python bridge is offline."},ts:Date.now()});
           return;
         }
         let requestInput=bridge?.request?bridgeControl(bridge.request,"textarea",false,false):null;
         if(!requestInput&&bridge?.request)requestInput=bridgeControl(bridge.request,"textarea",true,true);
         if(requestInput&&setNativeValue(requestInput,JSON.stringify(msg.envelope||{})))return;
-        sendHostReply(sourceWindow,{type:"progress",payload:{status:"error",runtime_kind:"data",overall:0,message:"Atomic Data Fetch bridge is unavailable. Re-run the Builder cell."},ts:Date.now()});
+        sendHostReply(sourceWindow,{type:"progress",payload:{status:"error",runtime_kind:runtimeKind,overall:0,message:"Atomic Studio request bridge is unavailable. Re-run the Builder cell."},ts:Date.now()});
         return;
       }
       if(msg.type==="command"){
@@ -5326,12 +5409,18 @@ function __MLB_STUDIO_FACTORY__(){
         applyExecutionProgress(execution);setStatus(execution.message);return false;
       }
       const command={action,...cp(config||{}),ts:Date.now()};
+      const progressInput=bridgeControl(bridge.progress,"textarea");lastProgressRaw=progressInput?.value||lastProgressRaw;
+      execution={status:"running",runtime_kind:"maintenance",phase:action,overall:0,model_id:config?.model_id||null,message,nodes:{}};
+      applyExecutionProgress(execution);setStatus(message);
+
+      // Deleting a model/dataset changes the same project snapshot Python must
+      // mutate. Send it atomically so hosted notebooks cannot apply an older
+      // state after deletion or begin deletion against a half-updated registry.
+      if((action==="delete_model"||action==="delete_dataset")&&dispatchAtomicStateRequest(command,action))return true;
+
       if(!setBridgeState()||!setBridgeCommand(command)){setStatus("Could not send maintenance command to Python.");return false;}
       const button=bridgeControl(bridge.run,"button");
       if(!button){setStatus("Python maintenance control was not found.");return false;}
-      const progressInput=bridgeControl(bridge.progress,"textarea");lastProgressRaw=progressInput?.value||lastProgressRaw;
-      execution={status:"running",runtime_kind:"maintenance",phase:action,overall:0,message,nodes:{}};
-      applyExecutionProgress(execution);setStatus(message);
       setTimeout(()=>{clickBridgeButton(button);},120);
       return true;
     }
@@ -5367,6 +5456,17 @@ function __MLB_STUDIO_FACTORY__(){
     function deleteBuiltModel(entry){
       entry=liveBuiltModel(entry);
       if(!entry)return;
+      const modelId=String(entry.id||"");
+      const trainingState=String(entry.training_live?.status||"").toLowerCase();
+      const generationState=String(entry.generation_live?.status||"").toLowerCase();
+      const activeExecution=execution.status==="running"&&
+        ["train","generate"].includes(String(execution.runtime_kind||""))&&
+        String(execution.model_id||runtimePanel?.modelId||"")===modelId;
+      const activeLive=[trainingState,generationState].some(v=>["starting","running","stopping"].includes(v));
+      if(activeExecution||activeLive){
+        setStatus("Stop this model's active training/generation run before deleting it.");
+        return;
+      }
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
       const ok=!win||typeof win.confirm!=="function"||win.confirm(
         'Delete "'+entry.name+'" from the Studio Model Repository?\n\n'+
@@ -5374,11 +5474,9 @@ function __MLB_STUDIO_FACTORY__(){
       );
       if(!ok)return;
       checkpoint("Delete Model "+entry.name);
-      const modelId=entry.id;
-      state.model_outputs=(state.model_outputs||[]).filter(item=>item.id!==modelId);
-      if(runtimePanel?.modelId===modelId)runtimePanel=null;
-      if(outputDirectorySelection===modelId)outputDirectorySelection=null;
-      selected=null;
+      // Keep the card/state until Python confirms deletion. Optimistically
+      // removing it used to let in-flight progress update a model that no longer
+      // existed in the browser and made retries race the Python registry.
       requestMaintenanceCommand("delete_model",{model_id:modelId},"Deleting "+entry.name+" from Studio…");
       draw();
     }

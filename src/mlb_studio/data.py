@@ -896,7 +896,14 @@ def prepared_dataset_output(
                 "Save To Disk requires a Dataset/DatasetDict. "
                 "Place Prepared Dataset before Batch/DataLoader, or disable Save To Disk."
             )
-        dataset.save_to_disk(str(path))
+        target = Path(path).expanduser()
+        if target.exists():
+            raise FileExistsError(
+                f"Prepared dataset path already exists: {target}. "
+                "Choose another Dataset Name or Save Path; existing data is never overwritten."
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        dataset.save_to_disk(str(target))
     return dataset
 
 

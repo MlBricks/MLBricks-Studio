@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 from collections import deque
@@ -45,6 +46,30 @@ _FRONTEND_ASSETS_LOCK = threading.Lock()
 _FRONTEND_BUNDLE_CACHE = None
 _WINDOWS_CUDA_PROBE_CACHE = None
 _MACOS_MPS_PROBE_CACHE = None
+
+
+class ArtifactConflictError(FileExistsError):
+    """A local Studio artifact exists and requires explicit overwrite approval."""
+
+    def __init__(self, *, kind, name, paths=None, message=None):
+        self.kind = str(kind or "artifact")
+        self.name = str(name or self.kind.title())
+        self.paths = [str(x) for x in (paths or []) if x]
+        if message is None:
+            where = f" at {self.paths[0]}" if self.paths else ""
+            message = (
+                f'{self.kind.title()} "{self.name}" already exists{where}. '
+                'Choose another name/path, or confirm Override to replace the existing local artifact.'
+            )
+        super().__init__(message)
+
+    def payload(self):
+        return {
+            "kind": self.kind,
+            "name": self.name,
+            "paths": list(self.paths),
+            "message": str(self),
+        }
 
 
 def _probe_windows_torch_cuda():
@@ -236,6 +261,7 @@ class Builder:
         self._bridge_queue_lock = threading.Lock()
         self._bridge_drain_scheduled = False
         self._active_bridge_action = None
+        self._active_bridge_model_id = None
         self.last_data_result = None
         self.last_run_error = None
         self.trained_models = {}
@@ -786,23 +812,217 @@ class Builder:
             elif t=="prepared_dataset": snapshot["output"] = value
         return snapshot
 
-    def _register_prepared_dataset(self, result):
+    @staticmethod
+    def _artifact_name_key(value):
+        return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+    @staticmethod
+    def _artifact_slug(value):
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip()).strip("._-")
+        return (slug or "prepared-dataset").lower()
+
+    def _disk_prepared_dataset_records(self):
+        """Return tiny metadata records for datasets persisted by Studio.
+
+        Only ``mlbricks_dataset.json`` markers are read. Dataset bodies are never
+        loaded just to detect a name/path collision.
+        """
+        records = []
+        data_root = Path((self.local_environment.get("paths") or {}).get("data") or "mlbricks_workspace/data")
+        try:
+            if not data_root.exists():
+                return records
+            for index, marker in enumerate(data_root.rglob("mlbricks_dataset.json")):
+                if index >= 1000:
+                    break
+                try:
+                    payload = json.loads(marker.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                records.append({
+                    "name": str(payload.get("name") or marker.parent.name),
+                    "path": str(marker.parent.resolve()),
+                    "metadata": payload if isinstance(payload, dict) else {},
+                })
+        except OSError:
+            pass
+        return records
+
+    def _disk_prepared_dataset_names(self):
+        return {
+            self._artifact_name_key(item.get("name"))
+            for item in self._disk_prepared_dataset_records()
+            if self._artifact_name_key(item.get("name"))
+        }
+
+    @staticmethod
+    def _remove_local_artifact_path(path):
+        target = Path(path)
+        if not target.exists() and not target.is_symlink():
+            return
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        else:
+            shutil.rmtree(target)
+
+    def _stage_local_directory_override(self, path):
+        """Move an existing artifact aside so replacement is rollback-safe."""
+        target = Path(path).expanduser()
+        if not target.exists() and not target.is_symlink():
+            return None
+        backup = target.with_name(target.name + f".mlb-override-backup-{uuid.uuid4().hex[:10]}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(target), str(backup))
+        return {"target": str(target), "backup": str(backup)}
+
+    def _commit_local_directory_overrides(self, staged):
+        for item in staged or []:
+            backup = Path(item["backup"])
+            if backup.exists() or backup.is_symlink():
+                self._remove_local_artifact_path(backup)
+
+    def _rollback_local_directory_overrides(self, staged):
+        for item in reversed(staged or []):
+            target = Path(item["target"])
+            backup = Path(item["backup"])
+            try:
+                if target.exists() or target.is_symlink():
+                    self._remove_local_artifact_path(target)
+                if backup.exists() or backup.is_symlink():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(backup), str(target))
+            except Exception:
+                # Never hide the original training/fetch failure with rollback
+                # cleanup. A leftover *.mlb-override-backup-* remains recoverable.
+                pass
+
+    def _preflight_prepared_dataset_output(self, *, overwrite_existing=False):
+        """Validate dataset identity and return collision/replacement metadata.
+
+        A duplicate is never silently replaced. Without explicit confirmation an
+        ``ArtifactConflictError`` is raised. With confirmation, the caller can
+        stage the old directory and replace it transactionally.
+        """
+        node = self._prepared_output_node() or {}
+        params = node.setdefault("params", {})
+        requested_name = str(params.get("dataset_name") or "Prepared Dataset").strip() or "Prepared Dataset"
+        name_key = self._artifact_name_key(requested_name)
+
+        registry_matches = [
+            item for item in self.state.setdefault("prepared_datasets", [])
+            if self._artifact_name_key(item.get("name")) == name_key
+        ]
+        disk_matches = [
+            item for item in self._disk_prepared_dataset_records()
+            if self._artifact_name_key(item.get("name")) == name_key
+        ]
+
+        save_to_disk = str(params.get("save_to_disk", "false")).lower() == "true"
+        target = None
+        if save_to_disk:
+            data_root = Path((self.local_environment.get("paths") or {}).get("data") or "mlbricks_workspace/data").expanduser()
+            configured = Path(str(params.get("path") or (data_root / "prepared_dataset"))).expanduser()
+            legacy_defaults = {
+                Path("mlbricks_workspace/data/prepared_dataset"),
+                Path("mlbricks/data/prepared_dataset"),
+            }
+            try:
+                configured_resolved = configured.resolve()
+                placeholder_resolved = (data_root / "prepared_dataset").resolve()
+                use_managed_name = configured_resolved == placeholder_resolved
+            except Exception:
+                use_managed_name = False
+            if configured in legacy_defaults:
+                use_managed_name = True
+            target = (data_root / self._artifact_slug(requested_name) if use_managed_name else configured).expanduser()
+            params["path"] = str(target)
+
+        conflicting_paths = []
+        for item in registry_matches:
+            if item.get("path"):
+                conflicting_paths.append(str(Path(item["path"]).expanduser()))
+        for item in disk_matches:
+            if item.get("path"):
+                conflicting_paths.append(str(Path(item["path"]).expanduser()))
+        if target is not None and (target.exists() or target.is_symlink()):
+            conflicting_paths.append(str(target))
+
+        # Also catch a target path owned by another registered dataset name.
+        if target is not None:
+            try:
+                target_resolved = str(target.resolve())
+            except Exception:
+                target_resolved = str(target)
+            for item in self.state.get("prepared_datasets") or []:
+                value = item.get("path")
+                if not value:
+                    continue
+                try:
+                    existing_resolved = str(Path(value).expanduser().resolve())
+                except Exception:
+                    existing_resolved = str(value)
+                if existing_resolved == target_resolved and item not in registry_matches:
+                    registry_matches.append(item)
+                    conflicting_paths.append(str(Path(value).expanduser()))
+
+        # Preserve order but deduplicate equivalent relative/absolute paths.
+        normalized_paths = []
+        seen_paths = set()
+        for value in conflicting_paths:
+            try:
+                key = str(Path(value).expanduser().resolve())
+            except Exception:
+                key = str(Path(value).expanduser())
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            normalized_paths.append(key)
+        conflicting_paths = normalized_paths
+        has_conflict = bool(registry_matches or disk_matches or conflicting_paths)
+        if has_conflict and not overwrite_existing:
+            if disk_matches:
+                collision_text = (
+                    f'Prepared dataset "{requested_name}" already exists in the local Studio data directory'
+                    + (f' at {conflicting_paths[0]}' if conflicting_paths else '')
+                    + '. Choose a different Dataset Name or Save Path, or confirm Override to replace it.'
+                )
+            else:
+                collision_text = (
+                    f'Prepared dataset "{requested_name}" already exists'
+                    + (f' at {conflicting_paths[0]}' if conflicting_paths else '')
+                    + '. Choose a different Dataset Name or Save Path, or confirm Override to replace it.'
+                )
+            raise ArtifactConflictError(
+                kind="dataset",
+                name=requested_name,
+                paths=conflicting_paths,
+                message=collision_text,
+            )
+
+        replacement = registry_matches[0] if registry_matches else None
+        return {
+            "name": requested_name,
+            "path": str(target) if target is not None else None,
+            "replace_metadata": replacement,
+            "registry_conflicts": registry_matches,
+            "disk_conflicts": disk_matches,
+            "conflicting_paths": conflicting_paths,
+        }
+
+    def _register_prepared_dataset(self, result, *, overwrite_existing=False, preflight=None):
         node = self._prepared_output_node() or {}
         params = node.get("params") or {}
         requested_name = str(params.get("dataset_name") or "Prepared Dataset").strip() or "Prepared Dataset"
+        name_key = self._artifact_name_key(requested_name)
+        existing = [
+            item for item in self.state.setdefault("prepared_datasets", [])
+            if self._artifact_name_key(item.get("name")) == name_key
+        ]
+        if existing and not overwrite_existing:
+            raise ArtifactConflictError(kind="dataset", name=requested_name, paths=[x.get("path") for x in existing if x.get("path")])
 
-        existing_meta = None
-        for item in self.state.setdefault("prepared_datasets", []):
-            if str(item.get("name", "")).strip().lower() == requested_name.lower():
-                existing_meta = item
-                break
-
-        dataset_id = (
-            existing_meta.get("id")
-            if existing_meta
-            else f"dataset_{uuid.uuid4().hex[:12]}"
-        )
-
+        replacement = (preflight or {}).get("replace_metadata") or (existing[0] if existing else None)
+        dataset_id = str((replacement or {}).get("id") or f"dataset_{uuid.uuid4().hex[:12]}")
         summary = self._summarize_prepared_result(result)
         save_to_disk = str(params.get("save_to_disk", "false")).lower() == "true"
         path = str(params.get("path") or "") if save_to_disk else None
@@ -818,16 +1038,96 @@ class Builder:
             **summary,
         }
 
-        registry = self.state.setdefault("prepared_datasets", [])
-        if existing_meta:
-            index = registry.index(existing_meta)
-            registry[index] = metadata
-        else:
-            registry.append(metadata)
+        if save_to_disk and path:
+            try:
+                marker = Path(path) / "mlbricks_dataset.json"
+                marker.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+            except OSError as exc:
+                raise RuntimeError(f"Dataset was prepared but Studio could not write its metadata marker: {exc}") from exc
 
+        # Replace conflicting registry entries only after the new dataset has
+        # completed successfully. Keeping the same id preserves model selections.
+        conflicts = (preflight or {}).get("registry_conflicts") or existing
+        conflict_ids = {str(x.get("id")) for x in conflicts if x.get("id") and str(x.get("id")) != dataset_id}
+        next_items = []
+        replaced = False
+        for item in self.state.setdefault("prepared_datasets", []):
+            iid = str(item.get("id") or "")
+            if iid == dataset_id:
+                if not replaced:
+                    next_items.append(metadata)
+                    replaced = True
+                continue
+            if iid in conflict_ids:
+                self.prepared_datasets.pop(iid, None)
+                continue
+            next_items.append(item)
+        if not replaced:
+            next_items.append(metadata)
+        self.state["prepared_datasets"] = next_items
         self.prepared_datasets[dataset_id] = result
         self.state.setdefault("project", {})["dataset"] = requested_name
         return metadata
+
+    def run_data_pipeline(self, progress_callback=None, *, overwrite_existing=False):
+        """Execute Data Processing with explicit, rollback-safe overwrite support."""
+        self._stop_event.clear()
+        self.last_run_error = None
+        last_progress = {}
+        staged = []
+
+        def relay(payload):
+            enriched = dict(payload or {})
+            enriched.setdefault("runtime_kind", "data")
+            last_progress.clear()
+            last_progress.update(enriched)
+            if progress_callback:
+                progress_callback(enriched)
+
+        try:
+            preflight = self._preflight_prepared_dataset_output(overwrite_existing=overwrite_existing)
+            if overwrite_existing:
+                # Deepest paths first prevents a rare parent/child collision from
+                # invalidating the second path while backups are staged.
+                candidates = [Path(value).expanduser() for value in (preflight.get("conflicting_paths") or [])]
+                candidates.sort(key=lambda value: len(value.parts), reverse=True)
+                for path in candidates:
+                    if path.exists() or path.is_symlink():
+                        staged_item = self._stage_local_directory_override(path)
+                        if staged_item:
+                            staged.append(staged_item)
+
+            self.last_data_result = execute_data_pipeline(
+                self.state,
+                progress_callback=relay,
+                stop_event=self._stop_event,
+                credential_resolver=lambda provider, name: self.persistence.get_credentials(provider, name),
+            )
+            metadata = self._register_prepared_dataset(
+                self.last_data_result,
+                overwrite_existing=overwrite_existing,
+                preflight=preflight,
+            )
+            self._commit_local_directory_overrides(staged)
+            staged = []
+
+            final_payload = dict(last_progress or {})
+            final_payload.update({
+                "status": "done",
+                "runtime_kind": "data",
+                "overall": 100,
+                "message": f'Data ready: {metadata["name"]}',
+                "prepared_dataset": metadata,
+                "available_datasets": self.available_datasets(),
+            })
+            if progress_callback:
+                progress_callback(final_payload)
+            return self.last_data_result
+        except Exception as exc:
+            if staged:
+                self._rollback_local_directory_overrides(staged)
+            self._remember_run_error(exc)
+            raise
 
     def available_datasets(self):
         """Return serializable metadata for every prepared dataset in this project."""
@@ -894,6 +1194,10 @@ class Builder:
                 progress_callback(enriched)
 
         try:
+            # Validate the output identity before downloading/processing anything.
+            # Duplicate names and managed paths are rejected early rather than
+            # creating another copy and discovering the collision afterward.
+            self._preflight_prepared_dataset_output()
             self.last_data_result = execute_data_pipeline(
                 self.state,
                 progress_callback=relay,
@@ -916,7 +1220,7 @@ class Builder:
 
             return self.last_data_result
         except Exception as exc:
-            self.last_run_error = exc
+            self._remember_run_error(exc)
             raise
 
     def _model_output(self, model_id):
@@ -930,6 +1234,80 @@ class Builder:
             if item.get("id") == dataset_id:
                 return item
         raise KeyError(f"Prepared dataset metadata not found: {dataset_id!r}")
+
+    def _remember_run_error(self, exc):
+        """Remember an error without retaining its traceback/GPU object graph.
+
+        Keeping the original exception object in ``last_run_error`` retains every
+        traceback frame. A failed training/compile frame can own the model,
+        optimizer, warm-up batches, and CUDA tensors, which prevents them from
+        being reclaimed and makes the next retrain/delete fail unpredictably.
+        Store only a detached diagnostic exception instead.
+        """
+        try:
+            tb = getattr(exc, "__traceback__", None)
+            if tb is not None:
+                try:
+                    traceback.clear_frames(tb)
+                except Exception:
+                    pass
+            try:
+                exc.__traceback__ = None
+            except Exception:
+                pass
+        finally:
+            self.last_run_error = RuntimeError(f"{type(exc).__name__}: {exc}")
+        return self.last_run_error
+
+    @staticmethod
+    def _reset_torch_compiler(torch):
+        """Best-effort reset of torch.compile/Dynamo state between model lives."""
+        reset_done = False
+        try:
+            compiler = getattr(torch, "compiler", None)
+            reset = getattr(compiler, "reset", None)
+            if callable(reset):
+                reset()
+                reset_done = True
+        except Exception:
+            pass
+        if not reset_done:
+            try:
+                dynamo = getattr(torch, "_dynamo", None)
+                reset = getattr(dynamo, "reset", None)
+                if callable(reset):
+                    reset()
+                    reset_done = True
+            except Exception:
+                pass
+        return reset_done
+
+    def _cleanup_failed_runtime(self, *, reset_compiler=False):
+        """Drop traceback-held references and release allocator/compiler caches."""
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if reset_compiler:
+                self._reset_torch_compiler(torch)
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                try:
+                    ipc_collect = getattr(torch.cuda, "ipc_collect", None)
+                    if callable(ipc_collect):
+                        ipc_collect()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        gc.collect()
 
     def _release_cached_runtime_models(self, *, preserve_server_models=True, reset_compiler=False):
         """Release cached compiled model objects and return memory cleanup details.
@@ -964,14 +1342,7 @@ class Builder:
 
         compiler_reset = False
         if torch is not None and reset_compiler:
-            try:
-                dynamo = getattr(torch, "_dynamo", None)
-                reset = getattr(dynamo, "reset", None)
-                if callable(reset):
-                    reset()
-                    compiler_reset = True
-            except Exception:
-                pass
+            compiler_reset = self._reset_torch_compiler(torch)
 
         after_allocated = after_reserved = None
         if torch is not None and cuda_available:
@@ -1051,12 +1422,32 @@ class Builder:
         }
 
     def delete_model_output(self, model_id):
-        """Remove a model registry entry and its live/cache references, not disk files."""
+        """Remove a model registry entry and its live/cache references, not disk files.
+
+        Deletion is deliberately refused while the same model is actively training
+        or generating. Removing the registry/cache underneath a live worker used to
+        produce follow-on KeyError/AssertionError failures and could leave compiled
+        CUDA graphs alive until the next run.
+        """
         import gc
 
         model_id = str(model_id or "").strip()
         if not model_id:
             raise ValueError("Model id is required.")
+        active_same_model = (
+            self._active_bridge_action in {"train", "generate"}
+            and str(self._active_bridge_model_id or "") == model_id
+        )
+        hot_thread = self._hot_generation_thread
+        hot_same_model = bool(
+            hot_thread is not None and hot_thread.is_alive()
+            and str(self._hot_generation_model_id or "") == model_id
+        )
+        if active_same_model or hot_same_model:
+            raise RuntimeError(
+                "Stop the active training/generation run before deleting this model."
+            )
+
         metadata = None
         for item in self.state.get("model_outputs") or []:
             if str(item.get("id")) == model_id:
@@ -1069,34 +1460,57 @@ class Builder:
                 server.stop()
             except Exception:
                 pass
-        had_cache = self.trained_models.pop(model_id, None) is not None
+
+        cached_runtime = self.trained_models.pop(model_id, None)
+        had_cache = cached_runtime is not None
+        compiled_cache = bool(
+            cached_runtime
+            and getattr((cached_runtime or {}).get("compiled"), "compile_used", False)
+        )
+        if cached_runtime is not None:
+            try:
+                cached_runtime.clear()
+            except Exception:
+                pass
+            del cached_runtime
+
         self.state["model_outputs"] = [
             item for item in (self.state.get("model_outputs") or [])
             if str(item.get("id")) != model_id
         ]
+        # A prior failed run must not pin its traceback/model after deletion.
+        self.last_run_error = None
         gc.collect()
         try:
             import torch
+            if compiled_cache:
+                self._reset_torch_compiler(torch)
             if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
                 torch.cuda.empty_cache()
         except Exception:
             pass
+        gc.collect()
         return {
             "model_id": model_id,
             "name": (metadata or {}).get("name") or model_id,
             "stopped_server": server is not None,
             "released_runtime_cache": had_cache,
+            "compiler_cache_reset": compiled_cache,
         }
 
-    def train_model(self, model_id, *, progress_callback=None):
-        """Compile and really train a supported Builder language model."""
+    def train_model(self, model_id, *, progress_callback=None, overwrite_existing=False):
+        """Compile/train a model with explicit, rollback-safe artifact overwrite."""
         if progress_callback:
             progress_callback({
                 "status":"running","runtime_kind":"train","phase":"runtime_import",
                 "overall":0,"model_id":model_id,
                 "message":"Loading the PyTorch training runtime…",
             })
-        from .model_runtime import train_builder_model
+        from .model_runtime import train_builder_model, _safe_name
         entry = self._model_output(model_id)
         dataset_id = entry.get("selected_dataset_id")
         if not dataset_id:
@@ -1106,22 +1520,57 @@ class Builder:
         config = self._runtime_with_project_trust(entry.get("training_config") or {})
         if model_id in self._model_servers:
             raise RuntimeError("Stop this model's API server before starting training.")
-        # A previous completed training run can keep a compiled model alive on the
-        # accelerator. Release inactive runtime caches before compiling the next
-        # training model so a second run does not inherit stale VRAM pressure.
+
+        output_root = Path(str(config.get("output_dir") or "mlbricks_workspace/models")).expanduser()
+        output_path = output_root / _safe_name(entry.get("name", "model"))
+        staged_output = None
+        if output_path.exists() or output_path.is_symlink():
+            if not overwrite_existing:
+                raise ArtifactConflictError(
+                    kind="model",
+                    name=str(entry.get("name") or "model"),
+                    paths=[str(output_path)],
+                    message=(
+                        f'Model artifact "{entry.get("name") or "model"}" already exists at {output_path}. '
+                        'Choose a different model/output directory, or confirm Override to replace the existing artifact.'
+                    ),
+                )
+            staged_output = self._stage_local_directory_override(output_path)
+
+        # Retraining is a new model lifetime. Drop every inactive resident model,
+        # detach any previous error traceback, and reset torch.compile when the old
+        # runtime (or the new request) is compiled. This prevents stale Dynamo /
+        # CUDA graph state from leaking into step 0 of the next training run.
+        self.last_run_error = None
         cached_runtimes = [
             value for key, value in self.trained_models.items()
             if key not in self._model_servers
         ]
-        if cached_runtimes:
-            reset_compiler = any(
+        reset_compiler = (
+            str(config.get("execution_mode") or "eager").lower() == "compiled"
+            or any(
                 bool(getattr((item or {}).get("compiled"), "compile_used", False))
                 for item in cached_runtimes
             )
+        )
+        if cached_runtimes:
             self._release_cached_runtime_models(
                 preserve_server_models=True,
                 reset_compiler=reset_compiler,
             )
+        elif reset_compiler:
+            try:
+                import torch
+                self._reset_torch_compiler(torch)
+                if torch.cuda.is_available():
+                    try:
+                        torch.cuda.synchronize()
+                    except Exception:
+                        pass
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
         self._stop_event.clear()
         def emit(payload):
             if progress_callback:
@@ -1129,10 +1578,60 @@ class Builder:
                 enriched.setdefault("model_id", model_id)
                 progress_callback(enriched)
 
-        result = train_builder_model(
-            state=self.state, model_entry=entry, dataset=dataset, dataset_meta=meta,
-            config=config, progress=emit, stop_event=self._stop_event,
-        )
+        def run_training_once():
+            return train_builder_model(
+                state=self.state, model_entry=entry, dataset=dataset, dataset_meta=meta,
+                config=config, progress=emit, stop_event=self._stop_event,
+            )
+
+        try:
+            result = run_training_once()
+        except AssertionError as first_exc:
+            if str(config.get("execution_mode") or "eager").lower() != "compiled":
+                if staged_output:
+                    self._rollback_local_directory_overrides([staged_output])
+                    staged_output = None
+                raise
+            # torch.compile occasionally leaves an invalid graph/cache after a
+            # previous model lifetime. One clean reset + rebuild is safe because no
+            # optimizer step has occurred when this assertion happens during graph
+            # capture/warm-up. Never loop indefinitely and never silently fall back
+            # to eager when the user explicitly selected compiled execution.
+            self._remember_run_error(first_exc)
+            self._cleanup_failed_runtime(reset_compiler=True)
+            emit({
+                "status":"running","runtime_kind":"train","phase":"compile_retry",
+                "overall":0,"step":0,
+                "message":"Compiled graph cache was stale. Resetting torch.compile and rebuilding once…",
+            })
+            self.last_run_error = None
+            try:
+                result = run_training_once()
+            except AssertionError as second_exc:
+                self._remember_run_error(second_exc)
+                self._cleanup_failed_runtime(reset_compiler=True)
+                if staged_output:
+                    self._rollback_local_directory_overrides([staged_output])
+                    staged_output = None
+                raise RuntimeError(
+                    "PyTorch compiled graph warm-up failed after a clean retry. "
+                    "Switch Training Setup → Execution to eager for this model/runtime, "
+                    "or restart the kernel if the CUDA compiler state was externally corrupted."
+                ) from None
+            except Exception as retry_exc:
+                self._remember_run_error(retry_exc)
+                self._cleanup_failed_runtime(reset_compiler=True)
+                if staged_output:
+                    self._rollback_local_directory_overrides([staged_output])
+                    staged_output = None
+                raise
+        except Exception as exc:
+            self._remember_run_error(exc)
+            self._cleanup_failed_runtime(reset_compiler=reset_compiler)
+            if staged_output:
+                self._rollback_local_directory_overrides([staged_output])
+                staged_output = None
+            raise
         update = result["model_update"]
         entry.update(update)
         self.trained_models[model_id] = {
@@ -1145,6 +1644,9 @@ class Builder:
             "model_id":model_id,"model_update":update,
             "sample_text":result.get("last_sample"),
         }
+        if staged_output:
+            self._commit_local_directory_overrides([staged_output])
+            staged_output = None
         if progress_callback: progress_callback(payload)
         return update
 
@@ -2053,6 +2555,11 @@ class Builder:
                     f"Unsupported model artifact format: {artifact_info.get('format')!r}."
                 )
             metadata = copy.deepcopy(artifact_info.get("metadata") or {})
+            if str(metadata.get("kind") or "").lower() == "training_checkpoint":
+                raise RuntimeError(
+                    "This path is an intermediate training checkpoint, not a separate Studio model. "
+                    "Load the model's 'last' artifact instead. Training checkpoints are hidden from the model repository."
+                )
             package = copy.deepcopy(metadata.get("builder_package") or {})
             source_entry = copy.deepcopy(package.get("model_entry") or {})
         else:
@@ -2066,6 +2573,29 @@ class Builder:
                 )
             package = copy.deepcopy(payload.get("builder_package") or {})
             source_entry = copy.deepcopy(package.get("model_entry") or payload.get("model_entry") or {})
+
+        candidate_name = str(source_entry.get("name") or path_obj.parent.name or path_obj.name).strip()
+        candidate_key = self._normalized_model_name(candidate_name)
+        candidate_path = str(path_obj)
+        for existing in self.state.get("model_outputs") or []:
+            existing_key = self._normalized_model_name(existing.get("name"))
+            existing_paths = set()
+            for key in ("path", "checkpoint_path", "local_path"):
+                value = existing.get(key)
+                if value:
+                    try:
+                        existing_paths.add(str(Path(value).expanduser().resolve()))
+                    except Exception:
+                        existing_paths.add(str(value))
+            if candidate_path in existing_paths:
+                # Scanning a directory again should be idempotent. Do not create
+                # another registry item for the exact same artifact.
+                return existing
+            if candidate_key and existing_key == candidate_key:
+                raise FileExistsError(
+                    f'Model "{candidate_name}" already exists in Studio. '
+                    'Delete/rename the existing model or use a different model name; duplicate model entries are not created.'
+                )
 
         architecture = copy.deepcopy(package.get("model_component") or source_entry.get("architecture") or {})
         if not architecture.get("nodes"):
@@ -3277,7 +3807,7 @@ class Builder:
                         "model_id":model_id,"message":"Generation stopped.",
                     })
                 else:
-                    self.last_run_error = exc
+                    self._remember_run_error(exc)
                     self._publish_bridge_progress({
                         "status":"error","runtime_kind":"generate","phase":"generate","overall":0,
                         "model_id":model_id,"message":f"{type(exc).__name__}: {exc}",
@@ -3433,6 +3963,7 @@ class Builder:
             generation_entry = self._model_output(model_id)
             generation_entry["generation_config"] = copy.deepcopy(command["generation_config"])
         self._active_bridge_action = action
+        self._active_bridge_model_id = model_id
 
         def worker():
             try:
@@ -3518,7 +4049,11 @@ class Builder:
                         "message":message,"maintenance_result":result,
                     })
                 elif action == "train":
-                    self.train_model(model_id, progress_callback=self._publish_bridge_progress)
+                    self.train_model(
+                        model_id,
+                        progress_callback=self._publish_bridge_progress,
+                        overwrite_existing=bool(command.get("overwrite_existing")),
+                    )
                 elif action == "generate":
                     self.generate_model(model_id, progress_callback=self._publish_bridge_progress)
                 elif action.startswith("hub_"):
@@ -3549,7 +4084,19 @@ class Builder:
                 else:
                     self.last_data_result = self.run_data_pipeline(
                         progress_callback=self._publish_bridge_progress,
+                        overwrite_existing=bool(command.get("overwrite_existing")),
                     )
+            except ArtifactConflictError as exc:
+                runtime_kind = "train" if action == "train" else "data" if action == "data" else action
+                self._publish_bridge_progress({
+                    "status": "overwrite_required",
+                    "runtime_kind": runtime_kind,
+                    "phase": "overwrite_check",
+                    "overall": 0,
+                    "model_id": model_id,
+                    "message": str(exc),
+                    "overwrite_request": exc.payload(),
+                })
             except PipelineStopped:
                 stopped_kind = "cloud" if str(action).startswith("cloud_") else action
                 stopped_message = "Cloud transfer cancelled." if stopped_kind == "cloud" else f"{action.title()} stopped."
@@ -3567,7 +4114,7 @@ class Builder:
                         "message":f"{action.title()} stopped."
                     })
                     return
-                self.last_run_error = exc
+                self._remember_run_error(exc)
                 runtime_kind = "serve" if str(action).startswith("serve_") else action
                 if str(action).startswith("cloud_"):
                     runtime_kind = "cloud"
@@ -3601,6 +4148,7 @@ class Builder:
                 self._publish_bridge_progress(error_payload)
             finally:
                 self._active_bridge_action = None
+                self._active_bridge_model_id = None
                 self._schedule_bridge_queue_drain()
 
         self._run_thread = threading.Thread(
@@ -3616,10 +4164,10 @@ class Builder:
         Standard ipywidgets synchronize each hidden widget independently. On
         hosted notebooks (especially Kaggle), updating the state textarea and
         then clicking a separate hidden Button can race: Python may receive the
-        click before the new project state. Data Fetch is state-sensitive, so
-        the browser now sends both pieces through one observed textarea. The
-        observer runs in Python and starts/queues the exact snapshot without a
-        second browser comm.
+        click before the new project state. Data Fetch, Training, and destructive
+        repository maintenance are state-sensitive, so the browser sends both
+        pieces through one observed textarea. The observer runs in Python and
+        starts/queues the exact snapshot without a second browser comm.
         """
         try:
             envelope = json.loads(raw or "{}")
@@ -3638,13 +4186,15 @@ class Builder:
         if not isinstance(command, dict):
             command = {"action": "data"}
         action = str(command.get("action") or "data").lower()
-        if action != "data":
+        atomic_actions = {"data", "train", "delete_model", "delete_dataset"}
+        if action not in atomic_actions:
             return False
         if not isinstance(state_payload, dict) or not state_payload.get("components"):
+            runtime_kind = "maintenance" if action.startswith("delete_") else action
             self._publish_bridge_progress({
-                "status": "error", "runtime_kind": "data", "phase": "dispatch",
+                "status": "error", "runtime_kind": runtime_kind, "phase": "dispatch",
                 "overall": 0, "nodes": {},
-                "message": "Data Fetch request did not include a valid Data Processing design.",
+                "message": "Studio request did not include a valid project snapshot.",
             })
             return False
 
@@ -3658,12 +4208,13 @@ class Builder:
         # _start_bridge_run() therefore observes exactly this state/command pair.
         state_widget.value = json.dumps(state_payload)
         command_widget.value = json.dumps(command)
-        self._publish_bridge_progress({
-            "status": "running", "runtime_kind": "data", "phase": "dispatch",
-            "overall": 0, "nodes": {},
-            "message": "Data request accepted by Python…",
-            "request_id": envelope.get("request_id"),
-        })
+        if action == "data":
+            self._publish_bridge_progress({
+                "status": "running", "runtime_kind": "data", "phase": "dispatch",
+                "overall": 0, "nodes": {},
+                "message": "Data request accepted by Python…",
+                "request_id": envelope.get("request_id"),
+            })
         self._start_bridge_run()
         return True
 
@@ -3720,7 +4271,7 @@ class Builder:
             try:
                 self._dispatch_bridge_request_envelope(raw)
             except Exception as exc:
-                self.last_run_error = exc
+                self._remember_run_error(exc)
                 self._publish_bridge_progress({
                     "status": "error", "runtime_kind": "data", "phase": "dispatch",
                     "overall": 0, "nodes": {},
