@@ -1614,10 +1614,17 @@ def compile_builder_model(state, model_entry, dataset_meta, runtime, *, progress
                 "Open Training Setup and set Backend to 'pytorch', or install/build the native MLBricks extension."
             ) from exc
         raise
-    # Apply the resolved runtime precision to floating parameters and buffers.
-    # Node presets are commonly stored as fp16 for GPU use; without dtype here,
-    # an Auto-to-CPU fallback could leave the whole model in slow CPU float16.
-    raw.to(device=device,dtype=dtype)
+    # AMP training needs FP32 master parameters; autocast supplies reduced-
+    # precision activations and GradScaler safely scales their gradients. Moving
+    # trainable parameters themselves to FP16 makes GradScaler fail during
+    # unscale_. Inference has no optimizer/scaler, so it can use the requested
+    # reduced parameter dtype directly.
+    parameter_dtype = (
+        torch.float32
+        if for_training and precision in {"fp16", "bf16"}
+        else dtype
+    )
+    raw.to(device=device,dtype=parameter_dtype)
     params=sum(p.numel() for p in raw.parameters())
     inference_model=raw
     training_model=_CausalLMTrainingGraph(raw) if for_training else None

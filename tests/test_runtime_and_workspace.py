@@ -220,3 +220,15 @@ def test_training_reports_runtime_import_before_lazy_model_runtime_import():
         "from .model_runtime import train_builder_model"
     )
     assert "if cached_runtimes:" in block
+
+
+def test_amp_training_keeps_fp32_master_parameters():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "mlb_studio" / "model_runtime.py"
+    ).read_text(encoding="utf-8")
+    start = source.index("def compile_builder_model(")
+    end = source.index("\n\nclass _PackedLMBatcher", start)
+    block = source[start:end]
+    assert 'if for_training and precision in {"fp16", "bf16"}' in block
+    assert "raw.to(device=device,dtype=parameter_dtype)" in block
