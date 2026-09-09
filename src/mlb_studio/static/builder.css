@@ -3810,3 +3810,13 @@ textarea.mlb-modal-input{min-height:100px;resize:vertical}
 .mlb-modal-backdrop.warning .mlb-modal-badge{background:#a7762d}
 .mlb-modal-backdrop.danger .mlb-modal-badge{background:#874154}
 .mlb-modal-backdrop.info .mlb-modal-badge,.mlb-modal-backdrop .mlb-modal-badge{background:#4d7fc2}
+
+/* Standalone desktop app fills the browser viewport. Notebook/Kaggle keeps the
+   fixed 720px embedded shell, but Builder.app() must not leave a large blank
+   area below the one-line status bar. */
+body.mlb-local-app .mlb-root{
+  height:100vh!important;
+  min-height:100vh!important;
+  max-height:100vh!important;
+  margin-bottom:0!important;
+}

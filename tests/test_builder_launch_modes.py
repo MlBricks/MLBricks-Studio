@@ -32,6 +32,9 @@ def test_local_app_serves_full_page_without_full_window_control():
         assert "/api/run" in page
         assert "/api/progress" in page
         assert "/api/progress-events" in page
+        assert '<body class="mlb-local-app">' in page
+        assert "body.mlb-local-app .mlb-root" in page
+        assert "height:100vh!important" in page
         assert urllib.request.urlopen(url + "favicon.svg", timeout=5).status == 200
     finally:
         builder.stop_app()

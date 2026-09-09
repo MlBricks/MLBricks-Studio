@@ -5036,11 +5036,11 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
   <style>
     html,body{{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1118}}
     body{{padding:0}}
-    .mlb-root{{width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;min-width:0!important;border-radius:0!important;border:0!important;box-shadow:none!important}}
+    body.mlb-local-app .mlb-root{{width:100vw!important;height:100vh!important;min-height:100vh!important;max-height:100vh!important;min-width:0!important;margin-bottom:0!important;border-radius:0!important;border:0!important;box-shadow:none!important}}
     .mlb-local-bridge{{position:fixed!important;left:-10000px!important;top:-10000px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}}
   </style>
 </head>
-<body>
+<body class="mlb-local-app">
   <div class="mlb-local-bridge" aria-hidden="true">
     <textarea class="{bridge['state']}"></textarea>
     <textarea class="{bridge['command']}"></textarea>
