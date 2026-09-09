@@ -3788,23 +3788,25 @@
 .mlb-react-runtime-side{display:grid;gap:10px;min-width:0;align-content:start}
 
 
-.mlb-modal-backdrop{position:fixed;z-index:10000;background:rgba(2,7,13,.42);display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
-.mlb-modal{width:min(500px,calc(100% - 28px));max-height:calc(100% - 28px);overflow:auto;background:#0e1721;border:1px solid #5d47a5;border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.46);padding:16px;color:#e6edf7}
-.mlb-modal-title{font-size:22px;font-weight:800;letter-spacing:.01em;color:#f2f6fd;margin-bottom:10px}
-.mlb-modal-body{font-size:14px;line-height:1.65;color:#c5d1e1}
-.mlb-modal-message{white-space:pre-wrap}
-.mlb-modal-details{margin:14px 0 0;padding:12px 14px;border-radius:12px;background:#08111a;border:1px solid #203043;color:#9fb0c7;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
-.mlb-modal-label{display:block;margin:14px 0 8px;font-size:12px;letter-spacing:.08em;color:#9fb0c7;text-transform:uppercase}
-.mlb-modal-input{width:100%;margin-top:14px;background:#071018;border:1px solid #28405a;border-radius:12px;color:#f4f8ff;padding:12px 14px;font:14px/1.5 Inter,system-ui,sans-serif;outline:none;box-sizing:border-box}
-.mlb-modal-input:focus{border-color:#7f5af0;box-shadow:0 0 0 3px rgba(127,90,240,.18)}
-textarea.mlb-modal-input{min-height:120px;resize:vertical}
-.mlb-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;flex-wrap:wrap}
-.mlb-modal-btn{min-width:100px;padding:9px 14px;border-radius:7px;border:1px solid #314a66;background:#0c1824;color:#d7e1ee;font-weight:700;cursor:pointer;transition:.16s ease;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
-.mlb-modal-btn:hover{transform:translateY(-1px);border-color:#49658a}
-.mlb-modal-btn.primary{background:#654adf;border-color:#7c68ff;color:#fff;box-shadow:0 10px 28px rgba(91,73,216,.28)}
-.mlb-modal-btn.danger{background:#6f1b2e;border-color:#9c3350;color:#fff}
-.mlb-modal-backdrop.warning .mlb-modal{border-color:#9b752e}
-.mlb-modal-backdrop.warning .mlb-modal-title{color:#ffd98a}
-.mlb-modal-backdrop.danger .mlb-modal{border-color:#9c3350}
-.mlb-modal-backdrop.danger .mlb-modal-title{color:#ffb8c8}
-.mlb-modal-backdrop.info .mlb-modal-title,.mlb-modal-backdrop .mlb-modal-title{color:#f2f6fd}
+.mlb-modal-backdrop{position:fixed;z-index:10000;background:rgba(5,11,18,.28);display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
+.mlb-modal{width:min(470px,calc(100% - 28px));max-height:calc(100% - 28px);overflow:auto;background:#18222c;border:1px solid #334252;border-radius:8px;box-shadow:0 10px 24px rgba(0,0,0,.34);padding:14px;color:#e8edf4}
+.mlb-modal-title{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:800;line-height:1.25;color:#f4f7fb;margin-bottom:8px}
+.mlb-modal-badge{width:30px;height:30px;min-width:30px;border-radius:7px;display:grid;place-items:center;background:#4d7fc2;color:#fff;font-size:13px;font-weight:900;line-height:1}
+.mlb-modal-body{font-size:12px;line-height:1.5;color:#aab6c5;padding-left:40px}
+.mlb-modal-message{white-space:pre-wrap;color:#aab6c5}
+.mlb-modal-details{margin:10px 0 0;padding:9px 10px;border-radius:7px;background:#121a23;border:1px solid #334252;color:#8c98a8;font:11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.mlb-modal-label{display:block;margin:10px 0 6px;font-size:10px;font-weight:800;letter-spacing:.05em;color:#8c98a8;text-transform:uppercase}
+.mlb-modal-input{width:100%;margin-top:8px;background:#121a23;border:1px solid #334252;border-radius:7px;color:#e8edf4;padding:9px 10px;font:12px/1.45 Inter,system-ui,sans-serif;outline:none;box-sizing:border-box}
+.mlb-modal-input:focus{border-color:#5e9df0;box-shadow:0 0 0 2px rgba(94,157,240,.12)}
+textarea.mlb-modal-input{min-height:100px;resize:vertical}
+.mlb-modal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px;flex-wrap:wrap;padding-left:40px}
+.mlb-modal-btn{min-width:88px;padding:7px 10px;border-radius:7px;border:1px solid #334252;background:#121a23;color:#dce4ee;font-size:11.5px;font-weight:700;cursor:pointer;transition:background .12s ease,border-color .12s ease}
+.mlb-modal-btn:hover{background:#1d2935;border-color:#46586a}
+.mlb-modal-btn.primary{background:#1b2b3d;border-color:#4d6680;color:#fff;box-shadow:none}
+.mlb-modal-btn.primary:hover{background:#22364c;border-color:#5a7898}
+.mlb-modal-btn.danger{background:#2a1b21;border-color:#6b3b4a;color:#f2d9df}
+.mlb-modal-backdrop.warning .mlb-modal,.mlb-modal-backdrop.danger .mlb-modal,.mlb-modal-backdrop.info .mlb-modal{border-color:#334252}
+.mlb-modal-backdrop.warning .mlb-modal-title,.mlb-modal-backdrop.danger .mlb-modal-title,.mlb-modal-backdrop.info .mlb-modal-title,.mlb-modal-backdrop .mlb-modal-title{color:#f4f7fb}
+.mlb-modal-backdrop.warning .mlb-modal-badge{background:#a7762d}
+.mlb-modal-backdrop.danger .mlb-modal-badge{background:#874154}
+.mlb-modal-backdrop.info .mlb-modal-badge,.mlb-modal-backdrop .mlb-modal-badge{background:#4d7fc2}

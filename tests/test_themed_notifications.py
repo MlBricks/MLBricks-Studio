@@ -28,4 +28,8 @@ def test_modal_is_scoped_to_studio_bounds_without_background_blur():
     assert "root.getBoundingClientRect()" in source
     assert "backdrop-filter" not in css
     assert ".mlb-modal-backdrop{position:fixed" in css
-    assert "background:rgba(2,7,13,.42)" in css
+    assert "background:rgba(5,11,18,.28)" in css
+    assert "background:#18222c" in css
+    assert "border:1px solid #334252" in css
+    assert ".mlb-modal-badge" in css
+    assert "backdrop-filter" not in css

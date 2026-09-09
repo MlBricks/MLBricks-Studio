@@ -3627,7 +3627,10 @@ function openStudioModal(options={}){
     dialog.className='mlb-modal';
     dialog.setAttribute('role','dialog');
     dialog.setAttribute('aria-modal','true');
-    const title=doc.createElement('div');title.className='mlb-modal-title';title.textContent=String(options.title||'MLBricks Studio');dialog.appendChild(title);
+    const title=doc.createElement('div');title.className='mlb-modal-title';
+    const badge=doc.createElement('span');badge.className='mlb-modal-badge';badge.textContent=String(options.badge||((options.variant==='danger')?'×':(options.variant==='warning')?'!':'i'));
+    const titleText=doc.createElement('span');titleText.textContent=String(options.title||'MLBricks Studio');
+    title.append(badge,titleText);dialog.appendChild(title);
     const body=doc.createElement('div');body.className='mlb-modal-body';dialog.appendChild(body);
     if(options.message){
       const msg=doc.createElement('div');msg.className='mlb-modal-message';msg.textContent=String(options.message);body.appendChild(msg);
