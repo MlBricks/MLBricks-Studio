@@ -56,7 +56,7 @@ def test_directory_override_is_rollback_safe(tmp_path, monkeypatch):
     assert not (target / "new.txt").exists()
 
 
-def test_model_training_directory_requires_override_before_compile(tmp_path, monkeypatch):
+def test_corrupted_model_directory_requires_fresh_start_before_compile(tmp_path, monkeypatch):
     builder = _builder(tmp_path, monkeypatch)
     output_root = tmp_path / "models"
     existing = output_root / "My-Model"
@@ -78,7 +78,32 @@ def test_model_training_directory_requires_override_before_compile(tmp_path, mon
     with pytest.raises(ArtifactConflictError) as exc:
         builder.train_model("m1")
     assert exc.value.kind == "model"
+    assert exc.value.action == "fresh_start"
     assert Path(exc.value.paths[0]) == existing
+
+
+def test_healthy_trained_model_requires_retrain_not_override(tmp_path, monkeypatch):
+    builder = _builder(tmp_path, monkeypatch)
+    output_root = tmp_path / "models"
+    existing = output_root / "My-Model"
+    existing.mkdir(parents=True)
+    builder.state["prepared_datasets"] = [{"id": "d1", "name": "Prepared"}]
+    builder.prepared_datasets["d1"] = {"train": [{"input_ids": [1, 2, 3]}]}
+    builder.state["model_outputs"] = [{
+        "id": "m1", "name": "My Model", "selected_dataset_id": "d1",
+        "training_config": {"output_dir": str(output_root), "execution_mode": "eager"},
+    }]
+    monkeypatch.setattr(builder, "_existing_model_training_artifact", lambda *args, **kwargs: {
+        "present": True, "resumable": True, "path": str(existing / "last"),
+        "kind": "trained_model", "resume_mode": "weights", "metadata": {}, "reason": None,
+    })
+
+    with pytest.raises(ArtifactConflictError) as exc:
+        builder.train_model("m1")
+
+    assert exc.value.kind == "model"
+    assert exc.value.action == "retrain"
+    assert "Retrain" in str(exc.value)
 
 
 def test_frontend_contains_override_confirmation_flow():
@@ -87,7 +112,12 @@ def test_frontend_contains_override_confirmation_flow():
     assert "Override it?" in source
     assert "overwrite_existing" in source
     assert "requestRunWithOverwrite(true)" in source
-    assert "startTrainingFromRuntime(entry,true)" in source
+    assert 'startTrainingFromRuntime(entry,"resume")' in source
+    assert 'startTrainingFromRuntime(entry,"fresh")' in source
+    assert "resume_existing" in source
+    assert "start_fresh" in source
+    assert "Retrain it?" in source
+    assert "Start fresh?" in source
     # A conflict response terminates the first request before confirmation.
     # Store overwrite_required in execution first so trainingIsRunning() does
     # not suppress the confirmed replacement request.

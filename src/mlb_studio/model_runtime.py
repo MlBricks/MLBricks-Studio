@@ -35,6 +35,14 @@ class TrainingStopped(RuntimeError):
     pass
 
 
+class ExistingModelArtifactError(RuntimeError):
+    """Existing model weights could not be loaded safely for retraining."""
+
+    def __init__(self, path, message):
+        self.path = str(path)
+        super().__init__(message)
+
+
 def _bool(v: Any) -> bool:
     if isinstance(v, bool):
         return v
@@ -1968,7 +1976,7 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
         if was_training: model.train()
 
 
-def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress,stop_event):
+def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress,stop_event,resume_from=None,resume_mode=None):
     """Train a Builder causal LM with notebook-equivalent throughput semantics.
 
     Eager and compiled runs use the same packed fixed-shape token batches. When
@@ -1988,6 +1996,42 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     loss_model=(compiled.training_model if compiled.training_model is not None else _CausalLMTrainingGraph(raw))
     precision=compiled.precision
 
+    resume_path=Path(str(resume_from)).expanduser() if resume_from else None
+    resume_kind=str(resume_mode or "weights").lower() if resume_path is not None else None
+    resume_payload=None
+    resume_step=0
+    resume_tokens=0
+    if resume_path is not None:
+        progress({
+            "status":"running","runtime_kind":"train","phase":"resume_weights","overall":0,
+            "step":0,"tokens_seen":0,
+            "message":f"Loading existing trained parameters from {resume_path.name or resume_path}…",
+            "resume_from":str(resume_path),"resume_mode":resume_kind,
+        })
+        try:
+            if resume_path.is_dir() and (resume_path/"model.pt").exists():
+                mlbricks_load=IMPORT_POOL.resolve_api("lifecycle.load")
+                loaded=mlbricks_load(resume_path,device=device,strict=True)
+                if not isinstance(loaded,nn.Module):
+                    raise RuntimeError(f"loaded artifact is not a torch.nn.Module: {type(loaded)!r}")
+                raw.load_state_dict(loaded.state_dict(),strict=True)
+                del loaded
+                if resume_kind=="checkpoint" and (resume_path/"training_state.pt").is_file():
+                    resume_payload=safe_torch_load(resume_path/"training_state.pt",map_location="cpu",allow_unsafe_pickle=False)
+            elif resume_path.is_file():
+                payload=safe_torch_load(resume_path,map_location="cpu",allow_unsafe_pickle=_bool(config.get("allow_unsafe_legacy_checkpoint",False)))
+                if not isinstance(payload,dict) or "model_state" not in payload:
+                    raise RuntimeError("legacy checkpoint does not contain model_state")
+                raw.load_state_dict(payload["model_state"],strict=True)
+                resume_payload=payload if resume_kind=="checkpoint" else None
+            else:
+                raise FileNotFoundError(f"model artifact was not found: {resume_path}")
+        except Exception as exc:
+            raise ExistingModelArtifactError(
+                resume_path,
+                f"Existing model parameters at {resume_path} could not be loaded safely: {type(exc).__name__}: {exc}",
+            ) from exc
+
     train=dataset["train"] if isinstance(dataset,dict) or hasattr(dataset,"keys") else dataset
     val_name=str(config.get("validation_split") or "validation")
     val=dataset.get(val_name) if hasattr(dataset,"get") else None
@@ -2003,6 +2047,28 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     opt=_optimizer(raw,config)
     warm=runtime_int(config.get("warmup_steps"),0,"Warmup Steps",minimum=0)
     scaler=torch.amp.GradScaler("cuda",enabled=(device.type=="cuda" and precision=="fp16")) if hasattr(torch,"amp") else None
+    if resume_payload and resume_kind=="checkpoint":
+        resume_step=max(0,int(resume_payload.get("step") or 0))
+        resume_tokens=max(0,int(resume_payload.get("tokens_seen") or 0))
+        try:
+            if resume_payload.get("optimizer"):
+                opt.load_state_dict(resume_payload["optimizer"])
+            if scaler is not None and resume_payload.get("scaler"):
+                scaler.load_state_dict(resume_payload["scaler"])
+        except Exception as exc:
+            # Optimizer/scaler state is optional. The learned model weights are
+            # still valuable, so an optimizer mismatch must not force a fresh
+            # untrained model. Continue from checkpoint parameters with a new
+            # optimizer and a new run counter instead.
+            opt=_optimizer(raw,config)
+            scaler=torch.amp.GradScaler("cuda",enabled=(device.type=="cuda" and precision=="fp16")) if hasattr(torch,"amp") else None
+            resume_step=0
+            resume_tokens=0
+            progress({
+                "status":"running","runtime_kind":"train","phase":"resume_optimizer_reset","overall":0,
+                "step":0,"tokens_seen":0,"resume_from":str(resume_path),
+                "message":f"Checkpoint weights loaded, but optimizer state is incompatible ({type(exc).__name__}). Continuing retraining with a fresh optimizer…",
+            })
 
     budget=str(config.get("budget_type") or "steps").lower()
     max_steps=runtime_int(config.get("max_steps"),1000,"Training Steps",minimum=1)
@@ -2013,12 +2079,37 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     if budget=="epochs":
         max_steps=max(1,math.ceil(len(train)/batch*epochs))
 
+    # A checkpoint saved exactly at the old budget has no remaining work. In
+    # that case treat its weights as the starting point for a new retraining run
+    # instead of immediately finishing with no loss value.
+    exhausted_resume=(
+        resume_kind=="checkpoint" and (
+            (budget in {"steps","epochs"} and resume_step>=max_steps)
+            or (budget=="tokens" and resume_tokens>=max_tokens)
+        )
+    )
+    if exhausted_resume:
+        resume_kind="weights"
+        resume_step=0
+        resume_tokens=0
+        opt=_optimizer(raw,config)
+        scaler=torch.amp.GradScaler("cuda",enabled=(device.type=="cuda" and precision=="fp16")) if hasattr(torch,"amp") else None
+        progress({
+            "status":"running","runtime_kind":"train","phase":"resume_budget_reset","overall":0,
+            "step":0,"tokens_seen":0,"resume_from":str(resume_path),
+            "message":"Existing checkpoint already reached the configured budget. Starting a new retraining run from its learned weights…",
+        })
+
     validate_every=runtime_int(config.get("validate_every"),100,"Validate Every N Steps",minimum=0)
     val_steps=runtime_int(config.get("validation_steps"),20,"Validation Steps",minimum=1)
     checkpoint_every=runtime_int(config.get("checkpoint_every"),500,"Checkpoint Every N Steps",minimum=0)
     output=Path(str(config.get("output_dir") or "mlbricks_workspace/models"))/_safe_name(model_entry.get("name","model"))
     output.mkdir(parents=True,exist_ok=True)
     (output/'checkpoints').mkdir(exist_ok=True)
+    saved_training_config=copy.deepcopy(config)
+    logical_output_dir=saved_training_config.pop("_studio_logical_output_dir",None)
+    if logical_output_dir:
+        saved_training_config["output_dir"]=str(logical_output_dir)
 
     architecture=copy.deepcopy(model_entry.get("architecture") or _root_model(state))
     custom_components=copy.deepcopy(state.get("custom_components") or {})
@@ -2044,7 +2135,7 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     # training graph variant under no_grad().
     eval_loss_model=_CausalLMTrainingGraph(raw)
 
-    tokens_seen=0;best_val=float('inf');last_val=None;last_val_ppl=None
+    tokens_seen=resume_tokens;run_tokens_seen=0;best_val=float('inf');last_val=None;last_val_ppl=None
     model.train();raw.train();loss_model.train()
 
     # torch.compile is lazy. Prepare two exact-shape batches first, then force
@@ -2054,7 +2145,7 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     if compiled.compile_used:
         progress({
             "status":"running","runtime_kind":"train","phase":"compile_warmup","overall":1,
-            "step":0,"max_steps":max_steps,"tokens_seen":0,"tokens_per_sec":None,
+            "step":resume_step,"max_steps":max_steps,"tokens_seen":tokens_seen,"tokens_per_sec":None,
             "avg_tokens_per_sec":None,"end_to_end_tokens_per_sec":None,
             "avg_end_to_end_tokens_per_sec":None,"loss":None,"ppl":None,
             "val_loss":None,"val_ppl":None,**_memory_snapshot(device),
@@ -2080,7 +2171,7 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
         opt.zero_grad(set_to_none=True)
         progress({
             "status":"running","runtime_kind":"train","phase":"compile_done","overall":2,
-            "step":0,"max_steps":max_steps,"tokens_seen":0,"tokens_per_sec":None,
+            "step":resume_step,"max_steps":max_steps,"tokens_seen":tokens_seen,"tokens_per_sec":None,
             "avg_tokens_per_sec":None,"end_to_end_tokens_per_sec":None,
             "avg_end_to_end_tokens_per_sec":None,"loss":None,"ppl":None,
             "val_loss":None,"val_ppl":None,**_memory_snapshot(device),
@@ -2096,17 +2187,19 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     e2e_train_seconds=0.0
     progress({
         "status":"running","runtime_kind":"train","phase":"train","overall":2,
-        "step":0,"max_steps":max_steps,"tokens_seen":0,"tokens_per_sec":None,
+        "step":resume_step,"max_steps":max_steps,"tokens_seen":tokens_seen,"tokens_per_sec":None,
         "avg_tokens_per_sec":None,"end_to_end_tokens_per_sec":None,
         "avg_end_to_end_tokens_per_sec":None,"loss":None,"ppl":None,
         "val_loss":None,"val_ppl":None,**_memory_snapshot(device),
         "compile_seconds":compile_seconds,
         "message":f"Training started on {device} · {compiled.parameter_count:,} parameters · packed [{batch}, {context}]"+
+                  (f" · retraining existing weights from {resume_path.name}" if resume_path is not None and resume_kind!="checkpoint" else "")+
+                  (f" · resumed checkpoint step {resume_step}" if resume_path is not None and resume_kind=="checkpoint" else "")+
                   (f" · whole-model compiled ({compile_seconds:.1f}s warm-up)" if compiled.compile_used else " · eager"),
         "compile_warning":compiled.compile_error,
     })
 
-    step=0;loss_value=None;sample=None
+    step=resume_step;loss_value=None;sample=None
     while True:
         if stop_event.is_set(): raise TrainingStopped("Training stopped.")
         if budget=="steps" and step>=max_steps:break
@@ -2152,11 +2245,12 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
         gpu_train_seconds+=gpu_elapsed
         e2e_train_seconds+=e2e_elapsed
         tokens_seen+=step_tokens
+        run_tokens_seen+=step_tokens
         loss_value=sum(float(v.float().cpu()) for v in detached_losses)
         tokens_per_sec=float(step_tokens)/gpu_elapsed
-        avg_tokens_per_sec=float(tokens_seen)/max(gpu_train_seconds,1e-9)
+        avg_tokens_per_sec=float(run_tokens_seen)/max(gpu_train_seconds,1e-9)
         end_to_end_tokens_per_sec=float(step_tokens)/e2e_elapsed
-        avg_end_to_end_tokens_per_sec=float(tokens_seen)/max(e2e_train_seconds,1e-9)
+        avg_end_to_end_tokens_per_sec=float(run_tokens_seen)/max(e2e_train_seconds,1e-9)
         ppl=_perplexity(loss_value)
         mem=_memory_snapshot(device)
         lr=float(opt.param_groups[0].get('lr',0.0)) if opt.param_groups else None
@@ -2208,7 +2302,7 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
             checkpoint_path=output/'checkpoints'/f'step_{step:06d}'
             metadata={
                 "kind":"training_checkpoint","step":step,"tokens_seen":tokens_seen,
-                "vocab_size":compiled.vocab_size,"training_config":copy.deepcopy(config),
+                "vocab_size":compiled.vocab_size,"training_config":copy.deepcopy(saved_training_config),
                 "builder_package":builder_package,
             }
             mlbricks_save = IMPORT_POOL.resolve_api("lifecycle.save")
@@ -2246,7 +2340,7 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
     final_metadata={
         "kind":"trained_model","step":step,"tokens_seen":tokens_seen,
         "best_val_loss":None if best_val==float('inf') else best_val,
-        "training_config":copy.deepcopy(config),"builder_package":builder_package,
+        "training_config":copy.deepcopy(saved_training_config),"builder_package":builder_package,
         "tokenizer_name":tok_cfg.get("tokenizer_name") or "gpt2",
         "execution":"whole-model compiled" if compiled.compile_used else "eager",
         "compile_mode":str(config.get("compile_mode") or "default") if compiled.compile_used else None,
@@ -2265,14 +2359,16 @@ def train_builder_model(*,state,model_entry,dataset,dataset_meta,config,progress
         "training_status":"trained","weights_ready":True,"path":str(final),"checkpoint_path":str(final),
         "trained_steps":step,"tokens_seen":tokens_seen,"last_loss":loss_value,"last_ppl":_perplexity(loss_value),
         "best_val_loss":None if best_val==float('inf') else best_val,"last_val_loss":last_val,"last_val_ppl":last_val_ppl,
-        "avg_tokens_per_sec":float(tokens_seen)/max(gpu_train_seconds,1e-9),
-        "avg_end_to_end_tokens_per_sec":float(tokens_seen)/max(e2e_train_seconds,1e-9),
+        "avg_tokens_per_sec":float(run_tokens_seen)/max(gpu_train_seconds,1e-9),
+        "avg_end_to_end_tokens_per_sec":float(run_tokens_seen)/max(e2e_train_seconds,1e-9),
         "memory_peak_gb":final_mem.get("memory_peak_gb"),"parameter_count":compiled.parameter_count,
         "effective_vocab_size":compiled.vocab_size,"execution_mode_used":"compiled" if compiled.compile_used else "eager",
         "compile_warning":compiled.compile_error,"compile_seconds":compile_seconds,
         "trained_at":time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
         "format":"MLBricks model artifact","artifact_format":"mlbricks.model",
         "tokenizer_path":str(tokenizer_dir) if tokenizer_dir is not None else None,
+        "retrained_from":str(resume_path) if resume_path is not None and resume_kind!="checkpoint" else None,
+        "resumed_checkpoint":str(resume_path) if resume_path is not None and resume_kind=="checkpoint" else None,
     }
     return {"compiled":compiled,"tokenizer":tokenizer,"model_update":update,"last_sample":sample}
 

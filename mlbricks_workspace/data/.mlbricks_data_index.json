@@ -1,0 +1,8 @@
+{
+  "format": "mlbricks-studio-artifact-index",
+  "version": 1,
+  "kind": "data",
+  "root": "/mnt/data/index_fix/src/MLBricks-Studio-main/mlbricks_workspace/data",
+  "root_signature": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+  "entries": []
+}

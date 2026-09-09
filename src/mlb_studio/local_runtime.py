@@ -2,11 +2,250 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from pathlib import Path
 from typing import Any
 
 DATA_FILE_EXTENSIONS = {'.txt', '.csv', '.json', '.jsonl', '.parquet', '.arrow'}
 MODEL_EXTENSIONS = {'.pt', '.pth', '.ckpt'}
+
+
+MANAGED_DATA_INDEX = ".mlbricks_data_index.json"
+MANAGED_MODEL_INDEX = ".mlbricks_model_index.json"
+MANAGED_INDEX_VERSION = 1
+
+
+def _stable_artifact_id(prefix: str, path: Path) -> str:
+    try:
+        raw = str(path.expanduser().resolve())
+    except Exception:
+        raw = str(path.expanduser())
+    return f"{prefix}_{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _root_children_signature(root: Path) -> str:
+    """Cheap signature of immediate artifact directories and known markers.
+
+    This is intentionally shallow: it never walks dataset shards, checkpoint
+    contents, Kaggle input trees, or the user's home directory. Known marker
+    stats make corruption/deletion of ``last/model.pt`` or dataset metadata
+    visible without reading the heavy artifact itself.
+    """
+    parts = []
+    marker_relpaths = (
+        "mlbricks_dataset.json", "dataset_dict.json", "dataset_info.json", "state.json",
+        "last", "last/model.pt", "last/metadata.json", "checkpoints",
+        "model.pt", "metadata.json",
+    )
+    try:
+        children = sorted((x for x in root.iterdir() if x.is_dir()), key=lambda x: x.name.casefold())
+    except OSError:
+        children = []
+    for child in children:
+        child_parts = [child.name]
+        try:
+            st = child.stat()
+            child_parts.append(f"d:{int(st.st_mtime_ns)}")
+        except OSError:
+            child_parts.append("d:0")
+        for rel in marker_relpaths:
+            probe = child / rel
+            try:
+                if not probe.exists():
+                    continue
+                st = probe.stat()
+                child_parts.append(f"{rel}:{int(st.st_mtime_ns)}:{int(st.st_size) if probe.is_file() else 0}")
+            except OSError:
+                continue
+        parts.append("\0".join(child_parts))
+    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def _dataset_index_record(path: Path) -> dict[str, Any] | None:
+    """Build one metadata-only dataset index record without loading dataset rows."""
+    if not path.is_dir():
+        return None
+    marker = _read_json_file(path / "mlbricks_dataset.json") or {}
+    looks_ready = (path / "dataset_dict.json").exists() or (
+        (path / "dataset_info.json").exists() and (path / "state.json").exists()
+    )
+    if not marker and not looks_ready:
+        return None
+    name = str(marker.get("name") or path.name or "Prepared Dataset")
+    record = {
+        "id": str(marker.get("id") or _stable_artifact_id("dataset", path)),
+        "name": name,
+        "path": str(path),
+        "kind": "dataset",
+        "status": "ready" if looks_ready else "incomplete",
+        "storage": str(marker.get("storage") or "disk"),
+        "created_at": marker.get("created_at"),
+        "metadata": marker,
+    }
+    for key in ("splits", "rows", "columns", "pipeline", "output_node_id", "tokenizer_name", "hub_repo_id", "hub_url", "hub_revision"):
+        if key in marker:
+            record[key] = marker.get(key)
+    return record
+
+
+def _model_name_from_metadata(payload: dict[str, Any] | None, fallback: str) -> str:
+    meta = (payload or {}).get("metadata") or {}
+    package = meta.get("builder_package") or {}
+    entry = package.get("model_entry") or {}
+    return str(entry.get("name") or fallback or "Model")
+
+
+def _model_index_record(path: Path) -> dict[str, Any] | None:
+    """Index one Studio model directory from known layout only; never load weights."""
+    if not path.is_dir() or path.name.startswith(".mlb-"):
+        return None
+    candidates: list[tuple[Path, str]] = []
+    last = path / "last"
+    if last.is_dir():
+        candidates.append((last, "trained_model"))
+    checkpoint_root = path / "checkpoints"
+    if checkpoint_root.is_dir():
+        try:
+            checkpoints = sorted(
+                (x for x in checkpoint_root.iterdir() if x.is_dir()),
+                key=lambda x: x.name, reverse=True,
+            )
+            candidates.extend((x, "training_checkpoint") for x in checkpoints)
+        except OSError:
+            pass
+
+    # Legacy direct artifact layout is still recognized, but only at this exact
+    # managed model path. We never recursively search unrelated directories.
+    if (path / "model.pt").exists() or (path / "metadata.json").exists():
+        candidates.append((path, "trained_model"))
+
+    first_metadata = None
+    for candidate, default_kind in candidates:
+        model_file = candidate / "model.pt"
+        metadata_file = candidate / "metadata.json"
+        payload = _read_json_file(metadata_file) if metadata_file.exists() else None
+        if first_metadata is None and payload:
+            first_metadata = payload
+        if not model_file.is_file() or not metadata_file.is_file():
+            continue
+        try:
+            if model_file.stat().st_size <= 0:
+                continue
+        except OSError:
+            continue
+        meta = (payload or {}).get("metadata") or {}
+        fmt = (payload or {}).get("format")
+        if fmt and fmt != "mlbricks.model":
+            continue
+        kind = str(meta.get("kind") or default_kind).lower()
+        return {
+            "id": _stable_artifact_id("model", path),
+            "name": _model_name_from_metadata(payload, path.name),
+            "path": str(path),
+            "artifact_path": str(candidate),
+            "kind": "model",
+            "status": "trained" if kind != "training_checkpoint" else "checkpoint",
+            "resumable": True,
+            "resume_mode": "checkpoint" if kind == "training_checkpoint" else "weights",
+            "artifact_kind": kind,
+            "metadata": meta,
+        }
+
+    # Directory exists in the managed model root but has no readable canonical
+    # artifact markers. Keep it in the index so Studio can immediately offer
+    # Start Fresh instead of discovering the collision after loading data/torch.
+    return {
+        "id": _stable_artifact_id("model", path),
+        "name": _model_name_from_metadata(first_metadata, path.name),
+        "path": str(path),
+        "artifact_path": None,
+        "kind": "model",
+        "status": "incomplete",
+        "resumable": False,
+        "resume_mode": None,
+        "artifact_kind": None,
+        "reason": "no complete trained model marker was found",
+        "metadata": ((first_metadata or {}).get("metadata") or {}),
+    }
+
+
+def _refresh_one_managed_index(root: Path, *, kind: str) -> dict[str, Any]:
+    root = root.expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    entries = []
+    try:
+        children = sorted((x for x in root.iterdir() if x.is_dir()), key=lambda x: x.name.casefold())
+    except OSError:
+        children = []
+    builder = _dataset_index_record if kind == "data" else _model_index_record
+    for child in children:
+        record = builder(child)
+        if record is not None:
+            entries.append(record)
+    filename = MANAGED_DATA_INDEX if kind == "data" else MANAGED_MODEL_INDEX
+    payload = {
+        "format": "mlbricks-studio-artifact-index",
+        "version": MANAGED_INDEX_VERSION,
+        "kind": kind,
+        "root": str(root),
+        "root_signature": _root_children_signature(root),
+        "entries": entries,
+    }
+    _write_json_atomic(root / filename, payload)
+    return payload
+
+
+def refresh_managed_artifact_indexes(paths: dict[str, str] | None) -> dict[str, Any]:
+    """Shallow-index only Studio's dedicated data and model directories."""
+    paths = dict(paths or {})
+    data_root = Path(paths.get("data") or "mlbricks_workspace/data")
+    model_root = Path(paths.get("models") or "mlbricks_workspace/models")
+    return {
+        "data": _refresh_one_managed_index(data_root, kind="data"),
+        "models": _refresh_one_managed_index(model_root, kind="models"),
+    }
+
+
+def _load_one_managed_index(root: Path, *, kind: str) -> dict[str, Any]:
+    root = root.expanduser()
+    filename = MANAGED_DATA_INDEX if kind == "data" else MANAGED_MODEL_INDEX
+    payload = _read_json_file(root / filename) or {}
+    expected_kind = kind
+    if (
+        payload.get("format") == "mlbricks-studio-artifact-index"
+        and int(payload.get("version") or 0) == MANAGED_INDEX_VERSION
+        and payload.get("kind") == expected_kind
+        and str(payload.get("root_signature") or "") == _root_children_signature(root)
+    ):
+        return payload
+    return _refresh_one_managed_index(root, kind=kind)
+
+
+def load_managed_artifact_indexes(paths: dict[str, str] | None) -> dict[str, Any]:
+    """Load cached indexes, rescanning only a managed root whose child list changed."""
+    paths = dict(paths or {})
+    data_root = Path(paths.get("data") or "mlbricks_workspace/data")
+    model_root = Path(paths.get("models") or "mlbricks_workspace/models")
+    return {
+        "data": _load_one_managed_index(data_root, kind="data"),
+        "models": _load_one_managed_index(model_root, kind="models"),
+    }
+
 
 
 def human_size(size: int | None) -> str:

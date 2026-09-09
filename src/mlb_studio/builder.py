@@ -49,18 +49,36 @@ _MACOS_MPS_PROBE_CACHE = None
 
 
 class ArtifactConflictError(FileExistsError):
-    """A local Studio artifact exists and requires explicit overwrite approval."""
+    """A local Studio artifact exists and needs an explicit user decision.
 
-    def __init__(self, *, kind, name, paths=None, message=None):
+    Datasets use ``action="override"``. Existing model weights are different:
+    a healthy artifact should be *retrained from its parameters*, never silently
+    replaced. Only an incomplete/corrupted model asks for ``fresh_start``.
+    """
+
+    def __init__(self, *, kind, name, paths=None, message=None, action="override", reason=None):
         self.kind = str(kind or "artifact")
         self.name = str(name or self.kind.title())
         self.paths = [str(x) for x in (paths or []) if x]
+        self.action = str(action or "override")
+        self.reason = str(reason or "").strip() or None
         if message is None:
             where = f" at {self.paths[0]}" if self.paths else ""
-            message = (
-                f'{self.kind.title()} "{self.name}" already exists{where}. '
-                'Choose another name/path, or confirm Override to replace the existing local artifact.'
-            )
+            if self.action == "retrain":
+                message = (
+                    f'{self.kind.title()} "{self.name}" already has trained parameters{where}. '
+                    'Confirm Retrain to continue from the existing weights.'
+                )
+            elif self.action == "fresh_start":
+                message = (
+                    f'{self.kind.title()} "{self.name}" cannot be resumed safely{where}. '
+                    'Confirm Start Fresh to replace the unusable local artifact.'
+                )
+            else:
+                message = (
+                    f'{self.kind.title()} "{self.name}" already exists{where}. '
+                    'Choose another name/path, or confirm Override to replace the existing local artifact.'
+                )
         super().__init__(message)
 
     def payload(self):
@@ -69,6 +87,8 @@ class ArtifactConflictError(FileExistsError):
             "name": self.name,
             "paths": list(self.paths),
             "message": str(self),
+            "action": self.action,
+            "reason": self.reason,
         }
 
 
@@ -279,9 +299,19 @@ class Builder:
         # excluded by StudioPersistence.
         self.persistence = StudioPersistence()
         self.runtime_capabilities = self._detect_runtime_capabilities()
-        from .local_runtime import detect_local_environment, ensure_mlbricks_workspace
+        from .local_runtime import (
+            detect_local_environment, ensure_mlbricks_workspace,
+            refresh_managed_artifact_indexes,
+        )
         self.local_environment = detect_local_environment()
         self.local_environment["paths"] = ensure_mlbricks_workspace(self.local_environment)
+        # Studio owns two dedicated artifact roots. Build one shallow metadata
+        # index at startup so later Build/Fetch/Train clicks can detect existing
+        # artifacts immediately without recursively searching the notebook disk
+        # or loading model weights/dataset rows into RAM.
+        self.local_artifact_index = refresh_managed_artifact_indexes(
+            self.local_environment.get("paths") or {}
+        )
         actual_root = Path(self.local_environment["paths"]["root"]).parent
         expected_root = Path(self.local_environment.get("workspace_root") or self.local_environment.get("default_root") or actual_root)
         if actual_root != expected_root:
@@ -290,6 +320,79 @@ class Builder:
             roots = [str(actual_root), *(self.local_environment.get("roots") or [])]
             self.local_environment["roots"] = list(dict.fromkeys(roots))
         self._apply_local_workspace_defaults()
+        self._hydrate_indexed_prepared_datasets()
+
+    def _refresh_managed_artifact_index(self):
+        from .local_runtime import refresh_managed_artifact_indexes
+        self.local_artifact_index = refresh_managed_artifact_indexes(
+            self.local_environment.get("paths") or {}
+        )
+        return self.local_artifact_index
+
+    def _ensure_managed_artifact_index_current(self):
+        from .local_runtime import load_managed_artifact_indexes
+        self.local_artifact_index = load_managed_artifact_indexes(
+            self.local_environment.get("paths") or {}
+        )
+        return self.local_artifact_index
+
+    def _indexed_data_records(self):
+        return copy.deepcopy(((self.local_artifact_index or {}).get("data") or {}).get("entries") or [])
+
+    def _indexed_model_records(self):
+        return copy.deepcopy(((self.local_artifact_index or {}).get("models") or {}).get("entries") or [])
+
+    def _hydrate_indexed_prepared_datasets(self):
+        """Register disk dataset metadata only; actual rows stay unloaded.
+
+        This makes a saved Studio dataset immediately selectable after a kernel
+        restart. ``get_prepared_dataset`` remains the only place that calls
+        ``datasets.load_from_disk`` and does so only when the user actually uses
+        that dataset.
+        """
+        registry = self.state.setdefault("prepared_datasets", [])
+        seen_names = {self._artifact_name_key(item.get("name")) for item in registry}
+        seen_paths = set()
+        for item in registry:
+            value = item.get("path")
+            if value:
+                try:
+                    seen_paths.add(str(Path(value).expanduser().resolve()))
+                except Exception:
+                    seen_paths.add(str(value))
+        for record in self._indexed_data_records():
+            if record.get("status") != "ready":
+                continue
+            path = record.get("path")
+            if not path:
+                continue
+            try:
+                resolved = str(Path(path).expanduser().resolve())
+            except Exception:
+                resolved = str(path)
+            name_key = self._artifact_name_key(record.get("name"))
+            if resolved in seen_paths or (name_key and name_key in seen_names):
+                continue
+            marker = copy.deepcopy(record.get("metadata") or {})
+            metadata = {
+                "id": str(marker.get("id") or record.get("id") or f"dataset_{uuid.uuid4().hex[:12]}"),
+                "name": str(marker.get("name") or record.get("name") or Path(path).name),
+                "created_at": marker.get("created_at"),
+                "output_node_id": marker.get("output_node_id"),
+                "storage": str(marker.get("storage") or "disk"),
+                "path": resolved,
+                "pipeline": copy.deepcopy(marker.get("pipeline") or {}),
+                "indexed_only": True,
+            }
+            for key in ("splits", "rows", "columns", "tokenizer_name", "hub_repo_id", "hub_url", "hub_revision"):
+                if key in marker:
+                    metadata[key] = copy.deepcopy(marker.get(key))
+                elif key in record:
+                    metadata[key] = copy.deepcopy(record.get(key))
+            registry.append(metadata)
+            seen_paths.add(resolved)
+            if name_key:
+                seen_names.add(name_key)
 
     def _apply_local_workspace_defaults(self):
         """Replace legacy Kaggle-only defaults with this session's workspace paths."""
@@ -821,31 +924,147 @@ class Builder:
         slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip()).strip("._-")
         return (slug or "prepared-dataset").lower()
 
-    def _disk_prepared_dataset_records(self):
-        """Return tiny metadata records for datasets persisted by Studio.
+    @staticmethod
+    def _model_artifact_slug(value):
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "model")).strip("-.")
+        return slug or "model"
 
-        Only ``mlbricks_dataset.json`` markers are read. Dataset bodies are never
-        loaded just to detect a name/path collision.
+    def _managed_models_root(self):
+        return Path((self.local_environment.get("paths") or {}).get("models") or "mlbricks_workspace/models").expanduser()
+
+    def _resolved_model_output_root(self, config):
+        managed = self._managed_models_root()
+        raw = str((config or {}).get("output_dir") or "").strip()
+        legacy = {"", "mlbricks_workspace/models", "mlbricks/models"}
+        if raw.replace("\\", "/") in legacy:
+            return managed
+        path = Path(raw).expanduser()
+        # Legacy hosted-runtime defaults should follow the current Studio
+        # workspace instead of becoming a second model repository.
+        if raw.startswith("/kaggle/") and str(managed).startswith("/kaggle/"):
+            return managed
+        return path
+
+    def _fast_existing_model_training_artifact(self, output_path, entry):
+        """Metadata-only model collision check used before importing torch/data.
+
+        The managed model index is created during Builder startup from only the
+        dedicated models directory. It never opens model.pt. For imported or
+        custom output paths we inspect only the exact path referenced by the
+        model entry; Studio never recursively searches unrelated directories.
         """
-        records = []
-        data_root = Path((self.local_environment.get("paths") or {}).get("data") or "mlbricks_workspace/data")
+        self._ensure_managed_artifact_index_current()
+        output_path = Path(output_path).expanduser()
         try:
-            if not data_root.exists():
-                return records
-            for index, marker in enumerate(data_root.rglob("mlbricks_dataset.json")):
-                if index >= 1000:
-                    break
+            output_resolved = str(output_path.resolve())
+        except Exception:
+            output_resolved = str(output_path)
+        wanted_name = self._artifact_name_key((entry or {}).get("name"))
+
+        for record in self._indexed_model_records():
+            try:
+                record_path = str(Path(record.get("path") or "").expanduser().resolve())
+            except Exception:
+                record_path = str(record.get("path") or "")
+            if record_path != output_resolved and self._artifact_name_key(record.get("name")) != wanted_name:
+                continue
+            resumable = bool(record.get("resumable"))
+            return {
+                "present": True,
+                "resumable": resumable,
+                "path": str(record.get("artifact_path") or "") or None,
+                "kind": record.get("artifact_kind"),
+                "resume_mode": record.get("resume_mode"),
+                "metadata": copy.deepcopy(record.get("metadata") or {}),
+                "reason": record.get("reason") or (None if resumable else "the indexed model artifact is incomplete"),
+                "indexed": True,
+            }
+
+        # If this exact directory was created after Builder startup, recognize it
+        # without scanning any parent tree. This is O(1) for the requested model.
+        if output_path.exists() or output_path.is_symlink():
+            last = output_path / "last"
+            if (last / "model.pt").is_file() and (last / "metadata.json").is_file():
+                payload = None
                 try:
-                    payload = json.loads(marker.read_text(encoding="utf-8"))
+                    payload = json.loads((last / "metadata.json").read_text(encoding="utf-8"))
                 except Exception:
-                    continue
-                records.append({
-                    "name": str(payload.get("name") or marker.parent.name),
-                    "path": str(marker.parent.resolve()),
-                    "metadata": payload if isinstance(payload, dict) else {},
-                })
-        except OSError:
-            pass
+                    payload = None
+                meta = (payload or {}).get("metadata") or {}
+                if (payload or {}).get("format") in {None, "mlbricks.model"}:
+                    return {
+                        "present": True, "resumable": True, "path": str(last),
+                        "kind": str(meta.get("kind") or "trained_model"), "resume_mode": "weights",
+                        "metadata": copy.deepcopy(meta), "reason": None, "indexed": False,
+                    }
+            checkpoint_root = output_path / "checkpoints"
+            if checkpoint_root.is_dir():
+                try:
+                    for candidate in sorted(
+                        (x for x in checkpoint_root.iterdir() if x.is_dir()),
+                        key=lambda x: x.name, reverse=True,
+                    ):
+                        if (candidate / "model.pt").is_file() and (candidate / "metadata.json").is_file():
+                            return {
+                                "present": True, "resumable": True, "path": str(candidate),
+                                "kind": "training_checkpoint", "resume_mode": "checkpoint",
+                                "metadata": {}, "reason": None, "indexed": False,
+                            }
+                except OSError:
+                    pass
+            return {
+                "present": True, "resumable": False, "path": None, "kind": None,
+                "resume_mode": None, "metadata": {},
+                "reason": "no complete trained model marker was found", "indexed": False,
+            }
+
+        # Exact external/imported model references are allowed without scanning
+        # their surrounding directory.
+        for key in ("checkpoint_path", "path"):
+            value = (entry or {}).get(key)
+            if not value:
+                continue
+            candidate = Path(str(value)).expanduser()
+            if not candidate.exists() and not candidate.is_symlink():
+                continue
+            if candidate.is_dir() and (candidate / "model.pt").is_file() and (candidate / "metadata.json").is_file():
+                return {
+                    "present": True, "resumable": True, "path": str(candidate),
+                    "kind": "trained_model", "resume_mode": "weights",
+                    "metadata": {}, "reason": None, "indexed": False,
+                }
+            if candidate.is_file():
+                # Legacy checkpoint validity is confirmed only after Retrain is
+                # approved; existence alone is enough for the immediate prompt.
+                return {
+                    "present": True, "resumable": True, "path": str(candidate),
+                    "kind": "legacy_checkpoint", "resume_mode": "checkpoint",
+                    "metadata": {}, "reason": None, "indexed": False,
+                }
+
+        return {
+            "present": False, "resumable": False, "path": None, "kind": None,
+            "resume_mode": None, "metadata": {}, "reason": None, "indexed": False,
+        }
+
+    def _disk_prepared_dataset_records(self):
+        """Return cached metadata for datasets in Studio's dedicated data root.
+
+        The directory was shallow-indexed during Builder startup. This method
+        intentionally does not recurse through the filesystem and never loads
+        Arrow/Parquet dataset bodies into RAM.
+        """
+        self._ensure_managed_artifact_index_current()
+        records = []
+        for item in self._indexed_data_records():
+            marker = copy.deepcopy(item.get("metadata") or {})
+            records.append({
+                "id": item.get("id"),
+                "name": str(marker.get("name") or item.get("name") or Path(str(item.get("path") or "dataset")).name),
+                "path": str(item.get("path") or ""),
+                "status": item.get("status"),
+                "metadata": marker,
+            })
         return records
 
     def _disk_prepared_dataset_names(self):
@@ -1067,6 +1286,10 @@ class Builder:
         self.state["prepared_datasets"] = next_items
         self.prepared_datasets[dataset_id] = result
         self.state.setdefault("project", {})["dataset"] = requested_name
+        if save_to_disk and path:
+            # Keep the shallow data index current so subsequent Fetch clicks can
+            # answer existence checks instantly without another directory scan.
+            self._refresh_managed_artifact_index()
         return metadata
 
     def run_data_pipeline(self, progress_callback=None, *, overwrite_existing=False):
@@ -1459,45 +1682,231 @@ class Builder:
             "compiler_cache_reset": compiled_cache,
         }
 
-    def train_model(self, model_id, *, progress_callback=None, overwrite_existing=False):
-        """Compile/train a model with explicit, rollback-safe artifact overwrite."""
+    def _existing_model_training_artifact(self, output_path, entry):
+        """Inspect existing model storage and find the best reusable weights.
+
+        ``last`` is preferred because it is the completed trained model. If a
+        run was interrupted before ``last`` was written, the newest valid
+        training checkpoint is resumable as a recovery point. Merely having a
+        directory is not enough: a malformed/partial artifact is reported as
+        present-but-unusable so the UI can ask for an explicit fresh start.
+        """
+        output_path = Path(output_path).expanduser()
+        candidates = []
+
+        def add_candidate(value):
+            if not value:
+                return
+            try:
+                path = Path(value).expanduser()
+            except Exception:
+                return
+            key = str(path)
+            if all(str(item) != key for item in candidates):
+                candidates.append(path)
+
+        # Completed model first. An entry may point to an imported/external
+        # artifact, so include its saved path even when output_dir changed.
+        add_candidate(output_path / "last")
+        add_candidate(entry.get("checkpoint_path"))
+        add_candidate(entry.get("path"))
+        add_candidate(output_path)
+        add_candidate(output_path / "last.pt")
+
+        checkpoint_root = output_path / "checkpoints"
+        if checkpoint_root.is_dir():
+            try:
+                for path in sorted(checkpoint_root.iterdir(), key=lambda x: x.name, reverse=True):
+                    add_candidate(path)
+            except OSError:
+                pass
+
+        present = bool(output_path.exists() or output_path.is_symlink())
+        errors = []
+        inspect_api = None
+        for candidate in candidates:
+            if not candidate.exists() and not candidate.is_symlink():
+                continue
+            present = True
+            if candidate.is_dir():
+                model_file = candidate / "model.pt"
+                if not model_file.is_file():
+                    continue
+                try:
+                    if model_file.stat().st_size <= 0:
+                        raise RuntimeError("model.pt is empty")
+                    if inspect_api is None:
+                        inspect_api = IMPORT_POOL.resolve_api("lifecycle.inspect")
+                    info = inspect_api(candidate)
+                    if not isinstance(info, dict) or info.get("format") != "mlbricks.model":
+                        raise RuntimeError(f"unsupported artifact format {getattr(info, 'get', lambda *_: None)('format')!r}")
+                    metadata = copy.deepcopy(info.get("metadata") or {})
+                    kind = str(metadata.get("kind") or "trained_model").lower()
+                    if kind == "training_checkpoint":
+                        resume_mode = "checkpoint"
+                    else:
+                        resume_mode = "weights"
+                    return {
+                        "present": True, "resumable": True, "path": str(candidate),
+                        "kind": kind, "resume_mode": resume_mode, "metadata": metadata,
+                        "reason": None,
+                    }
+                except Exception as exc:
+                    errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
+                    continue
+
+            if candidate.is_file():
+                try:
+                    payload = safe_torch_load(candidate, map_location="cpu", allow_unsafe_pickle=False)
+                    if not isinstance(payload, dict) or "model_state" not in payload:
+                        raise RuntimeError("model_state was not found")
+                    return {
+                        "present": True, "resumable": True, "path": str(candidate),
+                        "kind": "legacy_checkpoint", "resume_mode": "checkpoint",
+                        "metadata": copy.deepcopy(payload.get("metadata") or {}), "reason": None,
+                    }
+                except Exception as exc:
+                    errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
+
+        reason = "; ".join(errors[-3:]) if errors else "no readable trained weights were found"
+        return {
+            "present": present, "resumable": False, "path": None, "kind": None,
+            "resume_mode": None, "metadata": {}, "reason": reason,
+        }
+
+    def train_model(
+        self, model_id, *, progress_callback=None, overwrite_existing=False,
+        resume_existing=False, start_fresh=False,
+    ):
+        """Train a model without discarding healthy learned parameters.
+
+        Existing *valid* model weights are a retraining source, not an overwrite
+        target. Studio asks the user to Retrain and initializes the new run from
+        those weights. A fresh model is allowed only when the existing artifact
+        is missing/incomplete/corrupted (or an older client explicitly confirms
+        replacement), and that destructive path remains rollback-safe.
+
+        Collision detection is deliberately metadata-only and happens before
+        importing PyTorch or loading the selected dataset. This keeps the
+        Retrain/Start Fresh prompt immediate even for large on-disk datasets.
+        """
+        entry = self._model_output(model_id)
+        config = self._runtime_with_project_trust(entry.get("training_config") or {})
+        if model_id in self._model_servers:
+            raise RuntimeError("Stop this model's API server before starting training.")
+
+        output_root = self._resolved_model_output_root(config)
+        # Canonicalize legacy/default storage into Studio's dedicated model root.
+        config["output_dir"] = str(output_root)
+        safe_name = self._model_artifact_slug(entry.get("name", "model"))
+        output_path = output_root / safe_name
+
+        fast_existing = self._fast_existing_model_training_artifact(output_path, entry)
+        try:
+            managed_root = self._managed_models_root().resolve()
+            resolved_output = output_path.resolve()
+            in_managed_root = resolved_output == managed_root or managed_root in resolved_output.parents
+        except Exception:
+            in_managed_root = False
+
+        # For Studio-managed models the startup index is authoritative for the
+        # first prompt. For an explicitly custom/external output path, inspect
+        # only that exact artifact (still no recursive filesystem search).
+        existing = fast_existing
+        if fast_existing.get("present") and not in_managed_root and not fast_existing.get("indexed"):
+            existing = self._existing_model_training_artifact(output_path, entry)
+
+        # Backward compatibility for a frontend that still sends
+        # overwrite_existing=True. Never destroy healthy weights: reinterpret
+        # old "Override" approval as Retrain when a reusable model exists.
+        if overwrite_existing and not resume_existing and not start_fresh:
+            if existing.get("resumable"):
+                resume_existing = True
+            else:
+                start_fresh = True
+
+        if not resume_existing and not start_fresh:
+            if existing.get("resumable"):
+                resume_path_hint = str(existing.get("path") or output_path / "last")
+                raise ArtifactConflictError(
+                    kind="model", action="retrain",
+                    name=str(entry.get("name") or "model"), paths=[resume_path_hint],
+                    message=(
+                        f'Model "{entry.get("name") or "model"}" already has trained parameters at {resume_path_hint}. '
+                        'Retrain from these existing weights instead of overriding them? '
+                        'The current artifact will remain untouched until retraining finishes successfully.'
+                    ),
+                )
+            if existing.get("present"):
+                reason = str(existing.get("reason") or "the existing artifact is incomplete")
+                raise ArtifactConflictError(
+                    kind="model", action="fresh_start", reason=reason,
+                    name=str(entry.get("name") or "model"), paths=[str(output_path)],
+                    message=(
+                        f'Model "{entry.get("name") or "model"}" has existing local files, but its trained parameters '
+                        f'cannot be resumed safely ({reason}). Start fresh? The old directory will be backed up and '
+                        'restored automatically if fresh training fails.'
+                    ),
+                )
+
+        # Only after the user has chosen New / Retrain / Start Fresh do we touch
+        # the heavy runtime. If Retrain was selected, validate the exact indexed
+        # artifact before loading the dataset so a corrupt model cannot trigger
+        # an unnecessary dataset load.
+        validated_existing = existing
+        if resume_existing:
+            validated_existing = self._existing_model_training_artifact(output_path, entry)
+            if not validated_existing.get("resumable"):
+                reason = str(validated_existing.get("reason") or "the trained artifact is no longer readable")
+                raise ArtifactConflictError(
+                    kind="model", action="fresh_start", reason=reason,
+                    name=str(entry.get("name") or "model"), paths=[str(output_path)],
+                    message=(
+                        f'The existing model can no longer be loaded for retraining ({reason}). '
+                        'Confirm Start Fresh to rebuild it from untrained parameters.'
+                    ),
+                )
+
+        dataset_id = entry.get("selected_dataset_id")
+        if not dataset_id:
+            raise RuntimeError("Select a prepared training dataset first.")
+        meta = self._dataset_meta(dataset_id)
+        dataset = self.get_prepared_dataset(dataset_id)
+
         if progress_callback:
             progress_callback({
                 "status":"running","runtime_kind":"train","phase":"runtime_import",
                 "overall":0,"model_id":model_id,
                 "message":"Loading the PyTorch training runtime…",
             })
-        from .model_runtime import train_builder_model, _safe_name
-        entry = self._model_output(model_id)
-        dataset_id = entry.get("selected_dataset_id")
-        if not dataset_id:
-            raise RuntimeError("Select a prepared training dataset first.")
-        meta = self._dataset_meta(dataset_id)
-        dataset = self.get_prepared_dataset(dataset_id)
-        config = self._runtime_with_project_trust(entry.get("training_config") or {})
-        if model_id in self._model_servers:
-            raise RuntimeError("Stop this model's API server before starting training.")
+        from .model_runtime import train_builder_model, ExistingModelArtifactError
 
-        output_root = Path(str(config.get("output_dir") or "mlbricks_workspace/models")).expanduser()
-        output_path = output_root / _safe_name(entry.get("name", "model"))
+        resume_path = None
+        resume_mode = None
         staged_output = None
-        if output_path.exists() or output_path.is_symlink():
-            if not overwrite_existing:
-                raise ArtifactConflictError(
-                    kind="model",
-                    name=str(entry.get("name") or "model"),
-                    paths=[str(output_path)],
-                    message=(
-                        f'Model artifact "{entry.get("name") or "model"}" already exists at {output_path}. '
-                        'Choose a different model/output directory, or confirm Override to replace the existing artifact.'
-                    ),
-                )
-            staged_output = self._stage_local_directory_override(output_path)
+        retrain_parent = None
+        retrain_output = None
 
-        # Retraining is a new model lifetime. Drop every inactive resident model,
-        # detach any previous error traceback, and reset torch.compile when the old
-        # runtime (or the new request) is compiled. This prevents stale Dynamo /
-        # CUDA graph state from leaking into step 0 of the next training run.
+        if resume_existing:
+            # ``validated_existing`` was checked immediately after confirmation,
+            # before the dataset was loaded. Reuse it here instead of repeating
+            # artifact inspection after expensive data/runtime preparation.
+            existing = validated_existing
+            resume_path = str(existing["path"])
+            resume_mode = str(existing.get("resume_mode") or "weights")
+            # Retraining writes to a private sibling staging directory. The old
+            # trained model therefore remains fully usable until the new run is
+            # complete. On success the directories are swapped transactionally.
+            retrain_parent = output_root / f".mlb-retrain-{safe_name}-{uuid.uuid4().hex[:10]}"
+            retrain_output = retrain_parent / safe_name
+        elif start_fresh:
+            # Fresh start is only the recovery path for unusable/corrupted local
+            # model storage. Preserve it as a rollback backup until success.
+            if output_path.exists() or output_path.is_symlink():
+                staged_output = self._stage_local_directory_override(output_path)
+
+        # Retraining is a new runtime lifetime. Drop every inactive resident
+        # model and stale traceback/compiler state before rebuilding the graph.
         self.last_run_error = None
         cached_runtimes = [
             value for key, value in self.trained_models.items()
@@ -1529,82 +1938,236 @@ class Builder:
                 pass
 
         self._stop_event.clear()
+
+        def visible_path(value):
+            if not value or retrain_output is None:
+                return value
+            try:
+                raw_path = Path(str(value))
+                rel = raw_path.relative_to(retrain_output)
+                return str(output_path / rel)
+            except Exception:
+                return value
+
         def emit(payload):
             if progress_callback:
                 enriched = dict(payload or {})
                 enriched.setdefault("model_id", model_id)
+                if retrain_output is not None and enriched.get("checkpoint_path"):
+                    enriched["checkpoint_path"] = visible_path(enriched.get("checkpoint_path"))
                 progress_callback(enriched)
 
-        def run_training_once():
+        run_base_config = dict(config)
+        if retrain_parent is not None:
+            run_base_config["output_dir"] = str(retrain_parent)
+            run_base_config["_studio_logical_output_dir"] = str(output_root)
+
+        active_config = dict(run_base_config)
+        attempt = 0
+
+        def clean_partial_run_output():
+            target = retrain_output if retrain_output is not None else output_path
+            if target.exists() or target.is_symlink():
+                self._remove_local_artifact_path(target)
+
+        def run_training_once(run_config=None):
+            nonlocal active_config, attempt
+            active_config = dict(run_config or active_config)
+            # A compiler retry must never reuse files from a failed attempt.
+            if attempt > 0:
+                clean_partial_run_output()
+            attempt += 1
             return train_builder_model(
                 state=self.state, model_entry=entry, dataset=dataset, dataset_meta=meta,
-                config=config, progress=emit, stop_event=self._stop_event,
+                config=active_config, progress=emit, stop_event=self._stop_event,
+                resume_from=resume_path, resume_mode=resume_mode,
             )
 
+        def cleanup_failed_storage():
+            nonlocal staged_output
+            if retrain_parent is not None and (retrain_parent.exists() or retrain_parent.is_symlink()):
+                self._remove_local_artifact_path(retrain_parent)
+            if staged_output:
+                self._rollback_local_directory_overrides([staged_output])
+                staged_output = None
+
+        compile_recovery_warning = None
         try:
-            result = run_training_once()
+            result = run_training_once(run_base_config)
+        except ExistingModelArtifactError as resume_exc:
+            self._remember_run_error(resume_exc)
+            self._cleanup_failed_runtime(reset_compiler=reset_compiler)
+            cleanup_failed_storage()
+            raise ArtifactConflictError(
+                kind="model", action="fresh_start", reason=str(resume_exc),
+                name=str(entry.get("name") or "model"), paths=[str(getattr(resume_exc, "path", resume_path) or output_path)],
+                message=(
+                    f'The saved parameters for "{entry.get("name") or "model"}" could not be loaded safely. '
+                    f'{resume_exc} Start fresh from untrained parameters? The existing artifact will be backed up first.'
+                ),
+            ) from resume_exc
         except AssertionError as first_exc:
             if str(config.get("execution_mode") or "eager").lower() != "compiled":
-                if staged_output:
-                    self._rollback_local_directory_overrides([staged_output])
-                    staged_output = None
+                cleanup_failed_storage()
                 raise
-            # torch.compile occasionally leaves an invalid graph/cache after a
-            # previous model lifetime. One clean reset + rebuild is safe because no
-            # optimizer step has occurred when this assertion happens during graph
-            # capture/warm-up. Never loop indefinitely and never silently fall back
-            # to eager when the user explicitly selected compiled execution.
+            first_detail = str(first_exc).strip() or type(first_exc).__name__
             self._remember_run_error(first_exc)
             self._cleanup_failed_runtime(reset_compiler=True)
+            retry_config = dict(run_base_config)
+            requested_compile_mode = str(config.get("compile_mode") or "default")
+            retry_config["compile_mode"] = "default"
             emit({
                 "status":"running","runtime_kind":"train","phase":"compile_retry",
                 "overall":0,"step":0,
-                "message":"Compiled graph cache was stale. Resetting torch.compile and rebuilding once…",
+                "message":(
+                    "Compiled warm-up hit a PyTorch assertion. Resetting compiler state and "
+                    + ("retrying with compile mode default…" if requested_compile_mode != "default" else "rebuilding the compiled graph once…")
+                ),
+                "compile_recovery_reason": first_detail,
+                "requested_compile_mode": requested_compile_mode,
+                "retry_compile_mode": "default",
             })
             self.last_run_error = None
             try:
-                result = run_training_once()
+                result = run_training_once(retry_config)
+                if requested_compile_mode != "default":
+                    compile_recovery_warning = (
+                        f"Requested compile mode {requested_compile_mode!r} failed during warm-up; "
+                        "training recovered with compile mode 'default'."
+                    )
+            except ExistingModelArtifactError as resume_exc:
+                self._remember_run_error(resume_exc)
+                self._cleanup_failed_runtime(reset_compiler=True)
+                cleanup_failed_storage()
+                raise ArtifactConflictError(
+                    kind="model", action="fresh_start", reason=str(resume_exc),
+                    name=str(entry.get("name") or "model"), paths=[str(getattr(resume_exc, "path", resume_path) or output_path)],
+                    message=(
+                        f'The saved parameters for "{entry.get("name") or "model"}" could not be loaded safely. '
+                        'Confirm Start Fresh to rebuild from untrained parameters.'
+                    ),
+                ) from resume_exc
             except AssertionError as second_exc:
+                second_detail = str(second_exc).strip() or type(second_exc).__name__
                 self._remember_run_error(second_exc)
                 self._cleanup_failed_runtime(reset_compiler=True)
-                if staged_output:
-                    self._rollback_local_directory_overrides([staged_output])
-                    staged_output = None
-                raise RuntimeError(
-                    "PyTorch compiled graph warm-up failed after a clean retry. "
-                    "Switch Training Setup → Execution to eager for this model/runtime, "
-                    "or restart the kernel if the CUDA compiler state was externally corrupted."
-                ) from None
+                eager_config = dict(run_base_config)
+                eager_config["execution_mode"] = "eager"
+                emit({
+                    "status":"running","runtime_kind":"train","phase":"compile_fallback",
+                    "overall":0,"step":0,
+                    "message":"Compiled warm-up failed again. Rebuilding safely in eager mode so training can continue…",
+                    "compile_recovery_reason": second_detail,
+                    "requested_execution_mode": "compiled",
+                    "fallback_execution_mode": "eager",
+                })
+                self.last_run_error = None
+                try:
+                    result = run_training_once(eager_config)
+                    compile_recovery_warning = (
+                        "PyTorch compiled warm-up failed twice in this kernel; "
+                        "training automatically continued in eager mode. Restart the kernel "
+                        "before retrying compiled execution if compiled speed is required."
+                    )
+                except ExistingModelArtifactError as resume_exc:
+                    self._remember_run_error(resume_exc)
+                    self._cleanup_failed_runtime(reset_compiler=True)
+                    cleanup_failed_storage()
+                    raise ArtifactConflictError(
+                        kind="model", action="fresh_start", reason=str(resume_exc),
+                        name=str(entry.get("name") or "model"), paths=[str(getattr(resume_exc, "path", resume_path) or output_path)],
+                        message=(
+                            f'The saved parameters for "{entry.get("name") or "model"}" could not be loaded safely. '
+                            'Confirm Start Fresh to rebuild from untrained parameters.'
+                        ),
+                    ) from resume_exc
+                except Exception as eager_exc:
+                    self._remember_run_error(eager_exc)
+                    self._cleanup_failed_runtime(reset_compiler=True)
+                    cleanup_failed_storage()
+                    raise
             except Exception as retry_exc:
                 self._remember_run_error(retry_exc)
                 self._cleanup_failed_runtime(reset_compiler=True)
-                if staged_output:
-                    self._rollback_local_directory_overrides([staged_output])
-                    staged_output = None
+                cleanup_failed_storage()
                 raise
         except Exception as exc:
             self._remember_run_error(exc)
             self._cleanup_failed_runtime(reset_compiler=reset_compiler)
-            if staged_output:
-                self._rollback_local_directory_overrides([staged_output])
-                staged_output = None
+            cleanup_failed_storage()
             raise
+
         update = result["model_update"]
-        entry.update(update)
-        self.trained_models[model_id] = {
-            "compiled": result["compiled"], "tokenizer": result["tokenizer"],
-            "runtime": dict(config),
-        }
-        payload = {
-            "status":"done","runtime_kind":"train","phase":"done","overall":100,
-            "message":f'Training complete: {entry.get("name", "model")}',
-            "model_id":model_id,"model_update":update,
-            "sample_text":result.get("last_sample"),
-        }
+        if compile_recovery_warning:
+            existing_warning = str(update.get("compile_warning") or "").strip()
+            update["compile_warning"] = (
+                f"{existing_warning} {compile_recovery_warning}".strip()
+                if existing_warning else compile_recovery_warning
+            )
+            update["compile_recovered"] = True
+            update["requested_execution_mode"] = str(config.get("execution_mode") or "eager")
+            update["requested_compile_mode"] = str(config.get("compile_mode") or "default")
+            update["execution_mode_used"] = str(active_config.get("execution_mode") or update.get("execution_mode_used") or "eager")
+            update["compile_mode_used"] = (
+                str(active_config.get("compile_mode") or "default")
+                if update["execution_mode_used"] == "compiled" else None
+            )
+
+        # Commit a successful retrain atomically. Until this point the old model
+        # directory has not been modified at all.
+        if retrain_output is not None:
+            replacement_backup = None
+            try:
+                if not retrain_output.exists():
+                    raise RuntimeError("Retraining completed without producing a model artifact.")
+                if output_path.exists() or output_path.is_symlink():
+                    replacement_backup = self._stage_local_directory_override(output_path)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(retrain_output), str(output_path))
+                if replacement_backup:
+                    self._commit_local_directory_overrides([replacement_backup])
+                if retrain_parent.exists():
+                    try:
+                        retrain_parent.rmdir()
+                    except OSError:
+                        self._remove_local_artifact_path(retrain_parent)
+            except Exception:
+                if replacement_backup:
+                    self._rollback_local_directory_overrides([replacement_backup])
+                if retrain_parent.exists() or retrain_parent.is_symlink():
+                    self._remove_local_artifact_path(retrain_parent)
+                raise
+
+            for key in ("path", "checkpoint_path", "tokenizer_path"):
+                if update.get(key):
+                    update[key] = visible_path(update[key])
+            update["retrained_from"] = str(resume_path) if resume_path and resume_mode != "checkpoint" else update.get("retrained_from")
+            update["resumed_checkpoint"] = str(resume_path) if resume_path and resume_mode == "checkpoint" else update.get("resumed_checkpoint")
+
         if staged_output:
             self._commit_local_directory_overrides([staged_output])
             staged_output = None
-        if progress_callback: progress_callback(payload)
+
+        entry.update(update)
+        # A successful new train/retrain changed the canonical model artifact.
+        # Refresh only Studio's shallow managed indexes; no weights are loaded.
+        self._refresh_managed_artifact_index()
+        resident_runtime_config = dict(active_config)
+        resident_runtime_config.pop("_studio_logical_output_dir", None)
+        resident_runtime_config["output_dir"] = str(config.get("output_dir") or "mlbricks_workspace/models")
+        self.trained_models[model_id] = {
+            "compiled": result["compiled"], "tokenizer": result["tokenizer"],
+            "runtime": resident_runtime_config,
+        }
+        mode_text = "Retraining complete" if resume_path else "Training complete"
+        payload = {
+            "status":"done","runtime_kind":"train","phase":"done","overall":100,
+            "message":f'{mode_text}: {entry.get("name", "model")}',
+            "model_id":model_id,"model_update":update,
+            "sample_text":result.get("last_sample"),
+        }
+        if progress_callback:
+            progress_callback(payload)
         return update
 
     def _resident_generation_runtime(self, model_id, config, *, emit=None):
@@ -2296,8 +2859,54 @@ class Builder:
             raise RuntimeError(f"Unknown cloud bundle type: {content_type!r}")
 
     def scan_local_runtime_files(self, roots=None):
-        from .local_runtime import scan_local_files
-        return scan_local_files(roots=roots)
+        """List local artifacts without broad filesystem scans by default.
+
+        With no explicit roots, Local Repository is backed by the two managed
+        Studio indexes. A user-supplied root still opts into the older recursive
+        local-environment scan for importing external artifacts.
+        """
+        if roots:
+            from .local_runtime import scan_local_files
+            return scan_local_files(roots=roots)
+
+        self._ensure_managed_artifact_index_current()
+        entries = []
+        model_root = str(self._managed_models_root())
+        data_root = str(Path((self.local_environment.get("paths") or {}).get("data") or "mlbricks_workspace/data"))
+        for record in self._indexed_model_records():
+            artifact_path = str(record.get("artifact_path") or record.get("path") or "")
+            if not artifact_path:
+                continue
+            entries.append({
+                "path": artifact_path,
+                "name": str(record.get("name") or Path(artifact_path).name),
+                "relative": str(Path(artifact_path).name),
+                "root": model_root,
+                "kind": "model_artifact" if record.get("resumable") else "folder",
+                "label": "MLBricks Model" if record.get("resumable") else "Incomplete Model",
+                "size": None, "size_label": "—", "is_dir": True,
+                "indexed": True,
+            })
+        for record in self._indexed_data_records():
+            path = str(record.get("path") or "")
+            if not path:
+                continue
+            entries.append({
+                "path": path,
+                "name": str(record.get("name") or Path(path).name),
+                "relative": str(Path(path).name),
+                "root": data_root,
+                "kind": "dataset_dir",
+                "label": "Prepared Dataset" if record.get("status") == "ready" else "Incomplete Dataset",
+                "size": None, "size_label": "—", "is_dir": True,
+                "indexed": True,
+            })
+        return {
+            "roots": [model_root, data_root],
+            "entries": entries,
+            "truncated": False,
+            "indexed": True,
+        }
 
     def _register_local_dataset(self, dataset, path, *, tokenizer_name="gpt2", saved_meta=None):
         path = str(Path(path).resolve())
@@ -4010,6 +4619,8 @@ class Builder:
                         model_id,
                         progress_callback=self._publish_bridge_progress,
                         overwrite_existing=bool(command.get("overwrite_existing")),
+                        resume_existing=bool(command.get("resume_existing")),
+                        start_fresh=bool(command.get("start_fresh")),
                     )
                 elif action == "generate":
                     self.generate_model(model_id, progress_callback=self._publish_bridge_progress)
@@ -4046,9 +4657,9 @@ class Builder:
             except ArtifactConflictError as exc:
                 runtime_kind = "train" if action == "train" else "data" if action == "data" else action
                 self._publish_bridge_progress({
-                    "status": "overwrite_required",
+                    "status": "overwrite_required" if exc.action == "override" else "artifact_action_required",
                     "runtime_kind": runtime_kind,
-                    "phase": "overwrite_check",
+                    "phase": "overwrite_check" if exc.action == "override" else "artifact_action_check",
                     "overall": 0,
                     "model_id": model_id,
                     "message": str(exc),

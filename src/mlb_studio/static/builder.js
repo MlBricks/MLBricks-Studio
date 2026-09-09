@@ -1718,22 +1718,27 @@ function __MLB_STUDIO_FACTORY__(){
       return execution.status==="running" && execution.runtime_kind==="train";
     }
 
-    function startTrainingFromRuntime(entry,overwriteExisting=false){
+    function startTrainingFromRuntime(entry,mode="normal"){
       entry=liveBuiltModel(entry);
       if(!entry || trainingIsRunning())return;
+      if(mode===true)mode="fresh"; // compatibility with older callers
+      const retrain=mode==="resume";
+      const fresh=mode==="fresh";
       entry.training_status="starting";
-      if(!overwriteExisting)entry.training_history=[];
+      if(!retrain)entry.training_history=[];
       entry.training_live={
         status:"running",phase:"starting",overall:0,step:0,max_steps:entry.training_config?.max_steps??null,
         tokens_seen:0,tokens_per_sec:null,avg_tokens_per_sec:null,end_to_end_tokens_per_sec:null,avg_end_to_end_tokens_per_sec:null,loss:null,ppl:null,val_loss:null,val_ppl:null,
         memory_allocated_gb:null,memory_reserved_gb:null,memory_peak_gb:null,memory_total_gb:null,
-        elapsed_seconds:null,compile_seconds:null,message:overwriteExisting?"Override confirmed. Replacing existing model artifact…":"Starting training in Python…"
+        elapsed_seconds:null,compile_seconds:null,message:
+          retrain?"Retrain confirmed. Loading existing trained parameters…":
+          fresh?"Fresh start confirmed. Rebuilding model from untrained parameters…":"Starting training in Python…"
       };
       const alreadyStatus=runtimePanel?.mode==="train"&&runtimePanel?.modelId===entry.id&&runtimePanel?.tab==="status";
       runtimePanel={mode:"train",modelId:entry.id,tab:"status"};
       if(alreadyStatus)refreshReactRuntimeStatus(entry,"train");
       else draw();
-      setTimeout(()=>requestRuntimeCommand("train",entry,{overwriteExisting}),20);
+      setTimeout(()=>requestRuntimeCommand("train",entry,{resumeExisting:retrain,startFresh:fresh}),20);
     }
 
     function trainingActionButton(entry,valid){
@@ -2331,6 +2336,8 @@ function __MLB_STUDIO_FACTORY__(){
       const residentFastLane=action==="generate";
       const command={action,model_id:entry.id,ts:Date.now()};
       if(options?.overwriteExisting)command.overwrite_existing=true;
+      if(options?.resumeExisting)command.resume_existing=true;
+      if(options?.startFresh)command.start_fresh=true;
       if(residentFastLane)command.generation_config=cp(entry.generation_config||{});
 
       const progressInput=bridgeControl(bridge.progress,"textarea");
@@ -2699,13 +2706,12 @@ function __MLB_STUDIO_FACTORY__(){
     function handleOverwriteRequired(next){
       const req=next?.overwrite_request||{};
       const kind=String(req.kind||next.runtime_kind||"artifact").toLowerCase();
+      const action=String(req.action||"override").toLowerCase();
       const displayKind=kind==="dataset"?"Dataset":kind==="model"?"Model":"Artifact";
       const name=String(req.name||displayKind);
       const paths=Array.isArray(req.paths)?req.paths.filter(Boolean):[];
 
       // In Full Window mode the visible detached window owns confirmation UI.
-      // The hidden notebook host only forwards the request so the user never
-      // receives two confirmation dialogs for one collision.
       if(!isPopout&&popoutPeerConnected){
         sendPopoutMessage({type:"progress",source:"host",payload:cp(next),ts:Date.now()});
         return;
@@ -2714,34 +2720,56 @@ function __MLB_STUDIO_FACTORY__(){
       overwritePromptActive=true;
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
       const locationText=paths.length?"\n\nExisting location:\n"+paths.join("\n"):"";
-      const detail=displayKind+" \""+name+"\" already exists."+locationText+
-        "\n\nOverride it? Studio will keep the existing artifact as a temporary backup and restore it automatically if the replacement fails.";
+      let detail="";
+      if(kind==="model"&&action==="retrain"){
+        detail='Model "'+name+'" already has trained parameters.'+locationText+
+          "\n\nRetrain it? Studio will load the existing weights and continue training from them. " +
+          "The current trained model stays untouched until the retraining run finishes successfully.";
+      }else if(kind==="model"&&action==="fresh_start"){
+        const reason=req.reason?"\n\nReason:\n"+String(req.reason):"";
+        detail='Model "'+name+'" cannot be resumed safely.'+locationText+reason+
+          "\n\nStart fresh? Studio will back up the current directory, rebuild from untrained parameters, " +
+          "and restore the old files automatically if fresh training fails.";
+      }else{
+        detail=displayKind+' "'+name+'" already exists.'+locationText+
+          "\n\nOverride it? Studio will keep the existing artifact as a temporary backup and restore it automatically if the replacement fails.";
+      }
       let approved=false;
       try{approved=!!(win&&typeof win.confirm==="function"&&win.confirm(detail));}catch(_){}
       overwritePromptActive=false;
 
       if(approved){
-        setStatus("Override confirmed for "+displayKind.toLowerCase()+" \""+name+"\".");
         if(kind==="dataset"||next.runtime_kind==="data"){
+          setStatus('Override confirmed for dataset "'+name+'".');
           requestRunWithOverwrite(true);
           return;
         }
         if(kind==="model"||next.runtime_kind==="train"){
           const entry=builtModelById(next.model_id||runtimePanel?.modelId);
-          if(entry){startTrainingFromRuntime(entry,true);return;}
+          if(entry){
+            if(action==="retrain"){
+              setStatus('Retrain confirmed for model "'+name+'".');
+              startTrainingFromRuntime(entry,"resume");
+            }else{
+              setStatus('Fresh start confirmed for model "'+name+'".');
+              startTrainingFromRuntime(entry,"fresh");
+            }
+            return;
+          }
         }
       }
 
+      const verb=(kind==="model"&&action==="retrain")?"Retraining":(kind==="model"&&action==="fresh_start")?"Fresh start":"Override";
       const cancelled={
-        status:"stopped",runtime_kind:next.runtime_kind||kind,phase:"overwrite_cancelled",overall:0,
-        model_id:next.model_id||null,message:"Override cancelled. Existing "+displayKind.toLowerCase()+" was left unchanged.",nodes:next.nodes||{}
+        status:"stopped",runtime_kind:next.runtime_kind||kind,phase:"artifact_action_cancelled",overall:0,
+        model_id:next.model_id||null,message:verb+" cancelled. Existing "+displayKind.toLowerCase()+" was left unchanged.",nodes:next.nodes||{}
       };
       applyExecutionProgress(cancelled);
       setStatus(cancelled.message);
     }
 
     function applyExecutionProgress(next){
-      if(next?.status==="overwrite_required"&&next?.overwrite_request){
+      if((next?.status==="overwrite_required"||next?.status==="artifact_action_required")&&next?.overwrite_request){
         // The original Python request has finished at this point. Record that
         // lifecycle transition before opening the confirmation dialog. Without
         // this assignment the browser still thinks the first Train request is
@@ -4767,6 +4795,8 @@ function __MLB_STUDIO_FACTORY__(){
     function renderTrainingStatus(main,side,entry){
       const config=entry.training_config||{},live=trainingLive(entry),history=runtimeHistory(entry,"train");
       const dataset=preparedDatasetById(entry.selected_dataset_id)||null;
+      const executionUsed=String(live.fallback_execution_mode||live.execution_mode_used||entry.execution_mode_used||config.execution_mode||"eager");
+      const compileModeUsed=String(live.retry_compile_mode||entry.compile_mode_used||config.compile_mode||"default");
       const hero=runtimeSection("Training Status");hero.classList.add("mlb-training-status-hero");
       const top=document.createElement("div");top.className="mlb-training-status-top";
       const stateBox=document.createElement("div");stateBox.className="mlb-training-state "+(live.status||entry.training_status||"idle");
@@ -4801,7 +4831,7 @@ function __MLB_STUDIO_FACTORY__(){
         statusMetric("Val PPL",valPplNow==null?"—":Number(valPplNow).toFixed(2)),
         statusMetric("GPU Memory",memoryNow==null?"—":Number(memoryNow).toFixed(2)+" GB",live.memory_total_gb==null?null:"of "+Number(live.memory_total_gb).toFixed(1)+" GB"),
         statusMetric("Peak Memory",peakMemory==null?"—":Number(peakMemory).toFixed(2)+" GB"),
-        statusMetric("Compile",config.execution_mode==="compiled"?(live.compile_seconds==null?(currentAttempt?"Pending":(entry.compile_seconds==null?"Pending":Number(entry.compile_seconds).toFixed(1)+"s")):Number(live.compile_seconds).toFixed(1)+"s"):"Not used"),
+        statusMetric("Compile",executionUsed==="compiled"?(live.compile_seconds==null?(currentAttempt?"Pending":(entry.compile_seconds==null?"Pending":Number(entry.compile_seconds).toFixed(1)+"s")):Number(live.compile_seconds).toFixed(1)+"s"):"Not used"),
         statusMetric("Tokens",Number(tokensNow??0).toLocaleString()),statusMetric("Elapsed",formatDuration(live.elapsed_seconds)));
       hero.appendChild(metrics);main.appendChild(hero);
 
@@ -4823,7 +4853,7 @@ function __MLB_STUDIO_FACTORY__(){
         statusMetric("Training Status",entry.training_status||"untrained"),statusMetric("Trained At",entry.trained_at||"—"));cp.appendChild(cg);main.appendChild(cp);
 
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";const dev=selectedRuntimeDevice(config);
-      summary.innerHTML="<h3>Training Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Backend</span><strong>"+config.backend+"</strong></div><div><span>Execution</span><strong>"+config.execution_mode+"</strong></div><div><span>Precision</span><strong>"+config.precision+"</strong></div>";side.appendChild(summary);
+      summary.innerHTML="<h3>Training Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Backend</span><strong>"+config.backend+"</strong></div><div><span>Execution</span><strong>"+executionUsed+(executionUsed!==String(config.execution_mode||"eager")?" (fallback)":"")+"</strong></div><div><span>Compile Mode</span><strong>"+(executionUsed==="compiled"?compileModeUsed:"Not used")+"</strong></div><div><span>Precision</span><strong>"+config.precision+"</strong></div>";side.appendChild(summary);
       const statusValid=trainingConfigValid(entry,config);
       side.appendChild(trainingActionButton(entry,statusValid));
       const cleanVram=btn("Clean GPU VRAM","mlb-vram-clean-btn");
