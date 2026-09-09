@@ -1138,7 +1138,16 @@ class Builder:
 
     def generate_model(self, model_id, *, progress_callback=None):
         """Generate tokens from a trained Builder language model."""
-        from .model_runtime import load_trained_for_generation, generate_text
+        if progress_callback:
+            progress_callback({
+                "status":"running","runtime_kind":"generate","phase":"runtime_import",
+                "overall":0,"model_id":model_id,
+                "message":"Loading the generation runtime…",
+            })
+        from .model_runtime import (
+            load_trained_for_generation, generate_text,
+            resolve_device, resolve_precision,
+        )
         entry = self._model_output(model_id)
         if not entry.get("weights_ready"):
             raise RuntimeError("This model has no trained/loaded weights yet.")
@@ -1156,22 +1165,45 @@ class Builder:
         if cached is not None:
             compiled, tokenizer = cached["compiled"], cached["tokenizer"]
             previous_runtime = cached.get("runtime") or {}
-            runtime_keys = ("device", "backend", "execution_mode", "compile_mode", "precision")
-            runtime_changed = any(str(previous_runtime.get(k, "auto")) != str(config.get(k, "auto")) for k in runtime_keys)
-            # A compiled training run wraps only ``training_model``. Its cached
-            # ``model`` intentionally remains the eager TensorGraph, so it must
-            # not be mistaken for a compiled inference build when generation is
-            # requested with the same settings.
-            needs_inference_compile = (
-                str(config.get("execution_mode") or "eager") == "compiled"
-                and compiled.model is compiled.raw_model
+            desired_device = resolve_device(config.get("device", "auto"))
+            desired_precision, _ = resolve_precision(
+                config.get("precision", "auto"), desired_device
             )
-            if runtime_changed or needs_inference_compile:
+            desired_execution = str(config.get("execution_mode") or "eager")
+            previous_backend = str(previous_runtime.get("backend") or "auto")
+            desired_backend = str(config.get("backend") or "auto")
+
+            # Compare resolved execution properties, not raw config spellings.
+            # Training fp16 + cuda:0 and generation auto + auto can resolve to
+            # the same runtime and reuse the live trained model already in VRAM.
+            cache_compatible = (
+                str(compiled.device) == str(desired_device)
+                and str(compiled.precision) == str(desired_precision)
+                and previous_backend == desired_backend
+            )
+            if desired_execution == "compiled":
+                cache_compatible = (
+                    cache_compatible
+                    and compiled.model is not compiled.raw_model
+                    and str(previous_runtime.get("compile_mode") or "default")
+                    == str(config.get("compile_mode") or "default")
+                )
+            else:
+                cache_compatible = cache_compatible and compiled.model is compiled.raw_model
+
+            if not cache_compatible:
                 compiled, tokenizer = load_trained_for_generation(
                     state=self.state, model_entry=entry, dataset_meta=meta, config=config,
                     checkpoint_path=entry.get("checkpoint_path"), progress=emit,
                 )
                 self.trained_models[model_id] = {"compiled":compiled,"tokenizer":tokenizer,"runtime":dict(config)}
+            else:
+                cached["runtime"] = dict(config)
+                emit({
+                    "status":"running","runtime_kind":"generate","phase":"cache_reuse",
+                    "overall":0,
+                    "message":f"Reusing trained model already on {compiled.device}…",
+                })
         else:
             compiled, tokenizer = load_trained_for_generation(
                 state=self.state, model_entry=entry, dataset_meta=meta, config=config,

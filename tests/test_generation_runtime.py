@@ -55,7 +55,7 @@ class _CachedModel(nn.Module):
         raise AssertionError("full forward must not run on the recurrent path")
 
 
-def test_generate_text_uses_prefill_once_and_streams_every_token():
+def test_generate_text_uses_prefill_once_and_streams_live_without_terminal_backlog():
     model = _CachedModel()
     events = []
     text, count = generate_text(
@@ -71,9 +71,13 @@ def test_generate_text_uses_prefill_once_and_streams_every_token():
     assert model.forward_calls == 0
     assert events[0]["phase"] == "prefill"
     token_events = [event for event in events if event["phase"] == "generate"]
-    assert [event["generated_tokens"] for event in token_events] == [1, 2, 3]
+    assert token_events
+    assert token_events[0]["generated_tokens"] == 1
+    # The terminal text is sent once by Builder's immediate done event instead
+    # of being queued behind another growing per-token widget payload.
+    assert token_events[-1]["generated_tokens"] < count
     assert all(event["generation_mode"] == "recurrent-cache" for event in events)
-    assert token_events[-1]["generated_text"] == text
+    assert token_events[-1]["generated_text"] in text
 
 
 class _FakeBolt(nn.Module):
@@ -110,4 +114,3 @@ def test_bolt_generation_cache_is_fixed_capacity_and_reused():
     assert state["c"].shape[2] == 10
     assert state["c"].data_ptr() == c_ptr
     assert state["rho"].data_ptr() == rho_ptr
-

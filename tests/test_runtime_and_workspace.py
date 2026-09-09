@@ -232,3 +232,29 @@ def test_amp_training_keeps_fp32_master_parameters():
     block = source[start:end]
     assert 'if for_training and precision in {"fp16", "bf16"}' in block
     assert "raw.to(device=device,dtype=parameter_dtype)" in block
+
+
+def test_generation_cache_compares_resolved_runtime_properties():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "mlb_studio" / "builder.py"
+    ).read_text(encoding="utf-8")
+    start = source.index("    def generate_model(")
+    end = source.index("    def start_model_server(", start)
+    block = source[start:end]
+    assert "desired_device = resolve_device" in block
+    assert "desired_precision, _ = resolve_precision" in block
+    assert "str(compiled.device) == str(desired_device)" in block
+    assert "str(compiled.precision) == str(desired_precision)" in block
+    assert '"phase":"cache_reuse"' in block
+    assert "runtime_changed" not in block
+
+
+def test_generation_start_clears_stale_output():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "mlb_studio" / "static" / "builder.js"
+    ).read_text(encoding="utf-8")
+    start = source.index("function startGenerationFromRuntime")
+    end = source.index("function generationActionButton", start)
+    assert 'entry.last_generation="";' in source[start:end]

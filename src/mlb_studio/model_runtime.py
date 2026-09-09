@@ -1865,6 +1865,11 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
         mode="recurrent-cache" if supported else "full-context"
         mode_label=("cached prefill/decode" if supported else "full-context compatibility")
         started=time.perf_counter()
+        last_stream_at=0.0
+        # Notebook widget transports cannot consume hundreds of growing JSON
+        # payloads per second. Coalesce only the UI transport; token generation
+        # itself remains unthrottled and the browser still updates at 12.5 FPS.
+        stream_interval_seconds=0.08
         active_ids=list(ids[-context:])
 
         with torch.inference_mode(),_autocast_context(device,precision):
@@ -1892,10 +1897,14 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
                 next_id=int(next_token[0,0].item())
                 generated.append(next_id)
                 active_ids.append(next_id)
-                elapsed=max(time.perf_counter()-started,1e-9)
-                if progress:
-                    # Publish every token. The UI redraw is coalesced separately,
-                    # so generation never waits for a full sentence or 10-token batch.
+                now=time.perf_counter()
+                elapsed=max(now-started,1e-9)
+                terminal=(
+                    (tokenizer.eos_token_id is not None and next_id==tokenizer.eos_token_id)
+                    or i+1==max_new_tokens
+                )
+                if progress and not terminal and (i==0 or now-last_stream_at>=stream_interval_seconds):
+                    last_stream_at=now
                     progress({
                         "status":"running","runtime_kind":"generate","phase":"generate",
                         "overall":round((i+1)/max_new_tokens*100),"generated_tokens":i+1,
@@ -1904,8 +1913,7 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
                         "message":f"Generated {i+1}/{max_new_tokens} tokens · {mode_label}",
                         "generated_text":tokenizer.decode(generated,skip_special_tokens=True),
                     })
-                if tokenizer.eos_token_id is not None and next_id==tokenizer.eos_token_id: break
-                if i+1==max_new_tokens: break
+                if terminal: break
 
                 if supported and len(active_ids)<=context:
                     logits,cache=recurrent_model.decode_step(
@@ -2247,6 +2255,13 @@ def load_trained_for_generation(*,state,model_entry,dataset_meta,config,checkpoi
     path=Path(str(checkpoint_path or model_entry.get("checkpoint_path") or model_entry.get("path") or ""))
     if not path.exists():
         raise RuntimeError("Trained model artifact was not found. Train the model in this session or select a valid MLBricks model artifact.")
+
+    if progress:
+        progress({
+            "status":"running","runtime_kind":"generate","phase":"weights",
+            "overall":0,
+            "message":f"Loading trained weights from {path.name or path}…",
+        })
 
     if path.is_dir() and (path/"model.pt").exists():
         try:

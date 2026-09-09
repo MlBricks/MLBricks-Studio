@@ -1265,6 +1265,7 @@ function __MLB_STUDIO_FACTORY__(){
       entry=liveBuiltModel(entry);
       if(!entry || generationIsRunning() || !entry.weights_ready)return;
       entry.generation_history=[];
+      entry.last_generation="";
       entry.generation_live={status:"running",phase:"starting",overall:0,generated_tokens:0,message:"Starting generation in Python…",generated_text:""};
       runtimePanel={mode:"generate",modelId:entry.id,tab:"status"};
       draw();
