@@ -2,7 +2,7 @@
   "format": "mlbricks-studio-artifact-index",
   "version": 1,
   "kind": "models",
-  "root": "/mnt/data/fix_dataset_reload/MLBricks-Studio-main/mlbricks_workspace/models",
+  "root": "/mnt/data/ci_regression_fix/MLBricks-Studio-main/mlbricks_workspace/models",
   "root_signature": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
   "entries": []
 }

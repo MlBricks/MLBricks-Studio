@@ -50,13 +50,14 @@ def test_intentional_model_actions_scroll_is_preserved():
     assert "liveBody.scrollTop=Math.max(0,target.offsetTop-14);" in text
 
 
-def test_build_action_uses_hammer_icon_and_centered_content():
+def test_build_action_uses_magic_wand_icon_and_centered_content():
     js = _builder_js()
     css = _builder_css()
     assert 'build:\'<svg \'+common+\'>' in js
-    assert 'd="m12.9 5.9 2.8-2.8 5.2 5.2-2.8 2.8z"' in js
-    assert 'd="m15.6 9.4-9.8 9.8a2 2 0 0 0 2.8 2.8l9.8-9.8"' in js
-    final_rule = css[css.rindex("/* Build action: resolve older fixed-width rules") :]
+    assert 'd="m15 4-1-2-1 2-2 1 2 1 1 2 1-2 2-1-2-1Z"' in js
+    assert 'd="m21 12-1-2-1 2-2 1 2 1 1 2 1-2 2-1-2-1Z"' in js
+    assert 'd="m16.5 11.5-9.75 9.75a2.12 2.12 0 0 1-3-3l9.75-9.75"' in js
+    final_rule = css[css.rindex("/* Build action: magic-wand icon + label are centered horizontally as one unit. */") :]
     assert "width:auto!important" in final_rule
     assert "max-width:none!important" in final_rule
     assert "justify-content:center!important" in final_rule
