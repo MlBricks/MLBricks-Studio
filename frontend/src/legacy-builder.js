@@ -6887,7 +6887,7 @@ function studioChoice(title,message,actions,options={}){
 
     const CUSTOM_TERMINAL_LIMIT_PER_SIDE=4;
     const CUSTOM_TERMINAL_SIDES=["top","right","bottom","left"];
-    const ABSTRACT_TERMINAL_LIMIT=5;
+    const ABSTRACT_TERMINAL_LIMIT=10;
 
     function isAbstractDefinition(def){
       return String(def?.implementation||"")==="abstract_layer";
@@ -7025,7 +7025,7 @@ function studioChoice(title,message,actions,options={}){
       return customTerminalEntries(iface,sideKey).filter(item=>!(excludePort&&(item.port===excludePort||String(item.port.id)===String(excludePort.id)))).length;
     }
     function firstAbstractTerminalSide(preferred="top"){
-      // ABS custom terminals are capped by interface (5 inputs + 5 outputs),
+      // ABS custom terminals are capped by interface (10 inputs + 10 outputs),
       // not by surface. Any terminal may be placed on any of the four sides.
       return normalizedTerminalSide(preferred);
     }
@@ -7153,7 +7153,7 @@ function studioChoice(title,message,actions,options={}){
     function renderAbstractInterfaceEditor(body,def){
       const iface=normalizeAbstractInterface(def);
       const title=document.createElement("div");title.className="mlb-section-title";title.textContent="ABSTRACT LAYER INTERFACE";body.appendChild(title);
-      const fixed=document.createElement("div");fixed.className="mlb-api-path";fixed.innerHTML="<strong>Universal fixed ports:</strong> Top Input + Top Output · Back Input + Front Output · Bottom Input + Bottom Output.<br><strong>Lane mapping:</strong> Top = Skip · Back/Front = Main · Bottom = Extra.<br><strong>Custom ports:</strong> up to 5 inputs and 5 outputs. Each custom terminal can be placed on Top / Right / Bottom / Left and reordered like a Custom Component.";body.appendChild(fixed);
+      const fixed=document.createElement("div");fixed.className="mlb-api-path";fixed.innerHTML="<strong>Universal fixed ports:</strong> Top Input + Top Output · Back Input + Front Output · Bottom Input + Bottom Output.<br><strong>Lane mapping:</strong> Top = Skip · Back/Front = Main · Bottom = Extra.<br><strong>Custom ports:</strong> up to 10 inputs and 10 outputs. Each custom terminal can be placed on Top / Right / Bottom / Left and reordered like a Custom Component.";body.appendChild(fixed);
       const terminalSideOptions=[
         {value:"top",label:"Top"},{value:"right",label:"Right"},{value:"bottom",label:"Bottom"},{value:"left",label:"Left"}
       ];
@@ -7191,7 +7191,7 @@ function studioChoice(title,message,actions,options={}){
         const add=btn("+ Add Custom "+(kind==="in"?"Input":"Output"),"mlb-create mlb-custom-add-arg");
         add.disabled=ports.length>=ABSTRACT_TERMINAL_LIMIT;
         add.addEventListener("click",()=>{
-          if(ports.length>=ABSTRACT_TERMINAL_LIMIT){setStatus("Maximum 5 custom "+(kind==="in"?"inputs":"outputs")+" allowed on an Abstract Layer.");draw();return;}
+          if(ports.length>=ABSTRACT_TERMINAL_LIMIT){setStatus("Maximum "+ABSTRACT_TERMINAL_LIMIT+" custom "+(kind==="in"?"inputs":"outputs")+" allowed on an Abstract Layer.");draw();return;}
           const side=firstAbstractTerminalSide("top");
           checkpoint("Add Abstract Layer terminal");
           ports.push(newAbstractTerminal(kind,ports.length,side));
@@ -8919,7 +8919,7 @@ function studioChoice(title,message,actions,options={}){
     }
 
     function abstractBoundarySideCustomTerminalPercent(index,count){
-      // ABS can expose 5 custom inputs + 5 custom outputs and every one may be
+      // ABS can expose 10 custom inputs + 10 custom outputs and every one may be
       // placed on any surface. Left/right keep a protected gap around the fixed
       // Back Input / Front Output at 50%, mirroring the Custom Component layout.
       const total=Math.max(1,Math.min(ABSTRACT_TERMINAL_LIMIT*2,Number(count)||1));
@@ -9111,7 +9111,7 @@ function studioChoice(title,message,actions,options={}){
       if(item.visualSide==="bottom")return "left:"+p+"%;bottom:-7px;top:auto;transform:translateX(-50%)";
       // ABS custom terminals share the Custom Component rule: left/right stay
       // clear of the fixed universal center socket. ABS supports up to ten
-      // custom terminals on one side (5 custom inputs + 5 custom outputs).
+      // custom terminals on one side (10 custom inputs + 10 custom outputs).
       if(item.visualSide==="left")return "left:-7px;top:"+p+"%;transform:translateY(-50%)";
       return "right:-7px;top:"+p+"%;transform:translateY(-50%)";
     }
@@ -9339,6 +9339,24 @@ function studioChoice(title,message,actions,options={}){
         return [0,1];
       }
 
+      function oppositeVisualSide(side){
+        if(side==="left")return "right";
+        if(side==="right")return "left";
+        if(side==="top")return "bottom";
+        return "top";
+      }
+
+      function connectionFacingVisualSide(nodeEl,side,index,key="",socket=""){
+        const visual=portVisualSide(nodeEl,side,index,key,socket);
+        // Sentinel ABS boundary terminals are rendered on the frame only while
+        // editing inside that ABS. Their wires therefore leave/approach the port
+        // from the INTERIOR side of the frame. At the parent graph the ABS is a
+        // normal custom node, so its ports keep the ordinary exterior direction.
+        return nodeEl.classList.contains("mlb-abs-boundary-anchor")
+          ?oppositeVisualSide(visual)
+          :visual;
+      }
+
       function namedBezier(x1,y1,s1,x2,y2,s2){
         const [dx1,dy1]=sideVector(s1),[dx2,dy2]=sideVector(s2);
         const distance=Math.hypot(x2-x1,y2-y1);
@@ -9408,8 +9426,11 @@ function studioChoice(title,message,actions,options={}){
 
         const boundaryEdge=a.classList.contains("mlb-abs-boundary-anchor")||b.classList.contains("mlb-abs-boundary-anchor");
         if(boundaryEdge){
-          const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"");
-          const targetVisual=portVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"");
+          // While editing an ABS, the boundary is the outside wall and all graph
+          // components are inside it. Route boundary-connected wires toward the
+          // interior, never out across the frame and back over another lane.
+          const sourceVisual=connectionFacingVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"");
+          const targetVisual=connectionFacingVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"");
           p.setAttribute("d",namedBezier(x1,y1,sourceVisual,x2,y2,targetVisual));
           p.setAttribute("class","mlb-edge-main mlb-edge-abs-boundary mlb-edge-side-aware"+(lane==="named"?" mlb-edge-named":""));
           if(lane==="named")p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);
@@ -10730,7 +10751,7 @@ function studioChoice(title,message,actions,options={}){
           if(isApiCustom){
             renderAPICustomOverview(body,defNow);
           }else if(isAbstractCustom){
-            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Build directly inside the ABS boundary using the universal Studio layout: Top Input/Output, Back Input, Front Output, and Bottom Input/Output. Add up to five custom inputs and five custom outputs and place each one on any side.";body.appendChild(help);
+            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Build directly inside the ABS boundary using the universal Studio layout: Top Input/Output, Back Input, Front Output, and Bottom Input/Output. Add up to 10 custom inputs and 10 custom outputs and place each one on any side.";body.appendChild(help);
             renderAbstractInterfaceEditor(body,defNow);
           }else{
             const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Compose this reusable Module from built-in and saved components. You can nest Modules directly here without returning to Workshop.";body.appendChild(help);

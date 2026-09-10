@@ -425,7 +425,7 @@ def primitive_catalog():
             "name": "Abstract Layer",
             "icon": "ABS",
             "category": "Core Blocks",
-            "description": "Editable layer shell with 3 fixed inputs/outputs and up to 5 custom inputs/outputs.",
+            "description": "Editable layer shell with 3 fixed inputs/outputs and up to 10 custom inputs/outputs.",
             "accent": "purple",
             "api": [],
         },

@@ -718,7 +718,7 @@ def test_workshop_name_and_slm_presets_are_release_configured():
     assert 'abstractLayerDefinition(name)' in js
     assert 'addAbstractLayerPrimitive()' in js
     assert 'Open Abstract Layer' in js
-    assert 'const ABSTRACT_TERMINAL_LIMIT=5;' in js
+    assert 'const ABSTRACT_TERMINAL_LIMIT=10;' in js
     assert '+ Add Custom ' in js
     assert 'pos.name="Learned Position"' in js
     assert 'finalNorm.name="Final LayerNorm"' in js
@@ -775,5 +775,18 @@ def test_abs_boundary_matches_universal_six_socket_geometry_and_custom_component
     assert 'Math.min(ABSTRACT_TERMINAL_LIMIT*2,Number(count)||1)' in text
     assert 'changeAbstractTerminalSide(iface,port,value)' in text
     assert 'const side=firstAbstractTerminalSide("top");' in text
-    assert 'up to 5 inputs and 5 outputs' in text
+    assert 'up to 10 inputs and 10 outputs' in text
     assert 'Top / Right / Bottom / Left' in text
+    assert 'Maximum "+ABSTRACT_TERMINAL_LIMIT+" custom ' in text
+
+
+def test_abs_boundary_wires_face_interior_while_parent_abs_ports_stay_external():
+    text = _builder_js()
+    assert 'function oppositeVisualSide(side)' in text
+    assert 'function connectionFacingVisualSide(nodeEl,side,index,key="",socket="")' in text
+    assert 'nodeEl.classList.contains("mlb-abs-boundary-anchor")' in text
+    assert '?oppositeVisualSide(visual)' in text
+    assert 'const sourceVisual=connectionFacingVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"")' in text
+    assert 'const targetVisual=connectionFacingVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"")' in text
+    assert 'const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"")' in text
+    assert 'const targetVisual=portVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"")' in text
