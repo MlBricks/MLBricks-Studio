@@ -7020,6 +7020,28 @@ function studioChoice(title,message,actions,options={}){
       resequenceCustomTerminals(binding,next);
       return true;
     }
+    function abstractTerminalSideCount(iface,side,excludePort=null){
+      const sideKey=normalizedTerminalSide(side);
+      return customTerminalEntries(iface,sideKey).filter(item=>!(excludePort&&(item.port===excludePort||String(item.port.id)===String(excludePort.id)))).length;
+    }
+    function firstAbstractTerminalSide(preferred="top"){
+      // ABS custom terminals are capped by interface (5 inputs + 5 outputs),
+      // not by surface. Any terminal may be placed on any of the four sides.
+      return normalizedTerminalSide(preferred);
+    }
+    function changeAbstractTerminalSide(iface,port,nextSide){
+      const live=resolveCustomTerminal(iface,port);
+      if(!live)return false;
+      const prev=normalizedTerminalSide(live.side);
+      const next=normalizedTerminalSide(nextSide);
+      if(prev===next){live.side=next;resequenceCustomTerminals(iface,next);return false;}
+      live.side=next;
+      live.order=abstractTerminalSideCount(iface,next,live);
+      resequenceCustomTerminals(iface,prev);
+      resequenceCustomTerminals(iface,next);
+      return true;
+    }
+
     function redrawCustomTerminalLayout(){
       // Side/reorder controls are atomic layout actions. They must not wait for
       // the text-editor redraw guard, otherwise the socket appears stuck on its
@@ -7131,7 +7153,7 @@ function studioChoice(title,message,actions,options={}){
     function renderAbstractInterfaceEditor(body,def){
       const iface=normalizeAbstractInterface(def);
       const title=document.createElement("div");title.className="mlb-section-title";title.textContent="ABSTRACT LAYER INTERFACE";body.appendChild(title);
-      const fixed=document.createElement("div");fixed.className="mlb-api-path";fixed.innerHTML="<strong>Fixed ports:</strong> 3 inputs + 3 outputs · Skip / Main / Extra.<br><strong>Custom ports:</strong> up to 5 inputs and 5 outputs. Custom ports are additive and keep their stable mapping IDs.";body.appendChild(fixed);
+      const fixed=document.createElement("div");fixed.className="mlb-api-path";fixed.innerHTML="<strong>Universal fixed ports:</strong> Top Input + Top Output · Back Input + Front Output · Bottom Input + Bottom Output.<br><strong>Lane mapping:</strong> Top = Skip · Back/Front = Main · Bottom = Extra.<br><strong>Custom ports:</strong> up to 5 inputs and 5 outputs. Each custom terminal can be placed on Top / Right / Bottom / Left and reordered like a Custom Component.";body.appendChild(fixed);
       const terminalSideOptions=[
         {value:"top",label:"Top"},{value:"right",label:"Right"},{value:"bottom",label:"Bottom"},{value:"left",label:"Left"}
       ];
@@ -7161,7 +7183,7 @@ function studioChoice(title,message,actions,options={}){
           });
           head.append(nm,rm);box.appendChild(head);
           box.appendChild(editorRow("Terminal Name",port.name||"",value=>{port.name=apiSafePortName(value,(kind==="in"?"input_":"output_")+(index+1));draw();}));
-          box.appendChild(editorRow("Side",port.side||"top",value=>{checkpoint("Move Abstract Layer terminal side");changeCustomTerminalSide(iface,port,value);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
+          box.appendChild(editorRow("Side",port.side||"top",value=>{checkpoint("Move Abstract Layer terminal side");changeAbstractTerminalSide(iface,port,value);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
           const hint=document.createElement("div");hint.className="mlb-terminal-map-hint";
           hint.textContent=kind==="in"?"Inside ABS this appears directly on the boundary as an incoming named terminal.":"Inside ABS this appears directly on the boundary as an outgoing named terminal.";box.appendChild(hint);
           appendMoveControls(box,port);body.appendChild(box);
@@ -7170,8 +7192,7 @@ function studioChoice(title,message,actions,options={}){
         add.disabled=ports.length>=ABSTRACT_TERMINAL_LIMIT;
         add.addEventListener("click",()=>{
           if(ports.length>=ABSTRACT_TERMINAL_LIMIT){setStatus("Maximum 5 custom "+(kind==="in"?"inputs":"outputs")+" allowed on an Abstract Layer.");draw();return;}
-          const side=firstCustomTerminalSideWithRoom(iface,"top");
-          if(!side){setStatus("No terminal surface has room. Move an existing terminal to another side first.");draw();return;}
+          const side=firstAbstractTerminalSide("top");
           checkpoint("Add Abstract Layer terminal");
           ports.push(newAbstractTerminal(kind,ports.length,side));
           setStatus("Custom "+(kind==="in"?"input":"output")+" added to Abstract Layer.");draw();
@@ -8897,6 +8918,26 @@ function studioChoice(title,message,actions,options={}){
       return slots[i];
     }
 
+    function abstractBoundarySideCustomTerminalPercent(index,count){
+      // ABS can expose 5 custom inputs + 5 custom outputs and every one may be
+      // placed on any surface. Left/right keep a protected gap around the fixed
+      // Back Input / Front Output at 50%, mirroring the Custom Component layout.
+      const total=Math.max(1,Math.min(ABSTRACT_TERMINAL_LIMIT*2,Number(count)||1));
+      const i=Math.max(0,Math.min(total-1,Number(index)||0));
+      if(total===1)return 40;
+      const leftCount=Math.ceil(total/2);
+      const rightCount=total-leftCount;
+      const left=[];
+      const right=[];
+      for(let n=0;n<leftCount;n+=1){
+        left.push(leftCount===1?40:28+(16*n/(leftCount-1)));
+      }
+      for(let n=0;n<rightCount;n+=1){
+        right.push(rightCount===1?60:56+(16*n/(rightCount-1)));
+      }
+      return [...left,...right][i];
+    }
+
     function customTerminalRecords(node){
       const inputs=customUserTerminals(node,"in");
       const outputs=customUserTerminals(node,"out");
@@ -8910,8 +8951,9 @@ function studioChoice(title,message,actions,options={}){
         const group=all.filter(item=>String(item.port.side||"top")===visualSide)
           .sort((a,b)=>(Number(a.port.order)||0)-(Number(b.port.order)||0)||String(a.port.id).localeCompare(String(b.port.id)));
         group.forEach((item,index)=>{
+          const abstractLayout=!!abstractDefinitionForNode(node);
           const percent=(visualSide==="left"||visualSide==="right")
-            ?centeredSideCustomTerminalPercent(index,group.length)
+            ?(abstractLayout?abstractBoundarySideCustomTerminalPercent(index,group.length):centeredSideCustomTerminalPercent(index,group.length))
             :evenlySpacedCustomTerminalPercent(index,group.length);
           result.push({...item,visualSide,percent});
         });
@@ -9048,11 +9090,10 @@ function studioChoice(title,message,actions,options={}){
       return side==="in"?"Input":"Output";
     }
 
-    function absBoundaryFixedStyle(visualSide,index){
-      const positions=[18,50,82];
-      const p=positions[Math.max(0,Math.min(2,Number(index)||0))];
-      if(visualSide==="left")return "left:-7px;top:"+p+"%;transform:translateY(-50%)";
-      return "right:-7px;top:"+p+"%;transform:translateY(-50%)";
+    function absBoundaryFixedPosition(ioSide,socket){
+      // Use the exact same universal socket geometry as every Studio component:
+      // Top In/Out, Back In + Front Out, Bottom In/Out.
+      return namedSocketStyle(ioSide,socket);
     }
 
     function absBoundaryLabelStyle(visualSide,percent){
@@ -9068,8 +9109,9 @@ function studioChoice(title,message,actions,options={}){
       const p=percent.toFixed(2);
       if(item.visualSide==="top")return "left:"+p+"%;top:-7px;transform:translateX(-50%)";
       if(item.visualSide==="bottom")return "left:"+p+"%;bottom:-7px;top:auto;transform:translateX(-50%)";
-      // The 30–70% custom-side layout intentionally avoids the fixed 18/50/82
-      // ABS terminals, so custom ports can share left/right surfaces cleanly.
+      // ABS custom terminals share the Custom Component rule: left/right stay
+      // clear of the fixed universal center socket. ABS supports up to ten
+      // custom terminals on one side (5 custom inputs + 5 custom outputs).
       if(item.visualSide==="left")return "left:-7px;top:"+p+"%;transform:translateY(-50%)";
       return "right:-7px;top:"+p+"%;transform:translateY(-50%)";
     }
@@ -9077,26 +9119,30 @@ function studioChoice(title,message,actions,options={}){
     function abstractBoundaryPortMarkup(node,boundaryKind){
       if(!node)return "";
       const isInputBoundary=boundaryKind==="input";
+      // Internal graph direction is intentionally inverted at the boundary:
+      // conceptual ABS inputs SOURCE tensors into the layer, while conceptual
+      // ABS outputs TARGET tensors produced by internal components.
       const internalSide=isInputBoundary?"out":"in";
-      const visualSide=isInputBoundary?"left":"right";
+      const conceptSide=isInputBoundary?"in":"out";
       const fixed=isInputBoundary
         ?[
-          {index:0,key:"skip_out",label:"Skip In",color:"#a96dff"},
-          {index:1,key:"main_out",label:"Main In",color:"#7087ff"},
-          {index:2,key:"extra_out",label:"Extra In",color:"#35c8b5"}
+          {index:0,key:"skip_out",label:"Top Input",socket:"top",color:"#a96dff"},
+          {index:1,key:"main_out",label:"Back Input",socket:"back",color:"#7087ff"},
+          {index:2,key:"extra_out",label:"Bottom Input",socket:"bottom",color:"#35c8b5"}
         ]
         :[
-          {index:0,key:"skip_in",label:"Skip Out",color:"#a96dff"},
-          {index:1,key:"main_in",label:"Main Out",color:"#7087ff"},
-          {index:2,key:"extra_in",label:"Extra Out",color:"#35c8b5"}
+          {index:0,key:"skip_in",label:"Top Output",socket:"top",color:"#a96dff"},
+          {index:1,key:"main_in",label:"Front Output",socket:"front",color:"#7087ff"},
+          {index:2,key:"extra_in",label:"Bottom Output",socket:"bottom",color:"#35c8b5"}
         ];
       let html="";
       fixed.forEach(item=>{
         const roleClass=internalSide==="in"?"mlb-input-socket":"mlb-output-socket";
         const conceptClass=isInputBoundary?"concept-input":"concept-output";
-        html+='<button class="mlb-port '+internalSide+' '+roleClass+' mlb-abs-boundary-port mlb-abs-fixed-port '+conceptClass+'" data-node-id="'+node.id+'" data-side="'+internalSide+'" data-io-role="'+(internalSide==="in"?'input':'output')+'" data-visual-side="'+visualSide+'" data-port-index="'+item.index+'" data-port-mode="standard" data-port-key="" data-port-name="'+item.label+'" data-tooltip="'+item.label+'" style="'+absBoundaryFixedStyle(visualSide,item.index)+';--named-port-color:'+item.color+'" type="button" aria-label="'+item.label+'" title="'+item.label+'"></button>';
-        const p=[18,50,82][item.index];
-        html+='<span class="mlb-abs-boundary-port-label '+visualSide+' '+conceptClass+'" style="'+absBoundaryLabelStyle(visualSide,p)+';--named-port-color:'+item.color+'">'+item.label+'</span>';
+        const pos=absBoundaryFixedPosition(conceptSide,item.socket);
+        const percent=(item.socket==="top"||item.socket==="bottom")?(conceptSide==="in"?14:86):50;
+        html+='<button class="mlb-port '+internalSide+' '+roleClass+' mlb-abs-boundary-port mlb-abs-fixed-port '+conceptClass+' visual-'+pos.visual+'" data-node-id="'+node.id+'" data-side="'+internalSide+'" data-io-role="'+(internalSide==="in"?'input':'output')+'" data-visual-side="'+pos.visual+'" data-socket="'+item.socket+'" data-port-index="'+item.index+'" data-port-mode="standard" data-port-key="" data-port-name="'+item.label+'" data-tooltip="'+item.label+'" style="'+pos.style+';--named-port-color:'+item.color+'" type="button" aria-label="'+item.label+'" title="'+item.label+'"></button>';
+        html+='<span class="mlb-abs-boundary-port-label '+pos.visual+' '+conceptClass+' fixed" style="'+absBoundaryLabelStyle(pos.visual,percent)+';--named-port-color:'+item.color+'">'+item.label+'</span>';
       });
 
       customTerminalRecords(node).filter(item=>item.io===internalSide).forEach((item,customIndex)=>{
@@ -9123,7 +9169,7 @@ function studioChoice(title,message,actions,options={}){
       shell.setAttribute("aria-label","Abstract Layer boundary");
       const title=document.createElement("div");title.className="mlb-abs-boundary-title";
       const titleName=document.createElement("strong");titleName.textContent="ABS · "+String(def.name||"Abstract Layer");
-      const titleHint=document.createElement("span");titleHint.textContent="Connect components directly to the boundary ports";
+      const titleHint=document.createElement("span");titleHint.textContent="Universal 3×3 boundary · custom ports can be placed on any side";
       title.append(titleName,titleHint);shell.appendChild(title);
       shell.addEventListener("click",ev=>{
         if(ev.target.closest(".mlb-port"))return;
@@ -10439,7 +10485,7 @@ function studioChoice(title,message,actions,options={}){
             const def=state.custom_components?.[n.definition_id];
             meta.textContent=String(def?.implementation||"graph")==="api"
               ?"API execution graph · universal 3×3 sockets"
-              :(isAbstractDefinition(def)?"Abstract Layer · editable internal graph · fixed 3×3 + custom ports":"Nested Module · universal 3×3 sockets");
+              :(isAbstractDefinition(def)?"Abstract Layer · universal 3×3 boundary + custom ports":"Nested Module · universal 3×3 sockets");
           }else meta.textContent=(apiInfo(n).public_name||n.type)+" · universal 3×3 sockets";
           card.querySelectorAll('.mlb-port').forEach(portEl=>{
             const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
@@ -10684,7 +10730,7 @@ function studioChoice(title,message,actions,options={}){
           if(isApiCustom){
             renderAPICustomOverview(body,defNow);
           }else if(isAbstractCustom){
-            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Build directly inside the ABS boundary. Fixed Skip/Main/Extra ports live on the frame; add up to five custom inputs and five custom outputs below. Connect internal components straight to the boundary terminals.";body.appendChild(help);
+            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Build directly inside the ABS boundary using the universal Studio layout: Top Input/Output, Back Input, Front Output, and Bottom Input/Output. Add up to five custom inputs and five custom outputs and place each one on any side.";body.appendChild(help);
             renderAbstractInterfaceEditor(body,defNow);
           }else{
             const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Compose this reusable Module from built-in and saved components. You can nest Modules directly here without returning to Workshop.";body.appendChild(help);

@@ -593,7 +593,7 @@ def test_custom_terminal_surface_spacing_reserves_fixed_center_socket():
     assert '3:[30,40,60]' in js
     assert '4:[30,40,60,70]' in js
     assert 'function centeredSideCustomTerminalPercent(index,count)' in js
-    assert '?centeredSideCustomTerminalPercent(index,group.length)' in js
+    assert 'abstractLayout?abstractBoundarySideCustomTerminalPercent(index,group.length):centeredSideCustomTerminalPercent(index,group.length)' in js
     assert "Math.abs(percent-50)<0.01?'-18px':'-6px'" not in js
     assert 'never overlap it' in js
     # Old regressions either stacked custom terminals below center or created a
@@ -754,9 +754,26 @@ def test_abs_editor_uses_direct_boundary_ports_instead_of_visible_io_blocks():
     assert 'abstractBoundaryPortMarkup(boundary.input,"input")' in text
     assert 'abstractBoundaryPortMarkup(boundary.output,"output")' in text
     assert '(comp.nodes||[]).filter(n=>n.type!=="abstract_input"&&n.type!=="abstract_output")' in text
-    assert 'Connect components directly to the boundary ports' in text
+    assert 'Universal 3×3 boundary · custom ports can be placed on any side' in text
     assert 'Boundary In → Component → Boundary Out' in text
     assert '.mlb-flow.mlb-abs-boundary-flow{' in css
     assert '.mlb-abs-boundary-port{' in css
     assert '.mlb-abs-boundary-port-label{' in css
     assert '.mlb-edge-abs-boundary{' in css
+
+
+def test_abs_boundary_matches_universal_six_socket_geometry_and_custom_component_layout():
+    text = _builder_js()
+    assert '{index:0,key:"skip_out",label:"Top Input",socket:"top"' in text
+    assert '{index:1,key:"main_out",label:"Back Input",socket:"back"' in text
+    assert '{index:2,key:"extra_out",label:"Bottom Input",socket:"bottom"' in text
+    assert '{index:0,key:"skip_in",label:"Top Output",socket:"top"' in text
+    assert '{index:1,key:"main_in",label:"Front Output",socket:"front"' in text
+    assert '{index:2,key:"extra_in",label:"Bottom Output",socket:"bottom"' in text
+    assert 'return namedSocketStyle(ioSide,socket);' in text
+    assert 'function abstractBoundarySideCustomTerminalPercent(index,count)' in text
+    assert 'Math.min(ABSTRACT_TERMINAL_LIMIT*2,Number(count)||1)' in text
+    assert 'changeAbstractTerminalSide(iface,port,value)' in text
+    assert 'const side=firstAbstractTerminalSide("top");' in text
+    assert 'up to 5 inputs and 5 outputs' in text
+    assert 'Top / Right / Bottom / Left' in text
