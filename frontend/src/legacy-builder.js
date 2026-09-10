@@ -9261,7 +9261,55 @@ function studioChoice(title,message,actions,options={}){
           if(e.source===selected||e.target===selected)p.classList.add("mlb-edge-focus");
           else p.classList.add("mlb-edge-dim");
         }
+
+        // The visible wire stays purely visual. A wider transparent SVG path
+        // sits on top as the click target so even thin connections are easy to
+        // select in notebook and desktop layouts. Clicking a wire opens the
+        // Studio connection action dialog instead of deleting it immediately.
+        const hit=document.createElementNS("http://www.w3.org/2000/svg","path");
+        hit.setAttribute("d",p.getAttribute("d")||"");
+        hit.setAttribute("class","mlb-edge-hit");
+        hit.setAttribute("data-edge-id",e.id);
+        hit.setAttribute("aria-label","Connection actions");
+        hit.addEventListener("mouseenter",()=>p.classList.add("mlb-edge-hover"));
+        hit.addEventListener("mouseleave",()=>p.classList.remove("mlb-edge-hover"));
+        hit.addEventListener("click",async ev=>{
+          ev.preventDefault();
+          ev.stopPropagation();
+          if(!requireEditableLayout("remove connections"))return;
+          const live=current(state);
+          const edgeNow=(live?.edges||[]).find(x=>x.id===e.id);
+          if(!edgeNow)return;
+          const src=(live.nodes||[]).find(x=>x.id===edgeNow.source);
+          const tgt=(live.nodes||[]).find(x=>x.id===edgeNow.target);
+          const lane=edgeNow.kind==="residual"?"Skip":(edgeNow.kind==="aux"?"Extra":(edgeNow.kind==="named"?"Custom":"Main"));
+          const sourcePort=String(edgeNow.source_port||"").replace(/^named_out:/,"");
+          const targetPort=String(edgeNow.target_port||"").replace(/^named_in:/,"");
+          const portDetail=(edgeNow.kind==="named"&&(sourcePort||targetPort))
+            ?(" · "+(sourcePort||"output")+" → "+(targetPort||"input"))
+            :(" · "+lane);
+          const connection=(src?nodeDisplayName(src):"Node")+" → "+(tgt?nodeDisplayName(tgt):"Node")+portDetail;
+          const action=await studioChoice(
+            "Connection",
+            connection,
+            [
+              {label:"Cancel",value:"",className:"secondary"},
+              {label:"Remove Connection",value:"remove",className:"primary",primary:true}
+            ],
+            {variant:"warning",details:"Remove only this wire. The connected components remain in the layer."}
+          );
+          if(action!=="remove")return;
+          const latest=current(state);
+          if(!(latest?.edges||[]).some(x=>x.id===e.id))return;
+          checkpoint("Remove connection");
+          latest.edges=latest.edges.filter(x=>x.id!==e.id);
+          pendingPort=null;
+          setStatus("Connection removed.");
+          draw();
+        });
+
         svg.appendChild(p);
+        svg.appendChild(hit);
       }
     }
 

@@ -251,6 +251,9 @@
 .mlb-port.lane-2:hover,.mlb-port.lane-2.armed{background:#70e1d3;border-color:#fff}
 .mlb-edge-skip{fill:none;stroke:#a96dff;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .mlb-edge-extra{fill:none;stroke:#35c8b5;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* Direct wire editing: the transparent hit path makes thin connections easy to click. */
+.mlb-edge-hit{fill:none;stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer}
+.mlb-edge-hover{stroke-width:3.4!important}
 
 .mlb-palette.collapsed{display:none}
 .mlb-category:hover{background:#151f29}

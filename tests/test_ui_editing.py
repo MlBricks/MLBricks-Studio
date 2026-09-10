@@ -730,3 +730,16 @@ def test_workshop_name_and_slm_presets_are_release_configured():
     assert 'depth:2' in js
     assert 'coreName:"SOUP ×3"' in js
     assert 'depth:3' in js
+
+
+def test_wire_click_opens_remove_connection_action():
+    text = _builder_js()
+    css = _builder_css()
+    assert 'hit.setAttribute("class","mlb-edge-hit")' in text
+    assert 'hit.addEventListener("click",async ev=>' in text
+    assert '"Remove Connection",value:"remove"' in text
+    assert 'details:"Remove only this wire. The connected components remain in the layer."' in text
+    assert 'latest.edges=latest.edges.filter(x=>x.id!==e.id);' in text
+    assert 'checkpoint("Remove connection")' in text
+    assert '.mlb-edge-hit{fill:none;stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer}' in css
+    assert '.mlb-edge-hover{stroke-width:3.4!important}' in css
