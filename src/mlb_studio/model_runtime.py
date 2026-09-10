@@ -2240,6 +2240,9 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
                     "generation_algorithms":algorithms,"fallback_reason":fallback_reason,
                     "message":f"Prompt ready · {mode_label}",
                     "generated_text":tokenizer.decode(generated,skip_special_tokens=True),
+                    "generated_output":{"kind":"text","mime":"text/plain","data":tokenizer.decode(generated,skip_special_tokens=True)},
+                    "generated_output_kind":"text","generated_output_mime":"text/plain",
+                    "generated_output_meta":{"tokens": 0},
                 })
 
             for i in range(max_new_tokens):
@@ -2263,6 +2266,9 @@ def generate_text(model,tokenizer,prompt,*,max_new_tokens,context,device,precisi
                         "generation_algorithms":algorithms,"fallback_reason":fallback_reason,
                         "message":f"Generated {i+1}/{max_new_tokens} tokens · {mode_label}",
                         "generated_text":tokenizer.decode(generated,skip_special_tokens=True),
+                        "generated_output":{"kind":"text","mime":"text/plain","data":tokenizer.decode(generated,skip_special_tokens=True)},
+                        "generated_output_kind":"text","generated_output_mime":"text/plain",
+                        "generated_output_meta":{"tokens": i+1},
                     })
                 if terminal: break
 

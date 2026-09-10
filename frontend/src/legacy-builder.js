@@ -4383,9 +4383,17 @@ function studioChoice(title,message,actions,options={}){
           generation_algorithms:event.generation_algorithms||entry.generation_live?.generation_algorithms||[],
           fallback_reason:event.fallback_reason||entry.generation_live?.fallback_reason||null,
           runtime_source:event.runtime_source||entry.generation_live?.runtime_source||null,
+          generated_output:event.generated_output??entry.generation_live?.generated_output??entry.last_generated_output??null,
+          generated_output_kind:event.generated_output_kind||entry.generation_live?.generated_output_kind||entry.last_generated_output_kind||null,
+          generated_output_mime:event.generated_output_mime||entry.generation_live?.generated_output_mime||entry.last_generated_output_mime||null,
+          generated_output_meta:event.generated_output_meta||entry.generation_live?.generated_output_meta||entry.last_generated_output_meta||null,
           message:event.message,generated_text:next.generated_text||entry.generation_live?.generated_text||entry.last_generation||""
         };
         if(next.generated_text)entry.last_generation=next.generated_text;
+        if(event.generated_output!==undefined)entry.last_generated_output=event.generated_output;
+        if(event.generated_output_kind)entry.last_generated_output_kind=event.generated_output_kind;
+        if(event.generated_output_mime)entry.last_generated_output_mime=event.generated_output_mime;
+        if(event.generated_output_meta)entry.last_generated_output_meta=event.generated_output_meta;
       }
     }
 
@@ -4488,6 +4496,118 @@ function studioChoice(title,message,actions,options={}){
       return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     }
 
+    function outputMetaText(meta){
+      if(!meta||typeof meta!=="object")return "";
+      try{return JSON.stringify(meta,null,2);}catch(_){return String(meta);}
+    }
+
+    function extractOutputData(raw){
+      if(raw==null)return null;
+      if(typeof raw==="string"||typeof raw==="number"||typeof raw==="boolean"||Array.isArray(raw))return raw;
+      if(typeof raw!=="object")return raw;
+      if(raw.data!==undefined)return raw.data;
+      if(raw.value!==undefined)return raw.value;
+      if(raw.src!==undefined)return raw.src;
+      if(raw.url!==undefined)return raw.url;
+      return raw;
+    }
+
+    function guessOutputKind(kind,mime,data){
+      kind=String(kind||"").trim().toLowerCase();
+      mime=String(mime||"").trim().toLowerCase();
+      if(kind)return kind;
+      if(mime.startsWith("image/"))return "image";
+      if(mime.startsWith("audio/"))return "audio";
+      if(mime.startsWith("video/"))return "video";
+      if(mime.startsWith("application/json"))return "json";
+      if(typeof data==="string"&&data.startsWith("data:image/"))return "image";
+      if(typeof data==="string"&&data.startsWith("data:audio/"))return "audio";
+      if(Array.isArray(data))return "signal";
+      if(data&&typeof data==="object")return "json";
+      return "text";
+    }
+
+    function normalizedGenerationOutput(live,entry){
+      const raw=live.generated_output??entry.last_generated_output??live.generated_text??entry.last_generation??"";
+      const obj=(raw&&typeof raw==="object"&&!Array.isArray(raw))?raw:null;
+      const meta=(live.generated_output_meta&&typeof live.generated_output_meta==="object"?live.generated_output_meta:null)
+        || (entry.last_generated_output_meta&&typeof entry.last_generated_output_meta==="object"?entry.last_generated_output_meta:null)
+        || (obj&&obj.metadata&&typeof obj.metadata==="object"?obj.metadata:null)
+        || {};
+      const mime=String(live.generated_output_mime||entry.last_generated_output_mime||(obj&&(obj.mime||obj.content_type))||"");
+      const data=extractOutputData(raw);
+      const kind=guessOutputKind(live.generated_output_kind||entry.last_generated_output_kind||(obj&&(obj.kind||obj.type)),mime,data);
+      const src=(obj&&(obj.src||obj.url))||((typeof data==="string"&&(kind==="image"||kind==="audio"||kind==="video"||kind==="file"))?data:"");
+      return {kind,mime,data,meta,src};
+    }
+
+    function numericSignalSeries(value){
+      if(Array.isArray(value))return value.map(Number).filter(Number.isFinite);
+      if(typeof value==="string")return value.split(/[\s,]+/).map(Number).filter(Number.isFinite);
+      return [];
+    }
+
+    function waveformPoints(series,width,height){
+      if(!series.length)return "";
+      const min=Math.min(...series),max=Math.max(...series),span=(max-min)||1;
+      return series.map((v,i)=>(((i/Math.max(1,series.length-1))*width).toFixed(1))+","+((height-((v-min)/span)*height).toFixed(1))).join(" ");
+    }
+
+    function renderUniversalOutputPanel(section,entry,live,config){
+      const env=normalizedGenerationOutput(live,entry);
+      const card=document.createElement("div");card.className="mlb-status-sample generation mlb-output-viewer";
+      const head=document.createElement("div");
+      const title=document.createElement("strong");title.textContent="OUTPUT";
+      const meta=document.createElement("span");
+      const parts=[];
+      if(env.kind)parts.push(String(env.kind).toUpperCase());
+      if(env.mime)parts.push(env.mime);
+      if(env.kind==="text")parts.push(Number(live.generated_tokens||0)+" / "+Number(config.max_new_tokens||0)+" tokens");
+      meta.textContent=parts.join(" · ")||"Output preview";
+      head.append(title,meta);card.appendChild(head);
+      const addMeta=()=>{const text=outputMetaText(env.meta);if(text){const pre=document.createElement("pre");pre.className="mlb-output-meta";pre.textContent=text;card.appendChild(pre);}};
+      if(env.kind==="image"){
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card";
+        if(env.src||typeof env.data==="string"){
+          const img=document.createElement("img");img.className="mlb-output-image";img.alt="Generated output";img.src=env.src||env.data;wrap.appendChild(img);
+        }else{
+          const pre=document.createElement("pre");pre.textContent=String(env.data||"No image available.");wrap.appendChild(pre);
+        }
+        card.appendChild(wrap);addMeta();section.appendChild(card);return;
+      }
+      if(env.kind==="audio"){
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card";
+        if(env.src||typeof env.data==="string"){
+          const audio=document.createElement("audio");audio.className="mlb-output-audio";audio.controls=true;audio.src=env.src||env.data;wrap.appendChild(audio);
+        }else{
+          const pre=document.createElement("pre");pre.textContent=String(env.data||"No audio available.");wrap.appendChild(pre);
+        }
+        card.appendChild(wrap);addMeta();section.appendChild(card);return;
+      }
+      if(env.kind==="signal"){
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card";
+        const series=numericSignalSeries(env.data);const preview=series.slice(0,256);
+        const row=document.createElement("div");row.className="mlb-output-wave-head";row.innerHTML="<strong>Waveform</strong><span>"+(series.length?("samples: "+series.length):"No numeric samples")+"</span>";wrap.appendChild(row);
+        if(preview.length){
+          const svgNS="http://www.w3.org/2000/svg";const svg=document.createElementNS(svgNS,"svg");svg.setAttribute("class","mlb-output-wave");svg.setAttribute("viewBox","0 0 320 96");svg.setAttribute("preserveAspectRatio","none");
+          const poly=document.createElementNS(svgNS,"polyline");poly.setAttribute("fill","none");poly.setAttribute("stroke","currentColor");poly.setAttribute("stroke-width","2");poly.setAttribute("points",waveformPoints(preview,320,96));svg.appendChild(poly);wrap.appendChild(svg);
+        }
+        const pre=document.createElement("pre");pre.textContent=preview.length?JSON.stringify(preview,null,2):String(env.data||"No signal samples yet.");wrap.appendChild(pre);
+        card.appendChild(wrap);addMeta();section.appendChild(card);return;
+      }
+      if(["json","tensor","embedding","classification"].includes(env.kind)){
+        const pre=document.createElement("pre");pre.textContent=typeof env.data==="string"?env.data:JSON.stringify(env.data,null,2);card.appendChild(pre);section.appendChild(card);return;
+      }
+      if(env.kind==="video"||env.kind==="file"){
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card";
+        const source=env.src||(typeof env.data==="string"?env.data:"");
+        if(env.kind==="video"&&source){const video=document.createElement("video");video.className="mlb-output-video";video.controls=true;video.src=source;wrap.appendChild(video);}
+        if(source){const link=document.createElement("a");link.className="mlb-output-file-link";link.href=source;link.target="_blank";link.rel="noreferrer";link.textContent=source;wrap.appendChild(link);}else{const pre=document.createElement("pre");pre.textContent="No file available.";wrap.appendChild(pre);}
+        card.appendChild(wrap);addMeta();section.appendChild(card);return;
+      }
+      const pre=document.createElement("pre");pre.textContent=String(env.data||"No generated output yet.");card.appendChild(pre);section.appendChild(card);
+    }
+
     function formatDuration(seconds){
       const n=Number(seconds||0);if(!n)return "—";if(n<60)return n.toFixed(1)+"s";
       return Math.floor(n/60)+"m "+Math.floor(n%60)+"s";
@@ -4520,7 +4640,11 @@ function studioChoice(title,message,actions,options={}){
       if(execution.runtime_kind==="generate"&&runtimePanel?.modelId===entry.id){
         return {...live,status:execution.status||live.status,phase:execution.phase||live.phase,overall:Number(execution.overall??live.overall??0),
           generated_tokens:execution.generated_tokens??live.generated_tokens,message:execution.message||live.message,
-          generated_text:execution.generated_text||live.generated_text,runtime_source:execution.runtime_source||live.runtime_source};
+          generated_text:execution.generated_text||live.generated_text,runtime_source:execution.runtime_source||live.runtime_source,
+          generated_output:execution.generated_output??live.generated_output,
+          generated_output_kind:execution.generated_output_kind||live.generated_output_kind,
+          generated_output_mime:execution.generated_output_mime||live.generated_output_mime,
+          generated_output_meta:execution.generated_output_meta||live.generated_output_meta};
       }return live;
     }
 
@@ -4666,8 +4790,8 @@ function studioChoice(title,message,actions,options={}){
         statusMetric("Tok/s",live.tokens_per_sec==null?"—":Number(live.tokens_per_sec).toFixed(1)),statusMetric("Path",live.generation_mode||"Pending"),
         statusMetric("Temperature",config.temperature),statusMetric("Top K",config.top_k),statusMetric("Top P",config.top_p),statusMetric("Seed",config.seed));hero.appendChild(metrics);main.appendChild(hero);
 
-      const output=runtimeSection("Generated Text");const prompt=document.createElement("div");prompt.className="mlb-status-prompt";prompt.innerHTML="<strong>PROMPT</strong><pre>"+escapeRuntimeText(config.prompt||"")+"</pre>";output.appendChild(prompt);
-      const text=document.createElement("div");text.className="mlb-status-sample generation";text.innerHTML="<div><strong>OUTPUT</strong><span>"+Number(live.generated_tokens||0)+" / "+Number(config.max_new_tokens||0)+" tokens</span></div><pre>"+escapeRuntimeText(live.generated_text||entry.last_generation||"No generated text yet.")+"</pre>";output.appendChild(text);main.appendChild(output);
+      const output=runtimeSection("Generated Output");const prompt=document.createElement("div");prompt.className="mlb-status-prompt";prompt.innerHTML="<strong>PROMPT</strong><pre>"+escapeRuntimeText(config.prompt||"")+"</pre>";output.appendChild(prompt);
+      renderUniversalOutputPanel(output,entry,live,config);main.appendChild(output);
 
       const logs=runtimeSection("Generation Log");renderEventLog(logs,history,"Generation has not started yet.");main.appendChild(logs);
       const runtime=runtimeSection("Runtime Used");const rg=document.createElement("div");rg.className="mlb-validation-status-grid";const dev=selectedRuntimeDevice(config);

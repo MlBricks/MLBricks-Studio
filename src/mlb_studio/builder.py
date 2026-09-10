@@ -2459,11 +2459,17 @@ class Builder:
             stream_every_token=self._app_server is not None,
         )
         entry["last_generation"] = text
+        entry["last_generated_output"] = {"kind":"text","mime":"text/plain","data":text}
+        entry["last_generated_output_kind"] = "text"
+        entry["last_generated_output_mime"] = "text/plain"
+        entry["last_generated_output_meta"] = {"tokens": count}
         entry["generated_at"] = datetime.now(timezone.utc).isoformat()
         payload={
             "status":"done","runtime_kind":"generate","phase":"done","overall":100,
             "message":f"Generated {count} tokens.","model_id":model_id,
             "generated_tokens":count,"generated_text":text,
+            "generated_output":entry["last_generated_output"],"generated_output_kind":"text",
+            "generated_output_mime":"text/plain","generated_output_meta":{"tokens": count},
             "model_update":{"last_generation":text,"generated_at":entry["generated_at"]},
         }
         if progress_callback: emit(payload)

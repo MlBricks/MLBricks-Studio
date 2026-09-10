@@ -65,10 +65,128 @@
   function fmtDuration(seconds){var n=Number(seconds||0);if(!n)return '—';if(n<60)return n.toFixed(1)+'s';return Math.floor(n/60)+'m '+Math.floor(n%60)+'s';}
   function pct(value){return Math.max(0,Math.min(100,Number(value||0)));}
   function asArray(value){return Array.isArray(value)?value:[];}
+
   function displayList(value,fallback){
     if(Array.isArray(value))return value.filter(function(x){return x!=null&&String(x).trim()!=='';}).map(String).join(' · ')||fallback;
     var text=value==null?'':String(value).trim();
     return text||fallback;
+  }
+
+  function maybeObject(value){return value&&typeof value==='object'&&!Array.isArray(value)?value:null;}
+  function pickText(value){return value==null?'':String(value);}
+  function guessOutputKind(kind,mime,data){
+    kind=pickText(kind).trim().toLowerCase();
+    mime=pickText(mime).trim().toLowerCase();
+    if(kind)return kind;
+    if(mime.indexOf('image/')===0)return 'image';
+    if(mime.indexOf('audio/')===0)return 'audio';
+    if(mime.indexOf('video/')===0)return 'video';
+    if(mime.indexOf('application/json')===0)return 'json';
+    if(typeof data==='string'&&data.indexOf('data:image/')===0)return 'image';
+    if(typeof data==='string'&&data.indexOf('data:audio/')===0)return 'audio';
+    if(Array.isArray(data))return 'signal';
+    if(maybeObject(data))return 'json';
+    return 'text';
+  }
+  function extractOutputData(raw){
+    if(raw==null)return null;
+    if(typeof raw==='string'||typeof raw==='number'||typeof raw==='boolean'||Array.isArray(raw))return raw;
+    var obj=maybeObject(raw);
+    if(!obj)return raw;
+    if(obj.data!==undefined)return obj.data;
+    if(obj.value!==undefined)return obj.value;
+    if(obj.src!==undefined)return obj.src;
+    if(obj.url!==undefined)return obj.url;
+    return raw;
+  }
+  function normalizeOutputEnvelope(live,entry){
+    live=live||{};entry=entry||{};
+    var raw=live.generated_output;
+    if(raw==null)raw=entry.last_generated_output;
+    if(raw==null&&live.generated_text!=null)raw=live.generated_text;
+    if(raw==null&&entry.last_generation!=null)raw=entry.last_generation;
+    var obj=maybeObject(raw);
+    var meta=(maybeObject(live.generated_output_meta)||maybeObject(entry.last_generated_output_meta)||maybeObject(obj&&obj.metadata)||{});
+    var mime=pickText(live.generated_output_mime||entry.last_generated_output_mime||(obj&&(obj.mime||obj.content_type))||'');
+    var kind=guessOutputKind(live.generated_output_kind||entry.last_generated_output_kind||(obj&&(obj.kind||obj.type)),mime,extractOutputData(raw));
+    var data=extractOutputData(raw);
+    var src=(obj&&(obj.src||obj.url))||(typeof data==='string'&&(kind==='image'||kind==='audio'||kind==='video'||kind==='file')?data:'');
+    if((kind==='json'||kind==='tensor')&&typeof data==='string'){
+      try{data=JSON.parse(data);}catch(_){/* leave string */}
+    }
+    return {kind:kind,mime:mime,data:data,src:src,meta:meta};
+  }
+  function numericSeries(value){
+    if(Array.isArray(value))return value.map(Number).filter(function(v){return Number.isFinite(v);});
+    if(typeof value==='string'){
+      return value.split(/[\s,]+/).map(Number).filter(function(v){return Number.isFinite(v);});
+    }
+    return [];
+  }
+  function waveformPoints(series,width,height){
+    if(!series.length)return '';
+    var min=Math.min.apply(null,series),max=Math.max.apply(null,series),span=max-min||1;
+    var pts=[];var last=series.length-1||1;
+    for(var i=0;i<series.length;i++){
+      var x=(i/last)*width;
+      var y=height-((series[i]-min)/span)*height;
+      pts.push(x.toFixed(1)+','+y.toFixed(1));
+    }
+    return pts.join(' ');
+  }
+  function renderUniversalOutput(env,stats){
+    env=env||{kind:'text',data:''};stats=stats||{};
+    var info=[];
+    if(env.kind)info.push(env.kind.toUpperCase());
+    if(env.mime)info.push(env.mime);
+    if(stats.generated!=null&&stats.target!=null&&env.kind==='text')info.push(stats.generated+' / '+stats.target+' tokens');
+    if(env.meta&&env.meta.size)info.push(String(env.meta.size));
+    if(env.meta&&env.meta.dimensions)info.push(String(env.meta.dimensions));
+    var header=h('div',null,h('strong',null,'OUTPUT'),h('span',null,info.join(' · ')||'Output preview'));
+    if(env.kind==='image'){
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
+        h('div',{className:'mlb-output-visual-card'}, env.src||typeof env.data==='string'
+          ? h('img',{className:'mlb-output-image',src:env.src||env.data,alt:'Generated output'})
+          : h('pre',null,pickText(env.data)||'No image available.')),
+        env.meta&&Object.keys(env.meta).length?h('pre',{className:'mlb-output-meta'},JSON.stringify(env.meta,null,2)):null
+      );
+    }
+    if(env.kind==='audio'){
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
+        h('div',{className:'mlb-output-visual-card'}, env.src||typeof env.data==='string'
+          ? h('audio',{className:'mlb-output-audio',controls:true,src:env.src||env.data})
+          : h('pre',null,pickText(env.data)||'No audio available.')),
+        env.meta&&Object.keys(env.meta).length?h('pre',{className:'mlb-output-meta'},JSON.stringify(env.meta,null,2)):null
+      );
+    }
+    if(env.kind==='signal'){
+      var series=numericSeries(env.data);
+      var preview=series.length?series.slice(0,256):[];
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
+        h('div',{className:'mlb-output-visual-card'},
+          h('div',{className:'mlb-output-wave-head'},h('strong',null,'Waveform'),h('span',null,series.length?('samples: '+series.length):'No numeric samples')),
+          series.length?h('svg',{className:'mlb-output-wave',viewBox:'0 0 320 96',preserveAspectRatio:'none'},
+            h('polyline',{fill:'none',stroke:'currentColor',strokeWidth:'2',points:waveformPoints(preview,320,96)}))
+          : h('pre',null,'No signal samples yet.'),
+          h('pre',null,series.length?JSON.stringify(preview,null,2):pickText(env.data)||'No signal samples yet.')
+        ),
+        env.meta&&Object.keys(env.meta).length?h('pre',{className:'mlb-output-meta'},JSON.stringify(env.meta,null,2)):null
+      );
+    }
+    if(env.kind==='json'||env.kind==='tensor'||env.kind==='embedding'||env.kind==='classification'){
+      var text=typeof env.data==='string'?env.data:JSON.stringify(env.data,null,2);
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,h('pre',null,text||'No structured output yet.'));
+    }
+    if(env.kind==='file'||env.kind==='video'){
+      var source=env.src||pickText(env.data);
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
+        h('div',{className:'mlb-output-visual-card'},
+          env.kind==='video'&&source?h('video',{className:'mlb-output-video',controls:true,src:source}):null,
+          source?h('a',{href:source,target:'_blank',rel:'noreferrer',className:'mlb-output-file-link'},source):h('pre',null,'No file available.')),
+        env.meta&&Object.keys(env.meta).length?h('pre',{className:'mlb-output-meta'},JSON.stringify(env.meta,null,2)):null
+      );
+    }
+    return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,h('pre',null,pickText(env.data)||'No generated output yet.'));
   }
 
   class RuntimeErrorBoundary extends React.Component{
@@ -222,9 +340,9 @@
     h(Grid,null,h(StaticMetric,{label:'Generated',value:x.generated.toLocaleString()}),h(StaticMetric,{label:'Target',value:x.target.toLocaleString()}),h(StaticMetric,{label:'Tok/s',value:x.tok==null?'—':fmtFloat(x.tok,1)}),h(StaticMetric,{label:'Path',value:x.path}),h(StaticMetric,{label:'Temperature',value:x.temp}),h(StaticMetric,{label:'Top K',value:x.topk}),h(StaticMetric,{label:'Top P',value:x.topp}),h(StaticMetric,{label:'Seed',value:x.seed}))
   );},shallowEqual);
 
-  var GenerationOutput=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{};return {prompt:c.prompt||'',text:l.generated_text||e.last_generation||'No generated text yet.',generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0)};},function(x){return h(Section,{title:'Generated Text'},
+  var GenerationOutput=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{};return {prompt:c.prompt||'',output:normalizeOutputEnvelope(l,e),generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0)};},function(x){return h(Section,{title:'Generated Output'},
     h('div',{className:'mlb-status-prompt'},h('strong',null,'PROMPT'),h('pre',null,x.prompt)),
-    h('div',{className:'mlb-status-sample generation'},h('div',null,h('strong',null,'OUTPUT'),h('span',null,x.generated+' / '+x.target+' tokens')),h('pre',null,x.text))
+    renderUniversalOutput(x.output,{generated:x.generated,target:x.target})
   );},shallowEqual);
 
   var GenerationRuntime=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{};return {

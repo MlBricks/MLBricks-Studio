@@ -831,6 +831,16 @@
 .mlb-status-sample>div{display:flex;justify-content:space-between;gap:8px;padding:6px 7px;border-bottom:1px solid #273541}.mlb-status-sample>div strong,.mlb-status-prompt>strong{font-size:10.5px;color:#aebbc9;letter-spacing:.05em}.mlb-status-sample>div span{font-size:10.5px;color:#748394;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mlb-status-sample pre,.mlb-status-prompt pre{margin:0;max-height:190px;padding:8px;background:#0a1117;color:#d0d8e2;font:10.5px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow:auto}
 .mlb-status-prompt>strong{display:block;padding:6px 7px;border-bottom:1px solid #273541}.mlb-status-sample.generation pre{max-height:260px}
+.mlb-output-viewer pre{white-space:pre-wrap}
+.mlb-output-visual-card{display:grid;gap:8px;padding:8px;background:#0a1117}
+.mlb-output-image,.mlb-output-video{display:block;max-width:100%;max-height:360px;border:1px solid #273541;border-radius:6px;background:#081016;object-fit:contain}
+.mlb-output-audio{width:100%}
+.mlb-output-file-link{display:inline-block;color:#8bbcff;text-decoration:none;word-break:break-all}
+.mlb-output-file-link:hover{text-decoration:underline}
+.mlb-output-wave-head{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:10.5px;color:#aebbc9}
+.mlb-output-wave-head span{color:#748394}
+.mlb-output-wave{width:100%;height:96px;display:block;border:1px solid #273541;border-radius:6px;background:linear-gradient(180deg,#0d151c,#091118);color:#7cc8ff}
+.mlb-output-meta{border-top:1px solid #273541!important;background:#091118!important;color:#9bb0c3!important}
 .mlb-training-log{max-height:220px;overflow:auto;border:1px solid #2c3946;border-radius:6px;background:#0b1218}
 .mlb-log-row{display:grid;grid-template-columns:minmax(90px,25%) minmax(0,75%);gap:8px;padding:6px 7px;border-top:1px solid #202c36;font-size:10.5px;min-width:0}.mlb-log-row:first-child{border-top:0}.mlb-log-row span,.mlb-log-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mlb-log-row span{color:#778697}.mlb-log-row strong{color:#bfcad5;font-weight:600}.mlb-log-row.error strong{color:#ef8993}.mlb-log-row.done strong{color:#71d8a4}
 .mlb-log-empty{padding:14px;color:#718091;font-size:10.5px;text-align:center}
