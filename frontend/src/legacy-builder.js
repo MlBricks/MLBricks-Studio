@@ -6678,6 +6678,7 @@ function studioChoice(title,message,actions,options={}){
     }
 
     function addPrimitive(item){
+      if(item?.type==="abstract_layer"){addAbstractLayerPrimitive();return;}
       const apiMode=isApiComposerView();
       if(apiMode&&!apiComposerAllowsCatalogItem(item)){
         setStatus((item?.name||"This component")+" is not available inside API Components yet. Use a supported model component or Add Function in the top toolbar.");draw();return;
@@ -6865,6 +6866,50 @@ function studioChoice(title,message,actions,options={}){
 
     const CUSTOM_TERMINAL_LIMIT_PER_SIDE=4;
     const CUSTOM_TERMINAL_SIDES=["top","right","bottom","left"];
+    const ABSTRACT_TERMINAL_LIMIT=5;
+
+    function isAbstractDefinition(def){
+      return String(def?.implementation||"")==="abstract_layer";
+    }
+
+    function abstractDefinitionForNode(node){
+      if(!node)return null;
+      if(node.type==="custom"){
+        const def=state.custom_components?.[node.definition_id];
+        return isAbstractDefinition(def)?def:null;
+      }
+      if(node.type==="abstract_input"||node.type==="abstract_output"){
+        const def=activeCustomDefinition();
+        return isAbstractDefinition(def)?def:null;
+      }
+      return null;
+    }
+
+    function normalizeAbstractInterface(def){
+      if(!def)return {input_ports:[],output_ports:[]};
+      if(!def.interface||typeof def.interface!=="object")def.interface={input_ports:[],output_ports:[]};
+      const iface=def.interface;
+      if(!Array.isArray(iface.input_ports))iface.input_ports=[];
+      if(!Array.isArray(iface.output_ports))iface.output_ports=[];
+      const normSide=value=>CUSTOM_TERMINAL_SIDES.includes(String(value||"").toLowerCase())?String(value).toLowerCase():"top";
+      iface.input_ports=iface.input_ports.slice(0,ABSTRACT_TERMINAL_LIMIT).map((raw,i)=>{
+        const port=(raw&&typeof raw==="object")?raw:{};
+        port.id=String(port.id||("abs_in_"+(i+1)));
+        port.name=apiSafePortName(port.name||("input_"+(i+1)),"input_"+(i+1));
+        port.side=normSide(port.side);
+        port.order=Number.isFinite(Number(port.order))?Number(port.order):i;
+        return port;
+      });
+      iface.output_ports=iface.output_ports.slice(0,ABSTRACT_TERMINAL_LIMIT).map((raw,i)=>{
+        const port=(raw&&typeof raw==="object")?raw:{};
+        port.id=String(port.id||("abs_out_"+(i+1)));
+        port.name=apiSafePortName(port.name||("output_"+(i+1)),"output_"+(i+1));
+        port.side=normSide(port.side);
+        port.order=Number.isFinite(Number(port.order))?Number(port.order):i;
+        return port;
+      });
+      return iface;
+    }
 
     function normalizedTerminalSide(value){
       const side=String(value||"top").toLowerCase();
@@ -6960,6 +7005,160 @@ function studioChoice(title,message,actions,options={}){
       // old side until a later click/blur.
       deferredInteractionDraw=false;
       draw(true);
+    }
+
+    function abstractBoundaryNode(def,type){
+      const live=current(state);
+      const nodes=(live?.kind==="custom_edit"&&live.definition_id===def?.id)?(live.nodes||[]):(def?.nodes||[]);
+      return nodes.find(node=>node?.type===type)||null;
+    }
+
+    function removeAbstractTerminalEdges(def,port,io){
+      const portId=String(port?.id||"");
+      if(!portId||!def)return;
+      const targetKey="named_in:"+portId;
+      const sourceKey="named_out:"+portId;
+      // Remove external connections from every live instance of this reusable
+      // Abstract Layer definition. The terminal id is the stable mapping key.
+      Object.values(state.components||{}).forEach(comp=>{
+        const instanceIds=new Set((comp.nodes||[]).filter(node=>node?.type==="custom"&&node.definition_id===def.id).map(node=>node.id));
+        if(instanceIds.size){
+          comp.edges=(comp.edges||[]).filter(e=>io==="in"?!(instanceIds.has(e.target)&&e.target_port===targetKey):!(instanceIds.has(e.source)&&e.source_port===sourceKey));
+        }
+      });
+      // Remove the corresponding internal boundary mapping while the Abstract
+      // Layer editor is open or from its saved definition.
+      const removeInternal=(nodes,edges)=>{
+        const inputNode=(nodes||[]).find(node=>node?.type==="abstract_input");
+        const outputNode=(nodes||[]).find(node=>node?.type==="abstract_output");
+        return (edges||[]).filter(e=>io==="in"?!(inputNode&&e.source===inputNode.id&&e.source_port===sourceKey):!(outputNode&&e.target===outputNode.id&&e.target_port===targetKey));
+      };
+      def.edges=removeInternal(def.nodes||[],def.edges||[]);
+      const live=current(state);
+      if(live?.kind==="custom_edit"&&live.definition_id===def.id)live.edges=removeInternal(live.nodes||[],live.edges||[]);
+    }
+
+    function newAbstractTerminal(kind,index,side="top"){
+      const n=index+1;
+      return {
+        id:uid(kind==="in"?"absin":"absout"),
+        name:(kind==="in"?"input_":"output_")+n,
+        side:normalizedTerminalSide(side),
+        order:index
+      };
+    }
+
+    function abstractLayerDefinition(name){
+      const id=uid("custom");
+      const input=makeNode(cat(catalog,"abstract_input"));input.name="Layer Inputs";input.display_name="Layer Inputs";
+      const output=makeNode(cat(catalog,"abstract_output"));output.name="Layer Outputs";output.display_name="Layer Outputs";
+      const main=edge(input.id,output.id,"main");main.source_port="main_out";main.target_port="main_in";
+      const skip=edge(input.id,output.id,"residual");skip.source_port="skip_out";skip.target_port="skip_in";
+      const extra=edge(input.id,output.id,"aux");extra.source_port="extra_out";extra.target_port="extra_in";
+      return {
+        id,local_id:persistentUid("component"),name,description:"Editable Abstract Layer",revision:1,
+        implementation:"abstract_layer",nodes:[input,output],edges:[main,skip,extra],
+        input_count:3,output_count:3,interface:{input_ports:[],output_ports:[]},
+        palette_hidden:true,palette_installed:false,gallery_entry_id:null
+      };
+    }
+
+    function standardESAAbstractDefinition(name,spec){
+      const def=abstractLayerDefinition(name);
+      const input=def.nodes.find(node=>node.type==="abstract_input");
+      const output=def.nodes.find(node=>node.type==="abstract_output");
+      const norm1=makeNode(cat(catalog,"layernorm"));norm1.name="Pre-ESA LayerNorm";norm1.params={...(norm1.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
+      const esa=makeNode(cat(catalog,"esa"));esa.name="ESA";esa.params={...(esa.params||{}),embd:spec.dim,head:spec.heads,batch:spec.batch,block:spec.block,backend:"auto",precision:"auto",compass:16,dropout:0.0,gate_min:0.8,gate_max:0.995,eps:1e-5,strict_checks:false};
+      const res1=makeNode(cat(catalog,"residual"));res1.name="ESA Residual";res1.params={...(res1.params||{}),dropout:0.0};
+      const norm2=makeNode(cat(catalog,"layernorm"));norm2.name="Pre-FFN LayerNorm";norm2.params={...(norm2.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
+      const ffn=makeNode(cat(catalog,"ffn"));ffn.name="FFN";ffn.params={...(ffn.params||{}),hidden_size:spec.dim,intermediate_size:spec.ffn,activation:"gelu",dropout:0.0,bias:true,gated:false};
+      const res2=makeNode(cat(catalog,"residual"));res2.name="FFN Residual";res2.params={...(res2.params||{}),dropout:0.0};
+      def.nodes=[input,norm1,esa,res1,norm2,ffn,res2,output];
+      const makeLane=(a,b,kind,sourcePort,targetPort)=>{const e=edge(a.id,b.id,kind);e.source_port=sourcePort;e.target_port=targetPort;e.kind=kind;return e;};
+      def.edges=[
+        makeLane(input,norm1,"main","main_out","main_in"),
+        makeLane(norm1,esa,"main","main_out","main_in"),
+        makeLane(esa,res1,"main","main_out","main_in"),
+        makeLane(input,res1,"residual","skip_out","skip_in"),
+        makeLane(res1,norm2,"main","main_out","main_in"),
+        makeLane(norm2,ffn,"main","main_out","main_in"),
+        makeLane(ffn,res2,"main","main_out","main_in"),
+        makeLane(res1,res2,"residual","main_out","skip_in"),
+        makeLane(res2,output,"main","main_out","main_in"),
+        makeLane(res2,output,"residual","main_out","skip_in")
+      ];
+      def.description="Editable Pre-LN ESA Abstract Layer";
+      return def;
+    }
+
+    function addAbstractLayerPrimitive(){
+      if(!requireEditableLayout("add Abstract Layer"))return;
+      checkpoint("Add Abstract Layer");
+      const name=uniqueCustomDefinitionName("Abstract Layer");
+      const def=abstractLayerDefinition(name);
+      state.custom_components[def.id]=def;
+      const n={
+        id:uid("node"),type:"custom",name:uniqueNodeName(name),display_name:name,definition_id:def.id,
+        repeat:1,params:{},input_count:3,output_count:3,position:{x:0,y:0}
+      };
+      const pos=insertAfterSelection(n);
+      selected=n.id;pendingPort=null;
+      setStatus(name+" inserted at layer "+(pos+1)+". Open it from the Inspector to build the internal layer graph.");
+      draw();
+    }
+
+    function renderAbstractInterfaceEditor(body,def){
+      const iface=normalizeAbstractInterface(def);
+      const title=document.createElement("div");title.className="mlb-section-title";title.textContent="ABSTRACT LAYER INTERFACE";body.appendChild(title);
+      const fixed=document.createElement("div");fixed.className="mlb-api-path";fixed.innerHTML="<strong>Fixed ports:</strong> 3 inputs + 3 outputs · Skip / Main / Extra.<br><strong>Custom ports:</strong> up to 5 inputs and 5 outputs. Custom ports are additive and keep their stable mapping IDs.";body.appendChild(fixed);
+      const terminalSideOptions=[
+        {value:"top",label:"Top"},{value:"right",label:"Right"},{value:"bottom",label:"Bottom"},{value:"left",label:"Left"}
+      ];
+      const appendMoveControls=(box,port)=>{
+        const side=String(port.side||"top");
+        const row=document.createElement("div");row.className="mlb-terminal-move-row";
+        const first=btn(side==="top"||side==="bottom"?"← Left":"↑ Up","mlb-terminal-move");
+        const second=btn(side==="top"||side==="bottom"?"Right →":"Down ↓","mlb-terminal-move");
+        const items=customTerminalEntries(iface,side);
+        const index=items.findIndex(item=>item.port===port||item.port.id===port.id);
+        first.disabled=index<=0;second.disabled=index<0||index>=items.length-1;
+        first.addEventListener("click",()=>{checkpoint("Move Abstract Layer terminal");moveCustomTerminal(iface,port,-1);redrawCustomTerminalLayout();});
+        second.addEventListener("click",()=>{checkpoint("Move Abstract Layer terminal");moveCustomTerminal(iface,port,1);redrawCustomTerminalLayout();});
+        row.append(first,second);box.appendChild(row);
+      };
+      const renderGroup=(kind,label,ports)=>{
+        const st=document.createElement("div");st.className="mlb-subsection-title";st.textContent=label+" ("+ports.length+" / "+ABSTRACT_TERMINAL_LIMIT+")";body.appendChild(st);
+        ports.forEach((port,index)=>{
+          const box=document.createElement("div");box.className="mlb-custom-arg-card mlb-terminal-card";
+          const head=document.createElement("div");head.className="mlb-custom-arg-head";
+          const nm=document.createElement("strong");nm.textContent=port.name||((kind==="in"?"Input ":"Output ")+(index+1));
+          const rm=btn("×","mlb-custom-arg-remove");rm.title="Remove custom "+(kind==="in"?"input":"output")+" terminal";
+          rm.addEventListener("click",()=>{
+            checkpoint("Remove Abstract Layer terminal");
+            removeAbstractTerminalEdges(def,port,kind);
+            const oldSide=port.side;ports.splice(index,1);resequenceCustomTerminals(iface,oldSide);pendingPort=null;draw();
+          });
+          head.append(nm,rm);box.appendChild(head);
+          box.appendChild(editorRow("Terminal Name",port.name||"",value=>{port.name=apiSafePortName(value,(kind==="in"?"input_":"output_")+(index+1));draw();}));
+          box.appendChild(editorRow("Side",port.side||"top",value=>{checkpoint("Move Abstract Layer terminal side");changeCustomTerminalSide(iface,port,value);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
+          const hint=document.createElement("div");hint.className="mlb-terminal-map-hint";
+          hint.textContent=kind==="in"?"Inside the layer this appears as a named output on Layer Inputs.":"Inside the layer this appears as a named input on Layer Outputs.";box.appendChild(hint);
+          appendMoveControls(box,port);body.appendChild(box);
+        });
+        const add=btn("+ Add Custom "+(kind==="in"?"Input":"Output"),"mlb-create mlb-custom-add-arg");
+        add.disabled=ports.length>=ABSTRACT_TERMINAL_LIMIT;
+        add.addEventListener("click",()=>{
+          if(ports.length>=ABSTRACT_TERMINAL_LIMIT){setStatus("Maximum 5 custom "+(kind==="in"?"inputs":"outputs")+" allowed on an Abstract Layer.");draw();return;}
+          const side=firstCustomTerminalSideWithRoom(iface,"top");
+          if(!side){setStatus("No terminal surface has room. Move an existing terminal to another side first.");draw();return;}
+          checkpoint("Add Abstract Layer terminal");
+          ports.push(newAbstractTerminal(kind,ports.length,side));
+          setStatus("Custom "+(kind==="in"?"input":"output")+" added to Abstract Layer.");draw();
+        });
+        body.appendChild(add);
+      };
+      renderGroup("in","CUSTOM INPUTS",iface.input_ports);
+      renderGroup("out","CUSTOM OUTPUTS",iface.output_ports);
     }
 
     const VISUAL_FUNCTION_LANES=[
@@ -7875,7 +8074,7 @@ function studioChoice(title,message,actions,options={}){
       return {
         id:def.id,local_id:ensureComponentLocalId(def),name:def.name,description:def.description||"Reusable Module",
         revision:def.revision||1,implementation:def.implementation||"graph",
-        api_binding:cp(def.api_binding||null),input_count:3,output_count:3,
+        api_binding:cp(def.api_binding||null),interface:cp(def.interface||null),input_count:3,output_count:3,
         nodes:cp(c?.nodes||def.nodes||[]),edges:cp(c?.edges||def.edges||[])
       };
     }
@@ -8208,7 +8407,7 @@ function studioChoice(title,message,actions,options={}){
         const id=uid("custom");
         savedDef={
           id,local_id:persistentUid("component"),name,description:def.description||"",revision:1,implementation:def.implementation||"graph",
-          api_binding:cp(def.api_binding||null),nodes:cp(c.nodes),edges:cp(c.edges||[]),input_count:3,output_count:3,
+          api_binding:cp(def.api_binding||null),interface:cp(def.interface||null),nodes:cp(c.nodes),edges:cp(c.edges||[]),input_count:3,output_count:3,
           palette_hidden:true,palette_installed:false,gallery_entry_id:null
         };
         state.custom_components[id]=savedDef;
@@ -8247,6 +8446,10 @@ function studioChoice(title,message,actions,options={}){
       setTimeout(()=>requestPersistenceCommand("persistence_save_item",persistConfig,true),180);
     }
     function deleteNode(id){
+      const target=current(state)?.nodes?.find(node=>node.id===id);
+      if(target&&(target.type==="abstract_input"||target.type==="abstract_output")){
+        setStatus("Layer Inputs and Layer Outputs are fixed Abstract Layer boundaries and cannot be deleted.");draw();return;
+      }
       if(!requireEditableLayout("delete components"))return;
       checkpoint("Delete node");
       const c=current(state);
@@ -8260,6 +8463,7 @@ function studioChoice(title,message,actions,options={}){
 
     function duplicateSelected(){
       const n=selectedNode();if(!n)return;
+      if(n.type==="abstract_input"||n.type==="abstract_output"){setStatus("Abstract Layer boundary nodes cannot be duplicated.");draw();return;}
       if(!requireEditableLayout("duplicate components"))return;
       checkpoint("Duplicate "+n.name);
       const c=current(state),d=cp(n);d.id=uid("node");d.name=uniqueNodeName(n.name+" Copy",c);d.display_name=nodeDisplayName(n);
@@ -8273,6 +8477,7 @@ function studioChoice(title,message,actions,options={}){
 
     function moveSelected(delta){
       const n=selectedNode();if(!n)return;
+      if(n.type==="abstract_input"||n.type==="abstract_output"){setStatus("Abstract Layer boundary nodes stay fixed at the layer edges.");draw();return;}
       if(!requireEditableLayout("move components"))return;
       const c=current(state);
       const from=c.nodes.findIndex(x=>x.id===n.id);
@@ -8613,6 +8818,13 @@ function studioChoice(title,message,actions,options={}){
     }
 
     function customUserTerminals(node,side){
+      const abstractDef=abstractDefinitionForNode(node);
+      if(abstractDef){
+        const iface=normalizeAbstractInterface(abstractDef);
+        if(node?.type==="abstract_input")return side==="out"?(iface.input_ports||[]):[];
+        if(node?.type==="abstract_output")return side==="in"?(iface.output_ports||[]):[];
+        return side==="in"?(iface.input_ports||[]):(iface.output_ports||[]);
+      }
       if(node?.type!=="api_step")return null;
       const b=normalizeAPIBinding(node.api_binding||defaultAPIBinding());
       if(b.port_mode!=="extended")return null;
@@ -8822,8 +9034,9 @@ function studioChoice(title,message,actions,options={}){
         const mode=namedPorts?"named":"standard";
         const key=items.length===1?items[0].key:"";
         const name=items.length===1?items[0].name:signalName;
-        const disabled=namedPorts&&!items.length?" disabled":"";
-        const extraClass=(namedPorts?" named-port named-socket":"")+(items.length>1?" named-hub":"")+(namedPorts&&!items.length?" unused-socket":"");
+        const boundaryInactive=(node?.type==="abstract_input"&&side==="in")||(node?.type==="abstract_output"&&side==="out");
+        const disabled=(boundaryInactive||(namedPorts&&!items.length))?" disabled":"";
+        const extraClass=(namedPorts?" named-port named-socket":"")+(items.length>1?" named-hub":"")+(namedPorts&&!items.length?" unused-socket":"")+(boundaryInactive?" boundary-inactive":"");
         html+='<button class="mlb-port '+side+' '+(side==="in"?'mlb-input-socket':'mlb-output-socket')+' universal-socket visual-'+pos.visual+extraClass+'" data-side="'+side+'" data-io-role="'+(side==="in"?'input':'output')+'" data-physical-slot="'+physicalSocketName(side,socket)+'" data-visual-side="'+pos.visual+'" data-socket="'+socket+'" data-port-index="'+socketIndex+'" data-port-mode="'+mode+'" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+keys.join('|')+'" data-port-names="'+names.join('|')+'" data-tooltip="'+displayName+'" style="'+pos.style+';--named-port-color:'+portColor+'" type="button" aria-label="'+displayName+'" title="'+displayName+'"'+disabled+'></button>';
       });
 
@@ -9091,7 +9304,7 @@ function studioChoice(title,message,actions,options={}){
       state.project={...(state.project||{}),name:spec.name,context_length:spec.block,batch_size:spec.batch,
         model_settings:{embedding_size:spec.dim,heads:spec.heads,block:spec.block,default_batch:spec.batch,vocab_size:spec.vocab,precision:spec.precision||"fp16"},
         dataset:spec.dataset??null,estimated_parameters:spec.parameters,
-        description:spec.description||((spec.layers||0)+"-layer ESA SLM with explicit Signal/Residual Layer Blocks")};
+        description:spec.description||((spec.layers||0)+"-layer ESA SLM with editable Abstract Layers")};
       state.breadcrumbs=[{id:rootId,name:spec.name}];state.workspaces.model.view_component_id=rootId;state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
 
       const nodes=[];
@@ -9100,11 +9313,14 @@ function studioChoice(title,message,actions,options={}){
       const pos=makeNode(cat(catalog,"learned_position"));pos.name="Learned Position";pos.params={...(pos.params||{}),dim:spec.dim,hidden_size:spec.dim,max_seq_len:spec.block};nodes.push(pos);
       const drop=makeNode(cat(catalog,"dropout"));drop.name="Embedding Dropout";drop.params={...(drop.params||{}),p:0.0};nodes.push(drop);
 
+      const layerDef=standardESAAbstractDefinition(spec.name+" · ESA Layer",spec);
+      state.custom_components[layerDef.id]=layerDef;
       const layers=[];
       for(let i=1;i<=spec.layers;i++){
-        const layer=makeNode(cat(catalog,"layer_block"));
-        layer.name="Layer "+i;
-        layer.params={...(layer.params||{}),dim:spec.dim,heads:spec.heads,ffn_dim:spec.ffn,block:spec.block,batch:spec.batch,compass:16,activation:"gelu",dropout:0.0,norm_eps:1e-5};
+        const layer={
+          id:uid("node"),type:"custom",name:"Layer "+i,display_name:layerDef.name,definition_id:layerDef.id,
+          repeat:1,params:{},input_count:3,output_count:3,position:{x:0,y:0}
+        };
         layers.push(layer);nodes.push(layer);
       }
 
@@ -9117,25 +9333,16 @@ function studioChoice(title,message,actions,options={}){
       edges.push(edge(emb.id,pos.id));
       edges.push(edge(pos.id,drop.id));
 
-      function namedEdge(source,target,sourcePort,targetPort){
-        const e=edge(source.id,target.id,"named");
-        e.source_port=sourcePort;e.target_port=targetPort;e.kind="named";
-        return e;
-      }
-
+      const laneEdge=(source,target,kind,sourcePort,targetPort)=>{const e=edge(source.id,target.id,kind);e.source_port=sourcePort;e.target_port=targetPort;e.kind=kind;return e;};
       if(layers.length){
-        // Explicitly initialize both the signal and residual streams from the
-        // embedding path.  The block no longer relies on hidden graph ordering.
-        edges.push(namedEdge(drop,layers[0],"main_out","named_in:signal"));
-        edges.push(namedEdge(drop,layers[0],"main_out","named_in:residual"));
-
+        // Main is the signal stream; Skip is the explicit residual stream.
+        edges.push(laneEdge(drop,layers[0],"main","main_out","main_in"));
+        edges.push(laneEdge(drop,layers[0],"residual","main_out","skip_in"));
         for(let i=0;i<layers.length-1;i++){
-          edges.push(namedEdge(layers[i],layers[i+1],"named_out:signal","named_in:signal"));
-          edges.push(namedEdge(layers[i],layers[i+1],"named_out:residual","named_in:residual"));
+          edges.push(laneEdge(layers[i],layers[i+1],"main","main_out","main_in"));
+          edges.push(laneEdge(layers[i],layers[i+1],"residual","skip_out","skip_in"));
         }
-
-        const finish=edge(layers[layers.length-1].id,finalNorm.id);
-        finish.source_port="named_out:signal";finish.target_port="main_in";finish.kind="main";edges.push(finish);
+        edges.push(laneEdge(layers[layers.length-1],finalNorm,"main","main_out","main_in"));
       }else{
         edges.push(edge(drop.id,finalNorm.id));
       }
@@ -9979,9 +10186,13 @@ function studioChoice(title,message,actions,options={}){
           if(i&&!isApiComposerView()){
             const a=document.createElement("div");a.className="mlb-arrow";a.textContent="→";flow.appendChild(a);
           }
+          const customDefForCard=n.type==="custom"?state.custom_components?.[n.definition_id]:null;
+          const abstractCard=isAbstractDefinition(customDefForCard);
           const info=n.type==="api_step"
             ?{accent:"purple",description:"Python / PyTorch API function block",icon:"FX",api:[]}
-            :(n.type==="custom"?{accent:"purple",description:"Nested Module",icon:"LAY",api:[]}:cat(catalog,n.type));
+            :(n.type==="custom"
+              ?{accent:"purple",description:abstractCard?"Editable Abstract Layer":"Nested Module",icon:abstractCard?"ABS":"LAY",api:[]}
+              :cat(catalog,n.type));
           const runState=execution.nodes?.[n.id];
           const card=document.createElement("div");
           card.className="mlb-node"+(n.type==="api_step"?" mlb-api-step-node":"")+(selected===n.id?" selected":"")+(runState?" run-"+runState.status:"");card.dataset.type=n.type||"";
@@ -10006,10 +10217,17 @@ function studioChoice(title,message,actions,options={}){
                 :'<div class="mlb-mini-field"><span>Parameters</span><strong>'+((binding.parameters||[]).length)+'</strong></div>');
           }else if(n.type==="custom"){
             const def=state.custom_components?.[n.definition_id];const isApi=String(def?.implementation||"graph")==="api";
+            const isAbstract=isAbstractDefinition(def);
             const apiSteps=apiStepNodes(def);
-            card.querySelector(".mlb-node-fields").innerHTML=isApi
-              ?('<div class="mlb-mini-field"><span>Blocks</span><strong>'+((def?.nodes||[]).length||apiSteps.length||1)+'</strong></div>'+ '<div class="mlb-mini-field"><span>API</span><strong>'+apiSteps.length+' functions</strong></div>')
-              :('<div class="mlb-mini-field"><span>Architecture</span><strong>Open</strong></div>'+ '<div class="mlb-mini-field"><span>Sockets</span><strong>3 In / 3 Out</strong></div>');
+            if(isApi){
+              card.querySelector(".mlb-node-fields").innerHTML='<div class="mlb-mini-field"><span>Blocks</span><strong>'+((def?.nodes||[]).length||apiSteps.length||1)+'</strong></div>'+ '<div class="mlb-mini-field"><span>API</span><strong>'+apiSteps.length+' functions</strong></div>';
+            }else if(isAbstract){
+              const iface=normalizeAbstractInterface(def);
+              const internal=Math.max(0,(def?.nodes||[]).filter(x=>x.type!=="abstract_input"&&x.type!=="abstract_output").length);
+              card.querySelector(".mlb-node-fields").innerHTML='<div class="mlb-mini-field"><span>Inside</span><strong>'+internal+' components</strong></div>'+ '<div class="mlb-mini-field"><span>Ports</span><strong>3+'+iface.input_ports.length+' In / 3+'+iface.output_ports.length+' Out</strong></div>';
+            }else{
+              card.querySelector(".mlb-node-fields").innerHTML='<div class="mlb-mini-field"><span>Architecture</span><strong>Open</strong></div>'+ '<div class="mlb-mini-field"><span>Sockets</span><strong>3 In / 3 Out</strong></div>';
+            }
           }else card.querySelector(".mlb-node-fields").innerHTML=nodeMiniFields(n,info);
           card.querySelectorAll(".mlb-mini-field").forEach(row=>{
             const label=row.querySelector("span");
@@ -10022,7 +10240,10 @@ function studioChoice(title,message,actions,options={}){
             const metaBinding=ensureAPIStepObjectIds(n);
             meta.textContent=apiCallTypeLabel(metaBinding.call_type)+" · explicit graph connections";
           }else if(n.type==="custom"){
-            const def=state.custom_components?.[n.definition_id];meta.textContent=String(def?.implementation||"graph")==="api"?"API execution graph · universal 3×3 sockets":"Nested Module · universal 3×3 sockets";
+            const def=state.custom_components?.[n.definition_id];
+            meta.textContent=String(def?.implementation||"graph")==="api"
+              ?"API execution graph · universal 3×3 sockets"
+              :(isAbstractDefinition(def)?"Abstract Layer · editable internal graph · fixed 3×3 + custom ports":"Nested Module · universal 3×3 sockets");
           }else meta.textContent=(apiInfo(n).public_name||n.type)+" · universal 3×3 sockets";
           card.querySelectorAll('.mlb-port').forEach(portEl=>{
             const side=portEl.dataset.side, idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
@@ -10250,11 +10471,12 @@ function studioChoice(title,message,actions,options={}){
         const compNow=current(state);const defNow=compNow?.kind==="custom_edit"?state.custom_components?.[compNow.definition_id]:null;
         if(defNow){
           const isApiCustom=String(defNow.implementation||"graph")==="api";
-          const h=document.createElement("div");h.className="mlb-section-title";h.textContent=isApiCustom?"API COMPONENT":"MODULE";body.appendChild(h);
-          const nameRow=editorRow(isApiCustom?"API Component Name":"Module Name",defNow.name||"",value=>{
+          const isAbstractCustom=isAbstractDefinition(defNow);
+          const h=document.createElement("div");h.className="mlb-section-title";h.textContent=isApiCustom?"API COMPONENT":(isAbstractCustom?"ABSTRACT LAYER · ABS":"MODULE");body.appendChild(h);
+          const nameRow=editorRow(isApiCustom?"API Component Name":(isAbstractCustom?"Abstract Layer Name":"Module Name"),defNow.name||"",value=>{
             const name=String(value||"").trim().replace(/\s+/g," ");
             if(!name||name===defNow.name)return;
-            checkpoint("Rename "+(isApiCustom?"API Component":"Module"));
+            checkpoint("Rename "+(isApiCustom?"API Component":(isAbstractCustom?"Abstract Layer":"Module")));
             const oldName=defNow.name;defNow.name=name;compNow.name=name;
             const crumb=(state.breadcrumbs||[]).find(x=>x.id===compNow.id);if(crumb)crumb.name=name;
             Object.values(state.components||{}).forEach(comp=>{
@@ -10264,6 +10486,9 @@ function studioChoice(title,message,actions,options={}){
           body.appendChild(nameRow);
           if(isApiCustom){
             renderAPICustomOverview(body,defNow);
+          }else if(isAbstractCustom){
+            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Build the layer internally between Layer Inputs and Layer Outputs. Fixed Skip/Main/Extra ports always exist; add up to five custom inputs and five custom outputs below.";body.appendChild(help);
+            renderAbstractInterfaceEditor(body,defNow);
           }else{
             const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Compose this reusable Module from built-in and saved components. You can nest Modules directly here without returning to Workshop.";body.appendChild(help);
             // Nested Modules are created from the top toolbar; built-in Components remain in the left library.
@@ -10287,7 +10512,8 @@ function studioChoice(title,message,actions,options={}){
       }else{
         const api=apiInfo(n);const info=n.type==="custom"?{api:[]}:cat(catalog,n.type);
         const sw=document.createElement("div");sw.className="mlb-selected";
-        const displayName=nodeDisplayName(n);const apiName=api.public_name||"Custom Layer";
+        const selectedCustomDef=n.type==="custom"?state.custom_components?.[n.definition_id]:null;
+        const displayName=nodeDisplayName(n);const apiName=isAbstractDefinition(selectedCustomDef)?"ABS":(api.public_name||"Custom Layer");
         const pill=document.createElement("span");pill.className="mlb-pill";pill.textContent=apiName;
         if(normalizedUserName(displayName)===normalizedUserName(apiName)){
           sw.classList.add("single-pill");sw.appendChild(pill);
@@ -10308,7 +10534,7 @@ function studioChoice(title,message,actions,options={}){
 
         const path=document.createElement("div");path.className="mlb-api-path";
         path.textContent=n.type==="custom"
-          ?"custom://"+n.definition_id
+          ?(isAbstractDefinition(state.custom_components?.[n.definition_id])?"abstract://":"custom://")+n.definition_id
           :(api.builder_utility
               ?(api.builder_python_api?"Builder data/text operation":"Builder workflow settings")
               :(api.signature||api.import_path||"MLBricks API"));
@@ -10333,15 +10559,23 @@ function studioChoice(title,message,actions,options={}){
           body.appendChild(apiStatus);
         }
         if(n.type==="custom"){
-          const def=state.custom_components[n.definition_id];const isApi=String(def?.implementation||"graph")==="api";
+          const def=state.custom_components[n.definition_id];const isApi=String(def?.implementation||"graph")==="api";const isAbstract=isAbstractDefinition(def);
           const s=document.createElement("div");s.className="mlb-summary";
-          (isApi?[["Implementation","API Execution Graph"],["Functions",apiStepNodes(def).length||1],["Connections",def?.edges?.length||0],["Revision","v"+(def?.revision||1)]]:[["Internal Components",def?.nodes?.length||0],["Connections",def?.edges?.length||0],["Revision","v"+(def?.revision||1)]]).forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";s.appendChild(r);});
+          const abstractIface=isAbstract?normalizeAbstractInterface(def):null;
+          const summaryRows=isApi
+            ?[["Implementation","API Execution Graph"],["Functions",apiStepNodes(def).length||1],["Connections",def?.edges?.length||0],["Revision","v"+(def?.revision||1)]]
+            :(isAbstract
+              ?[["Implementation","Abstract Layer (ABS)"],["Internal Components",Math.max(0,(def?.nodes||[]).filter(x=>x.type!=="abstract_input"&&x.type!=="abstract_output").length)],["Fixed Ports","3 In / 3 Out"],["Custom Ports",abstractIface.input_ports.length+" In / "+abstractIface.output_ports.length+" Out"],["Connections",def?.edges?.length||0],["Revision","v"+(def?.revision||1)]]
+              :[["Internal Components",def?.nodes?.length||0],["Connections",def?.edges?.length||0],["Revision","v"+(def?.revision||1)]]);
+          summaryRows.forEach(([a,b])=>{const r=document.createElement("div");r.className="mlb-summary-row";r.innerHTML="<span>"+a+"</span><strong>"+b+"</strong>";s.appendChild(r);});
           body.appendChild(s);
           if(isApi){
             const fields=customExposedFields(def);if(fields.length){const st=document.createElement("div");st.className="mlb-section-title";st.textContent="CUSTOM ARGUMENTS";body.appendChild(st);fields.forEach(f=>renderField(body,n,f));}
             const bound=[];apiStepNodes(def).forEach(step=>{(normalizeAPIBinding(step.api_binding||defaultAPIBinding()).parameters||[]).filter(x=>String(x.source||"user")!=="user").forEach(x=>bound.push({label:(step.name||"Function")+" · "+(x.label||x.name),source:x.source}));});
             if(!bound.length&&def?.api_binding) (normalizeAPIBinding(def.api_binding).parameters||[]).filter(x=>String(x.source||"user")!=="user").forEach(x=>bound.push({label:x.label||x.name,source:x.source}));
             if(bound.length){const st=document.createElement("div");st.className="mlb-section-title";st.textContent="BOUND ARGUMENTS";body.appendChild(st);const fixed=document.createElement("div");fixed.className="mlb-api-path";fixed.textContent=bound.map(x=>x.label+" ← "+x.source).join(" · ");body.appendChild(fixed);}
+          }else if(isAbstract){
+            renderAbstractInterfaceEditor(body,def);
           }else{
             const st=document.createElement("div");st.className="mlb-section-title";st.textContent="MODULE PORTS";body.appendChild(st);
             const fixed=document.createElement("div");fixed.className="mlb-api-path";fixed.textContent="Fixed clean interface: Top Skip, Middle Main, Bottom Extra — on both left and right sides.";body.appendChild(fixed);
@@ -10424,20 +10658,25 @@ function studioChoice(title,message,actions,options={}){
         const moveLeft=btn(state.active_workspace==="data"?"← Move Earlier":"← Move Left");
         const moveRight=btn(state.active_workspace==="data"?"Move Later →":"Move Right →");
         const nodeIndex=current(state).nodes.findIndex(x=>x.id===n.id);
-        moveLeft.disabled=layoutIsLocked()||nodeIndex<=0;
-        moveRight.disabled=layoutIsLocked()||nodeIndex<0||nodeIndex>=current(state).nodes.length-1;
+        const fixedBoundaryPosition=n.type==="abstract_input"||n.type==="abstract_output";
+        moveLeft.disabled=layoutIsLocked()||fixedBoundaryPosition||nodeIndex<=0;
+        moveRight.disabled=layoutIsLocked()||fixedBoundaryPosition||nodeIndex<0||nodeIndex>=current(state).nodes.length-1;
         moveLeft.addEventListener("click",()=>moveSelected(-1));
         moveRight.addEventListener("click",()=>moveSelected(1));
         moveGrid.append(moveLeft,moveRight);body.appendChild(moveGrid);
 
         const actions=document.createElement("div");actions.className="mlb-action-grid";
-        if(n.definition_id){const def=state.custom_components?.[n.definition_id];const open=btn(String(def?.implementation||"graph")==="api"?"Open API Component":"Open Module");open.addEventListener("click",()=>openInside(n));actions.appendChild(open);}
-        const dup=btn("Duplicate");dup.disabled=layoutIsLocked();dup.addEventListener("click",duplicateSelected);actions.appendChild(dup);
-        const del=btn("Delete");del.disabled=layoutIsLocked();del.addEventListener("click",()=>deleteNode(n.id));actions.appendChild(del);body.appendChild(actions);
+        if(n.definition_id){const def=state.custom_components?.[n.definition_id];const impl=String(def?.implementation||"graph");const open=btn(impl==="api"?"Open API Component":(impl==="abstract_layer"?"Open Abstract Layer":"Open Module"));open.addEventListener("click",()=>openInside(n));actions.appendChild(open);}
+        const fixedBoundary=n.type==="abstract_input"||n.type==="abstract_output";
+        const dup=btn("Duplicate");dup.disabled=layoutIsLocked()||fixedBoundary;dup.addEventListener("click",duplicateSelected);actions.appendChild(dup);
+        const del=btn("Delete");del.disabled=layoutIsLocked()||fixedBoundary;del.addEventListener("click",()=>deleteNode(n.id));actions.appendChild(del);body.appendChild(actions);
         if(current(state).kind==="custom_edit"){
           const parentCfg=document.createElement("div");
           parentCfg.className="mlb-summary";
-          parentCfg.innerHTML='<div class="mlb-summary-row"><span>Module Interface</span><strong>Skip / Main / Extra</strong></div>';
+          const parentDefNow=activeCustomDefinition();
+          parentCfg.innerHTML=isAbstractDefinition(parentDefNow)
+            ?'<div class="mlb-summary-row"><span>Abstract Interface</span><strong>3 fixed + up to 5 custom I/O</strong></div>'
+            :'<div class="mlb-summary-row"><span>Module Interface</span><strong>Skip / Main / Extra</strong></div>';
           body.appendChild(parentCfg);
           appendCustomSaveActions(body);
         }

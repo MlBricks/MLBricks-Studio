@@ -123,13 +123,19 @@ def test_layer_block_recurrent_generation_keeps_explicit_lanes(monkeypatch):
     assert cache["position"] == 3
 
 
-def test_release_presets_use_only_layer_blocks_for_standard_esa_depth():
+def test_release_presets_use_editable_abstract_layers_for_standard_esa_depth():
     for state, expected in ((tinystories_30m_project(), 10), (esa_200m_project(), 12)):
         graph = state["components"][state["root_component_id"]]
-        layers = [n for n in graph["nodes"] if n.get("type") == "layer_block"]
+        layers = [n for n in graph["nodes"] if n.get("type") == "custom"]
         assert len(layers) == expected
-        assert not [n for n in graph["nodes"] if n.get("type") == "custom"]
-        # First block gets both lanes from embedding dropout.
+        assert not [n for n in graph["nodes"] if n.get("type") == "layer_block"]
+        definition_ids = {n.get("definition_id") for n in layers}
+        assert len(definition_ids) == 1
+        definition = state["custom_components"][next(iter(definition_ids))]
+        assert definition.get("implementation") == "abstract_layer"
+        assert [n.get("type") for n in definition.get("nodes", [])][0] == "abstract_input"
+        assert [n.get("type") for n in definition.get("nodes", [])][-1] == "abstract_output"
+        # First ABS gets both fixed lanes from embedding dropout.
         first = layers[0]
         incoming = [e for e in graph["edges"] if e.get("target") == first["id"]]
-        assert {e.get("target_port") for e in incoming} == {"named_in:signal", "named_in:residual"}
+        assert {e.get("target_port") for e in incoming} == {"main_in", "skip_in"}

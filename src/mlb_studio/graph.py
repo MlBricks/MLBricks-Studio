@@ -419,13 +419,49 @@ def primitive_catalog():
             ],
         },
         {
+            "type": "abstract_layer",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Abstract Layer",
+            "icon": "ABS",
+            "category": "Core Blocks",
+            "description": "Editable layer shell with 3 fixed inputs/outputs and up to 5 custom inputs/outputs.",
+            "accent": "purple",
+            "api": [],
+        },
+        {
+            "type": "abstract_input",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "library_hidden": True,
+            "name": "Layer Inputs",
+            "icon": "IN",
+            "category": "Core Blocks",
+            "description": "Abstract Layer boundary: exposes fixed and custom external inputs to the internal graph.",
+            "accent": "green",
+            "api": [],
+        },
+        {
+            "type": "abstract_output",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "library_hidden": True,
+            "name": "Layer Outputs",
+            "icon": "OUT",
+            "category": "Core Blocks",
+            "description": "Abstract Layer boundary: maps the internal graph back to fixed and custom external outputs.",
+            "accent": "cyan",
+            "api": [],
+        },
+        {
             "type": "layer_block",
             "builder_utility": True,
             "builder_python_api": False,
+            "library_hidden": True,
             "name": "Layer Block",
             "icon": "LYR",
             "category": "Core Blocks",
-            "description": "Explicit Pre-LN ESA layer with separate Signal and Residual input/output lanes.",
+            "description": "Legacy fixed Pre-LN ESA layer block. New designs should use Abstract Layer.",
             "accent": "purple",
             "runtime_ports": {
                 "inputs": [
@@ -744,15 +780,73 @@ def new_project(name: str = "Untitled Model"):
     }
 
 
+def _abstract_layer_definition(*, name, dim, heads, ffn_dim, block, batch=16):
+    """Editable Pre-LN ESA layer expressed as an Abstract Layer internal graph."""
+    definition_id = _id("abs")
+    layer_in = _node("abstract_input", "Layer Inputs")
+    norm1 = _node("layernorm", "Pre-ESA LayerNorm", {
+        "normalized_shape": dim, "eps": 1e-5,
+        "elementwise_affine": True, "bias": True,
+        "device": None, "dtype": None,
+    })
+    esa = _node("esa", "ESA", {
+        "embd": dim, "head": heads, "batch": batch, "block": block,
+        "backend": "auto", "precision": "auto", "compass": 16,
+        "dropout": 0.0, "gate_min": 0.8, "gate_max": 0.995,
+        "eps": 1e-5, "strict_checks": False,
+    })
+    residual1 = _node("residual", "ESA Residual", {"dropout": 0.0})
+    norm2 = _node("layernorm", "Pre-FFN LayerNorm", {
+        "normalized_shape": dim, "eps": 1e-5,
+        "elementwise_affine": True, "bias": True,
+        "device": None, "dtype": None,
+    })
+    ffn = _node("ffn", "FFN", {
+        "hidden_size": dim, "intermediate_size": ffn_dim,
+        "activation": "gelu", "dropout": 0.0, "bias": True, "gated": False,
+    })
+    residual2 = _node("residual", "FFN Residual", {"dropout": 0.0})
+    layer_out = _node("abstract_output", "Layer Outputs")
+    nodes = [layer_in, norm1, esa, residual1, norm2, ffn, residual2, layer_out]
+    edges = [
+        _edge(layer_in["id"], norm1["id"], source_port="main_out", target_port="main_in", kind="main"),
+        _edge(norm1["id"], esa["id"]),
+        _edge(esa["id"], residual1["id"], source_port="main_out", target_port="main_in", kind="main"),
+        _edge(layer_in["id"], residual1["id"], source_port="skip_out", target_port="skip_in", kind="residual"),
+        _edge(residual1["id"], norm2["id"]),
+        _edge(norm2["id"], ffn["id"]),
+        _edge(ffn["id"], residual2["id"], source_port="main_out", target_port="main_in", kind="main"),
+        _edge(residual1["id"], residual2["id"], source_port="main_out", target_port="skip_in", kind="residual"),
+        _edge(residual2["id"], layer_out["id"], source_port="main_out", target_port="main_in", kind="main"),
+        _edge(residual2["id"], layer_out["id"], source_port="main_out", target_port="skip_in", kind="residual"),
+    ]
+    return {
+        "id": definition_id,
+        "local_id": _id("component"),
+        "name": name,
+        "description": "Editable Pre-LN ESA Abstract Layer",
+        "revision": 1,
+        "implementation": "abstract_layer",
+        "nodes": nodes,
+        "edges": edges,
+        "input_count": 3,
+        "output_count": 3,
+        "interface": {"input_ports": [], "output_ports": []},
+        "palette_hidden": True,
+        "palette_installed": False,
+        "gallery_entry_id": None,
+    }
+
+
 def _standard_esa_layer_block_project(*, name, dim, heads, layers, ffn_dim, block, batch=16, dataset=None):
-    """Build a standard ESA SLM from explicit Signal/Residual Layer Blocks."""
+    """Build a standard ESA SLM from editable Abstract Layer instances."""
     project = new_project(name)
     project["project"].update({
         "context_length": block,
         "batch_size": batch,
         "dataset": dataset,
         "estimated_parameters": "~50M" if dim == 480 else "~200M",
-        "description": f"{layers}-layer ESA SLM with explicit Signal/Residual Layer Blocks",
+        "description": f"{layers}-layer ESA SLM with editable Abstract Layer blocks",
         "model_settings": {
             "embedding_size": dim,
             "heads": heads,
@@ -785,18 +879,17 @@ def _standard_esa_layer_block_project(*, name, dim, heads, layers, ffn_dim, bloc
         "dim": dim, "max_seq_len": block,
     })
     drop = _node("dropout", "Embedding Dropout", {"p": 0.0})
+
+    # One reusable editable definition is instantiated independently at every
+    # physical layer. Editing the Abstract Layer updates the architecture of
+    # every instance while each runtime instance owns its own parameters/state.
+    abstract_def = _abstract_layer_definition(
+        name=f"{name} · ESA Layer", dim=dim, heads=heads,
+        ffn_dim=ffn_dim, block=block, batch=batch,
+    )
+    project["custom_components"][abstract_def["id"]] = abstract_def
     layer_nodes = [
-        _node("layer_block", f"Layer {i}", {
-            "dim": dim,
-            "heads": heads,
-            "ffn_dim": ffn_dim,
-            "block": block,
-            "batch": batch,
-            "compass": 16,
-            "activation": "gelu",
-            "dropout": 0.0,
-            "norm_eps": 1e-5,
-        })
+        _node("custom", f"Layer {i}", {}, definition_id=abstract_def["id"])
         for i in range(1, layers + 1)
     ]
     final_norm = _node("layernorm", "Final LayerNorm", {
@@ -819,22 +912,20 @@ def _standard_esa_layer_block_project(*, name, dim, heads, layers, ffn_dim, bloc
         _edge(pos["id"], drop["id"]),
     ]
 
-    # First layer receives the embedding stream explicitly on both lanes.
     first = layer_nodes[0]
     edges.extend([
-        _edge(drop["id"], first["id"], source_port="main_out", target_port="named_in:signal", kind="named"),
-        _edge(drop["id"], first["id"], source_port="main_out", target_port="named_in:residual", kind="named"),
+        _edge(drop["id"], first["id"], source_port="main_out", target_port="main_in", kind="main"),
+        _edge(drop["id"], first["id"], source_port="main_out", target_port="skip_in", kind="residual"),
     ])
 
-    # Every physical layer now has two visible, independently routed lanes.
     for left, right in zip(layer_nodes[:-1], layer_nodes[1:]):
         edges.extend([
-            _edge(left["id"], right["id"], source_port="named_out:signal", target_port="named_in:signal", kind="named"),
-            _edge(left["id"], right["id"], source_port="named_out:residual", target_port="named_in:residual", kind="named"),
+            _edge(left["id"], right["id"], source_port="main_out", target_port="main_in", kind="main"),
+            _edge(left["id"], right["id"], source_port="skip_out", target_port="skip_in", kind="residual"),
         ])
 
     edges.extend([
-        _edge(layer_nodes[-1]["id"], final_norm["id"], source_port="named_out:signal", target_port="main_in", kind="main"),
+        _edge(layer_nodes[-1]["id"], final_norm["id"], source_port="main_out", target_port="main_in", kind="main"),
         _edge(final_norm["id"], head["id"]),
         _edge(head["id"], out["id"]),
     ])

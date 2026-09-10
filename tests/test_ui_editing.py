@@ -710,11 +710,16 @@ def test_workshop_name_and_slm_presets_are_release_configured():
     assert 'dim:480,heads:6,layers:10,ffn:1920,block:512' in js
     assert 'name:"200M SLM",parameters:"~200M"' in js
     assert 'dim:1024,heads:16,layers:12,ffn:4096,block:256' in js
-    assert 'cat(catalog,"layer_block")' in js
-    assert '"named_out:signal","named_in:signal"' in js
-    assert '"named_out:residual","named_in:residual"' in js
-    assert '"main_out","named_in:signal"' in js
-    assert '"main_out","named_in:residual"' in js
+    assert 'standardESAAbstractDefinition(spec.name+" · ESA Layer",spec)' in js
+    assert 'implementation:"abstract_layer"' in js
+    assert 'type:"custom",name:"Layer "+i' in js
+    assert '"main_out","main_in"' in js
+    assert '"skip_out","skip_in"' in js
+    assert 'abstractLayerDefinition(name)' in js
+    assert 'addAbstractLayerPrimitive()' in js
+    assert 'Open Abstract Layer' in js
+    assert 'const ABSTRACT_TERMINAL_LIMIT=5;' in js
+    assert '+ Add Custom ' in js
     assert 'pos.name="Learned Position"' in js
     assert 'finalNorm.name="Final LayerNorm"' in js
     assert 'tie_embeddings:true' in js

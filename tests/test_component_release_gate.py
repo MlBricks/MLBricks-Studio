@@ -26,7 +26,7 @@ EXPECTED_COMPONENT_TYPES = {
     "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset",
     "text_process", "train_test_split", "tokenize_text", "manual_dataset",
     "image_process", "audio_process", "batch_data", "prepared_dataset",
-    "embedding", "esa", "layer_block", "soup", "stateaware_esa_stack", "vesa", "rmsnorm",
+    "embedding", "esa", "abstract_layer", "abstract_input", "abstract_output", "layer_block", "soup", "stateaware_esa_stack", "vesa", "rmsnorm",
     "ffn", "saffn", "residual", "dropout", "bolt", "visualbolt",
     "value_buffer", "linear", "layernorm", "rescontroller", "micro_ffn",
     "virtual_saffn", "elasticbit_runtime", "rope", "learned_position",
@@ -72,10 +72,10 @@ def _topological_ok(component):
     return len(seen) == len(ids)
 
 
-def test_release_gate_catalog_has_exactly_the_42_supported_studio_components():
+def test_release_gate_catalog_has_exactly_the_45_supported_studio_components():
     catalog = primitive_catalog()
     types = [item.get("type") for item in catalog]
-    assert len(catalog) == 42
+    assert len(catalog) == 45
     assert len(types) == len(set(types))
     assert set(types) == EXPECTED_COMPONENT_TYPES
 
@@ -210,15 +210,50 @@ def test_catalog_json_roundtrip_preserves_all_component_defaults():
     assert restored == catalog
 
 
+def _assert_standard_esa_abstract_layers(state, *, expected_layers, dim, heads, ffn_dim):
+    graph = state["components"][state["root_component_id"]]
+    layers = [n for n in graph["nodes"] if n.get("type") == "custom"]
+    assert len(layers) == expected_layers
+    assert not [n for n in graph["nodes"] if n.get("type") == "layer_block"]
+
+    definition_ids = {n.get("definition_id") for n in layers}
+    assert len(definition_ids) == 1
+    definition = state["custom_components"][next(iter(definition_ids))]
+    assert definition["implementation"] == "abstract_layer"
+    assert definition["input_count"] == 3
+    assert definition["output_count"] == 3
+    assert definition["interface"] == {"input_ports": [], "output_ports": []}
+
+    inner = definition["nodes"]
+    assert inner[0]["type"] == "abstract_input"
+    assert inner[-1]["type"] == "abstract_output"
+    esa = next(n for n in inner if n.get("type") == "esa")
+    ffn = next(n for n in inner if n.get("type") == "ffn")
+    norms = [n for n in inner if n.get("type") == "layernorm"]
+    residuals = [n for n in inner if n.get("type") == "residual"]
+    assert len(norms) == 2
+    assert len(residuals) == 2
+    assert esa["params"]["embd"] == dim
+    assert esa["params"]["head"] == heads
+    assert ffn["params"]["hidden_size"] == dim
+    assert ffn["params"]["intermediate_size"] == ffn_dim
+
+    # Every adjacent Abstract Layer pair carries the fixed Main and Skip lanes.
+    for left, right in zip(layers[:-1], layers[1:]):
+        pair = [e for e in graph["edges"] if e.get("source") == left["id"] and e.get("target") == right["id"]]
+        assert {e.get("source_port") for e in pair} == {"main_out", "skip_out"}
+        assert {e.get("target_port") for e in pair} == {"main_in", "skip_in"}
+
+    return layers, definition
+
+
 def test_release_slm_presets_have_requested_depths_and_names():
     slm50 = tinystories_30m_project()
     assert slm50["project"]["name"] == "50M SLM"
     assert slm50["project"]["estimated_parameters"] == "~50M"
-    model50 = slm50["components"][slm50["root_component_id"]]
-    layers50 = [n for n in model50["nodes"] if n.get("type") == "layer_block"]
-    assert len(layers50) == 10
-    assert all(n["params"]["dim"] == 480 for n in layers50)
-    assert all(n["params"]["ffn_dim"] == 1920 for n in layers50)
+    _assert_standard_esa_abstract_layers(
+        slm50, expected_layers=10, dim=480, heads=6, ffn_dim=1920
+    )
 
     soup50 = soup_30m_1l_project()
     assert soup50["project"]["name"] == "50M SLM · SOUP"
@@ -230,22 +265,14 @@ def test_release_slm_presets_have_requested_depths_and_names():
     assert slm200["project"]["model_settings"]["embedding_size"] == 1024
     assert slm200["project"]["model_settings"]["heads"] == 16
     model200 = slm200["components"][slm200["root_component_id"]]
-    layers200 = [n for n in model200["nodes"] if n.get("type") == "layer_block"]
-    assert len(layers200) == 12
+    layers200, _ = _assert_standard_esa_abstract_layers(
+        slm200, expected_layers=12, dim=1024, heads=16, ffn_dim=4096
+    )
     assert any(n.get("type") == "learned_position" and n["params"]["dim"] == 1024 for n in model200["nodes"])
     head200 = next(n for n in model200["nodes"] if n.get("type") == "lm_head")
     assert head200["params"]["hidden_size"] == 1024
     assert head200["params"]["vocab_size"] == 50257
     assert head200["params"]["tie_embeddings"] is True
-    assert all(n["params"]["dim"] == 1024 for n in layers200)
-    assert all(n["params"]["heads"] == 16 for n in layers200)
-    assert all(n["params"]["ffn_dim"] == 4096 for n in layers200)
-    # Every adjacent Layer Block pair carries both explicit graph lanes.
-    edges200 = model200["edges"]
-    for left, right in zip(layers200[:-1], layers200[1:]):
-        pair = [e for e in edges200 if e.get("source") == left["id"] and e.get("target") == right["id"]]
-        assert {e.get("source_port") for e in pair} == {"named_out:signal", "named_out:residual"}
-        assert {e.get("target_port") for e in pair} == {"named_in:signal", "named_in:residual"}
     assert slm_200m_project()["project"]["name"] == "200M SLM"
 
     stateaware200 = stateaware_esa_200m_project()

@@ -65,7 +65,7 @@ def test_builder_html_no_longer_duplicates_popout_asset_payload(tmp_path, monkey
     html = Builder()._repr_html_()
     # Frontend assets are gzip+base64 encoded once, then expanded in-browser.
     # This keeps notebook output compact and avoids reparsing raw source text.
-    assert len(html.encode("utf-8")) < 460_000
+    assert len(html.encode("utf-8")) < 470_000
     assert "DecompressionStream" in html
     assert "window.__MLB_STUDIO_ASSETS_READY__" in html
     assert "runtimeScript.textContent = jsText" in html

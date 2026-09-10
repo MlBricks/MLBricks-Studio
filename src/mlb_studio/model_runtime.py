@@ -885,6 +885,61 @@ class _APIBoundComponent(nn.Module):
         return self.graph(x, graph_skip=skip, graph_extra=extra)
 
 
+class _AbstractLayerComponent(nn.Module):
+    """Editable layer shell backed by an internal TensorGraph.
+
+    The outer component always keeps Studio's three fixed lanes (Main / Skip /
+    Extra). Up to five additive custom named inputs and outputs are described by
+    ``definition["interface"]`` and are carried through the two boundary nodes
+    inside the graph.
+    """
+
+    def __init__(self, *, definition, params, runtime, custom_components=None, _custom_stack=()):
+        super().__init__()
+        self.definition = deepcopy(definition or {})
+        self.params = deepcopy(params or {})
+        self.runtime = deepcopy(runtime or {})
+        self.custom_components = custom_components or {}
+        self._custom_stack = tuple(_custom_stack or ())
+        nodes = [deepcopy(n) for n in (self.definition.get("nodes") or [])]
+        if not any(str(n.get("type") or "") == "abstract_input" for n in nodes):
+            raise ModelCompileError(f"Abstract Layer {self.definition.get('name')!r} has no Layer Inputs boundary.")
+        if not any(str(n.get("type") or "") == "abstract_output" for n in nodes):
+            raise ModelCompileError(f"Abstract Layer {self.definition.get('name')!r} has no Layer Outputs boundary.")
+        self.graph = TensorGraph(
+            nodes=nodes,
+            edges=deepcopy(self.definition.get("edges") or []),
+            custom_components=self.custom_components,
+            runtime=self.runtime,
+            _custom_stack=self._custom_stack,
+        )
+
+    def forward(self, x, *, skip=None, extra=None, named_inputs=None):
+        return self.graph(
+            x, graph_skip=skip, graph_extra=extra, graph_named=named_inputs or {}
+        )
+
+    @torch.no_grad()
+    def prefill(self, x, *, skip=None, extra=None, named_inputs=None, capacity=None):
+        return self.graph.prefill(
+            x, capacity=capacity, graph_skip=skip, graph_extra=extra,
+            graph_named=named_inputs or {},
+        )
+
+    @torch.no_grad()
+    def decode_step(self, x, cache, *, skip=None, extra=None, named_inputs=None, position=None):
+        return self.graph.decode_step(
+            x, cache, position=position, graph_skip=skip, graph_extra=extra,
+            graph_named=named_inputs or {},
+        )
+
+    def recurrent_generation_support(self):
+        return self.graph.recurrent_generation_support()
+
+    def recurrent_generation_algorithms(self):
+        return self.graph.recurrent_generation_algorithms()
+
+
 class TensorGraph(nn.Module):
     """Small tensor DAG compiler for the model components Builder can execute today."""
     def __init__(self, *, nodes, edges, custom_components, runtime, vocab_override=None, _custom_stack=()):
@@ -970,7 +1025,7 @@ class TensorGraph(nn.Module):
                 label=node.get("name") or "API Function",
                 object_registry=self.api_object_registry,
             )
-        if t in {"text_input","image_input","audio_input","text_output","logits_output"}: return _Identity()
+        if t in {"text_input","image_input","audio_input","text_output","logits_output","abstract_input","abstract_output"}: return _Identity()
         if t=="classifier":
             default_dim = runtime_int(
                 self.runtime.get("model_dim"),
@@ -1135,8 +1190,15 @@ class TensorGraph(nn.Module):
             if did in self._custom_stack:
                 chain=" -> ".join([*self._custom_stack,did])
                 raise ModelCompileError(f"Circular custom component dependency detected: {chain}")
-            if str(definition.get("implementation") or "graph") == "api":
+            implementation = str(definition.get("implementation") or "graph")
+            if implementation == "api":
                 return _APIBoundComponent(
+                    definition=definition, params=p, runtime=self.runtime,
+                    custom_components=self.custom_components,
+                    _custom_stack=(*self._custom_stack,did),
+                )
+            if implementation == "abstract_layer":
+                return _AbstractLayerComponent(
                     definition=definition, params=p, runtime=self.runtime,
                     custom_components=self.custom_components,
                     _custom_stack=(*self._custom_stack,did),
@@ -1217,7 +1279,7 @@ class TensorGraph(nn.Module):
                 )
             head.tie_weights(embedding)
 
-    def forward(self, graph_input, graph_skip=None, graph_extra=None):
+    def forward(self, graph_input, graph_skip=None, graph_extra=None, graph_named=None):
         values={}
         def edge_value(edge, lane):
             source_id=edge.get("source")
@@ -1250,7 +1312,25 @@ class TensorGraph(nn.Module):
             else: x=graph_input
             stored_value = None
             contract = API_COMPONENTS.get(t)
-            if contract is not None:
+            if t == "abstract_input":
+                y = _APIMixedOutputs(
+                    _APILaneOutputs(main=graph_input, skip=graph_skip, extra=graph_extra),
+                    dict(graph_named or {}),
+                )
+                stored_value = y
+            elif t == "abstract_output":
+                if not main_sources:
+                    raise ModelCompileError("Layer Outputs requires a Main input from the internal layer graph.")
+                if len(skip_sources) > 1 or len(extra_sources) > 1:
+                    raise ModelCompileError("Layer Outputs accepts at most one Skip and one Extra input.")
+                skip_value = edge_value(self.in_skip_edges[nid][0], "skip") if skip_sources else None
+                extra_value = edge_value(self.in_extra_edges[nid][0], "extra") if extra_sources else None
+                y = _APIMixedOutputs(
+                    _APILaneOutputs(main=x, skip=skip_value, extra=extra_value),
+                    named_inputs,
+                )
+                stored_value = y
+            elif contract is not None:
                 declared=set(contract.input_ports)
                 contract_inputs={}
 
@@ -1361,6 +1441,21 @@ class TensorGraph(nn.Module):
                 for _ in range(1,repeat):
                     repeat_input=_lane_output(y,"main")
                     y=mod(repeat_input,skip=skip_value,extra=extra_value,named_inputs=named_inputs)
+            elif t=="custom" and str((self.custom_components.get(node.get("definition_id")) or {}).get("implementation") or "graph") == "abstract_layer":
+                if len(skip_sources)>1 or len(extra_sources)>1:
+                    raise ModelCompileError(f"Abstract Layer {node.get('name')} accepts at most one Skip and one Extra tensor lane.")
+                skip_value=edge_value(self.in_skip_edges[nid][0], "skip") if skip_sources else graph_skip
+                extra_value=edge_value(self.in_extra_edges[nid][0], "extra") if extra_sources else graph_extra
+                y=mod(x,skip=skip_value,extra=extra_value,named_inputs=named_inputs)
+                repeat=max(1,int(node.get("repeat") or 1))
+                for _ in range(1,repeat):
+                    y=mod(
+                        _lane_output(y,"main"),
+                        skip=(getattr(getattr(y,"standard",None),"skip",None) if isinstance(y,_APIMixedOutputs) else None),
+                        extra=(getattr(getattr(y,"standard",None),"extra",None) if isinstance(y,_APIMixedOutputs) else None),
+                        named_inputs=(dict(y.values) if isinstance(y,_APIMixedOutputs) else {}),
+                    )
+                stored_value=y
             elif t=="custom" and str((self.custom_components.get(node.get("definition_id")) or {}).get("implementation") or "graph") == "api":
                 if len(skip_sources)>1 or len(extra_sources)>1:
                     raise ModelCompileError(f"API component {node.get('name')} accepts at most one Skip and one Extra tensor lane.")
@@ -1379,7 +1474,11 @@ class TensorGraph(nn.Module):
         sinks=[n for n in self.order if not self.outgoing[n["id"]]]
         if not sinks: raise ModelCompileError("Graph has no output node.")
         if len(sinks)>1: raise ModelCompileError("Training compiler currently requires one tensor output.")
-        return _lane_output(values[sinks[0]["id"]], "main")
+        sink=sinks[0]
+        value=values[sink["id"]]
+        if str(sink.get("type") or "") == "abstract_output":
+            return value
+        return _lane_output(value, "main")
 
     def recurrent_generation_support(self):
         """Return whether this visual graph has an exact token-step execution path.
@@ -1392,13 +1491,14 @@ class TensorGraph(nn.Module):
             "text_input", "image_input", "audio_input", "text_output", "logits_output",
             "embedding", "lm_head", "learned_position", "sinusoidal_position",
             "rmsnorm", "layernorm", "linear", "ffn", "residual", "dropout",
-            "value_buffer",
+            "value_buffer", "abstract_input", "abstract_output",
         }
         for node in self.order:
             nid=node["id"]
             component_type=str(node.get("type") or "")
             module=self.mods[nid]
-            if self.in_named.get(nid) and component_type != "layer_block":
+            implementation = str((self.custom_components.get(node.get("definition_id")) or {}).get("implementation") or "graph") if component_type == "custom" else ""
+            if self.in_named.get(nid) and component_type != "layer_block" and not (component_type == "custom" and implementation == "abstract_layer") and component_type != "abstract_output":
                 return False, f"{node.get('name', component_type)} uses named state ports"
             if component_type == "esa":
                 if not callable(getattr(module,"prefill",None)) or not callable(getattr(module,"decode_step",None)):
@@ -1413,6 +1513,10 @@ class TensorGraph(nn.Module):
             elif component_type == "layer_block":
                 if not callable(getattr(module,"prefill",None)) or not callable(getattr(module,"decode_step",None)):
                     return False, f"{node.get('name','Layer Block')} does not expose recurrent ESA generation"
+            elif component_type == "custom" and isinstance(module,_AbstractLayerComponent):
+                supported,reason=module.recurrent_generation_support()
+                if not supported:
+                    return False, f"{node.get('name','Abstract Layer')}: {reason}"
             elif component_type == "custom" and isinstance(module,TensorGraph):
                 if self.in_skip.get(nid) or self.in_extra.get(nid):
                     return False, f"{node.get('name','Module')} uses external Skip/Extra generation inputs"
@@ -1439,6 +1543,8 @@ class TensorGraph(nn.Module):
             elif component_type == "soup": algorithms.append("SOUP recurrent generation")
             elif component_type == "layer_block": algorithms.append("ESA Layer Block recurrent generation")
             elif component_type == "learned_position": algorithms.append("Cyclic learned-position continuation")
+            elif component_type == "custom" and isinstance(module,_AbstractLayerComponent):
+                algorithms.extend(module.recurrent_generation_algorithms())
             elif component_type == "custom" and isinstance(module,TensorGraph):
                 algorithms.extend(module.recurrent_generation_algorithms())
         return list(dict.fromkeys(algorithms))
@@ -1531,7 +1637,7 @@ class TensorGraph(nn.Module):
         if next_states: run["next_states"][nid]=next_states
         return output
 
-    def _generation_execute(self,graph_input,run,graph_skip=None,graph_extra=None):
+    def _generation_execute(self,graph_input,run,graph_skip=None,graph_extra=None,graph_named=None):
         values={}
         def edge_value(edge,lane):
             source_id=edge.get("source")
@@ -1562,7 +1668,23 @@ class TensorGraph(nn.Module):
             else: x=graph_input
 
             contract=API_COMPONENTS.get(component_type)
-            if component_type=="bolt":
+            if component_type=="abstract_input":
+                y=_APIMixedOutputs(
+                    _APILaneOutputs(main=graph_input,skip=graph_skip,extra=graph_extra),
+                    dict(graph_named or {}),
+                )
+            elif component_type=="abstract_output":
+                if not main_sources:
+                    raise ModelCompileError("Layer Outputs requires a Main input from the internal layer graph.")
+                if len(skip_sources)>1 or len(extra_sources)>1:
+                    raise ModelCompileError("Layer Outputs accepts at most one Skip and one Extra input.")
+                skip_value=edge_value(self.in_skip_edges[nid][0],"skip") if skip_sources else None
+                extra_value=edge_value(self.in_extra_edges[nid][0],"extra") if extra_sources else None
+                y=_APIMixedOutputs(
+                    _APILaneOutputs(main=x,skip=skip_value,extra=extra_value),
+                    named_inputs,
+                )
+            elif component_type=="bolt":
                 if skip_sources or extra_sources: raise ModelCompileError("BOLT recurrent generation accepts only its Main input.")
                 y=self._generation_transform(node,module,x,run)
             elif component_type=="layer_block":
@@ -1597,6 +1719,22 @@ class TensorGraph(nn.Module):
             elif component_type=="residual":
                 if len(skip_sources)!=1: raise ModelCompileError(f"Residual {node.get('name')} needs exactly one Skip input.")
                 y=module(edge_value(self.in_skip_edges[nid][0],"skip"),x)
+            elif component_type=="custom" and isinstance(module,_AbstractLayerComponent):
+                if len(skip_sources)>1 or len(extra_sources)>1:
+                    raise ModelCompileError(f"Abstract Layer {node.get('name')} accepts at most one Skip and one Extra generation input.")
+                skip_value=edge_value(self.in_skip_edges[nid][0],"skip") if skip_sources else graph_skip
+                extra_value=edge_value(self.in_extra_edges[nid][0],"extra") if extra_sources else graph_extra
+                states=[] if run["phase"]=="prefill" else list(run["states"].get(nid) or [])
+                state=states[0] if states else None
+                if run["phase"]=="prefill":
+                    y,state=module.prefill(
+                        x,skip=skip_value,extra=extra_value,named_inputs=named_inputs,capacity=run["capacity"]
+                    )
+                else:
+                    y,state=module.decode_step(
+                        x,state,skip=skip_value,extra=extra_value,named_inputs=named_inputs,position=run["position"]
+                    )
+                run["next_states"][nid]=[state]
             elif component_type=="custom" and isinstance(module,TensorGraph):
                 y=self._generation_transform(node,module,x,run)
             else:
@@ -1606,27 +1744,31 @@ class TensorGraph(nn.Module):
             values[nid]=y
         sinks=[n for n in self.order if not self.outgoing[n["id"]]]
         if len(sinks)!=1: raise ModelCompileError("Recurrent generation requires exactly one tensor output.")
-        return _lane_output(values[sinks[0]["id"]],"main")
+        sink=sinks[0]
+        value=values[sink["id"]]
+        if str(sink.get("type") or "") == "abstract_output":
+            return value
+        return _lane_output(value,"main")
 
     @torch.no_grad()
-    def prefill(self,graph_input,*,capacity=None,graph_skip=None,graph_extra=None):
+    def prefill(self,graph_input,*,capacity=None,graph_skip=None,graph_extra=None,graph_named=None):
         supported,reason=self.recurrent_generation_support()
         if not supported: raise ModelCompileError(reason or "Graph has no recurrent generation path.")
         if graph_input.ndim<2 or graph_input.size(1)<1: raise ValueError("prefill expects a non-empty [B,T,...] input")
         run={"phase":"prefill","states":{},"next_states":{},"position":0,
              "capacity":max(int(capacity or graph_input.size(1)),int(graph_input.size(1)))}
-        output=self._generation_execute(graph_input,run,graph_skip,graph_extra)
+        output=self._generation_execute(graph_input,run,graph_skip,graph_extra,graph_named)
         cache={"states":run["next_states"],"position":int(graph_input.size(1)),"capacity":run["capacity"]}
         return output,cache
 
     @torch.no_grad()
-    def decode_step(self,graph_input,cache,*,position=None,graph_skip=None,graph_extra=None):
+    def decode_step(self,graph_input,cache,*,position=None,graph_skip=None,graph_extra=None,graph_named=None):
         if graph_input.ndim<2 or graph_input.size(1)!=1: raise ValueError("decode_step expects one token per batch")
         position=int(cache.get("position",0) if position is None else position)
         if position>=int(cache.get("capacity",position+1)): raise ValueError("generation cache capacity exceeded")
         run={"phase":"decode","states":cache.get("states") or {},"next_states":{},
              "position":position,"capacity":int(cache.get("capacity",position+1))}
-        output=self._generation_execute(graph_input,run,graph_skip,graph_extra)
+        output=self._generation_execute(graph_input,run,graph_skip,graph_extra,graph_named)
         cache={"states":run["next_states"],"position":position+1,"capacity":run["capacity"]}
         return output,cache
 
