@@ -4376,11 +4376,19 @@ function studioChoice(title,message,actions,options={}){
       if(!api?.available||typeof api.mountStatus!=="function")return false;
       const snapshot=reactRuntimeSnapshot(entry,mode);
       if(!snapshot)return false;
-      api.mountStatus({
-        instanceId:reactInstanceId,modelId:entry.id,mode,main,side,snapshot,
-        actions:reactRuntimeActions(entry,mode)
-      });
-      return true;
+      try{
+        api.mountStatus({
+          instanceId:reactInstanceId,modelId:entry.id,mode,main,side,snapshot,
+          actions:reactRuntimeActions(entry,mode)
+        });
+        return true;
+      }catch(error){
+        // Never leave Training/Generation with an empty center if the optional
+        // React status island rejects one telemetry payload. The legacy status
+        // renderer is deliberately kept as an immediate in-place fallback.
+        try{console.error("MLBricks Studio runtime status mount failed",error);}catch(_){}
+        return false;
+      }
     }
 
     function refreshReactRuntimeStatus(entry,mode){
@@ -4388,10 +4396,17 @@ function studioChoice(title,message,actions,options={}){
       if(!api?.available||typeof api.updateStatus!=="function")return false;
       entry=liveBuiltModel(entry)||entry;
       if(!entry)return false;
-      return api.updateStatus({
-        instanceId:reactInstanceId,modelId:entry.id,mode,
-        snapshot:reactRuntimeSnapshot(entry,mode)
-      });
+      try{
+        return api.updateStatus({
+          instanceId:reactInstanceId,modelId:entry.id,mode,
+          snapshot:reactRuntimeSnapshot(entry,mode)
+        });
+      }catch(error){
+        // A bad display-only payload must never interrupt the model runtime.
+        // Returning false lets scheduleRuntimeStatusDraw rebuild/fallback once.
+        try{console.error("MLBricks Studio runtime status update failed",error);}catch(_){}
+        return false;
+      }
     }
 
     function scheduleRuntimeStatusDraw(){
@@ -9318,7 +9333,48 @@ function studioChoice(title,message,actions,options={}){
       document.body.appendChild(input);input.click();
     }
 
+    let drawRecoveryAttempts=0;
+    let drawRecoveryTimer=null;
+
+    function renderDrawRecovery(error){
+      // drawUnsafe clears the root before reconstructing the shell. Historically,
+      // any unexpected display exception after that clear left the center blank
+      // until the user clicked a tab. Always leave an actionable Studio surface.
+      try{window.__MLBReactRuntime?.unmountInstance?.(reactInstanceId);}catch(_){}
+      root.classList.remove("mlb-runtime-page-active","mlb-custom-editor-active");
+      root.innerHTML="";
+      const shell=document.createElement("div");shell.className="mlb-render-recovery";
+      const card=document.createElement("div");card.className="mlb-render-recovery-card";
+      const title=document.createElement("strong");title.textContent="Studio view is recovering";
+      const copy=document.createElement("span");copy.textContent="Your model/runtime state is still active. Only the visible workspace failed to redraw.";
+      const detail=document.createElement("small");detail.textContent=String(error?.message||error||"Unexpected display error").slice(0,500);
+      const actions=document.createElement("div");actions.className="mlb-render-recovery-actions";
+      const retry=btn("Retry View","mlb-dark-btn");
+      retry.addEventListener("click",()=>{drawRecoveryAttempts=0;draw(true);});
+      actions.appendChild(retry);
+      card.append(title,copy,detail,actions);shell.appendChild(card);root.appendChild(shell);
+    }
+
     function draw(force=false){
+      try{
+        drawUnsafe(force);
+        drawRecoveryAttempts=0;
+      }catch(error){
+        try{console.error("MLBricks Studio full view render failed",error);}catch(_){}
+        drawRecoveryAttempts+=1;
+        renderDrawRecovery(error);
+        // One automatic retry handles transient host/React timing faults. A
+        // persistent renderer bug stops here with Retry View instead of looping.
+        if(drawRecoveryAttempts===1 && !drawRecoveryTimer){
+          drawRecoveryTimer=setTimeout(()=>{
+            drawRecoveryTimer=null;
+            draw(true);
+          },80);
+        }
+      }
+    }
+
+    function drawUnsafe(force=false){
       if(!force && (pointerInteractionActive || focusedEditorActive)){
         deferredInteractionDraw=true;
         return;

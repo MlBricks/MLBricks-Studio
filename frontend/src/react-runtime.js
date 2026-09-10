@@ -64,6 +64,40 @@
   function fmtFloat(value,digits){var n=Number(value);return Number.isFinite(n)?n.toFixed(digits):'—';}
   function fmtDuration(seconds){var n=Number(seconds||0);if(!n)return '—';if(n<60)return n.toFixed(1)+'s';return Math.floor(n/60)+'m '+Math.floor(n%60)+'s';}
   function pct(value){return Math.max(0,Math.min(100,Number(value||0)));}
+  function asArray(value){return Array.isArray(value)?value:[];}
+  function displayList(value,fallback){
+    if(Array.isArray(value))return value.filter(function(x){return x!=null&&String(x).trim()!=='';}).map(String).join(' · ')||fallback;
+    var text=value==null?'':String(value).trim();
+    return text||fallback;
+  }
+
+  class RuntimeErrorBoundary extends React.Component{
+    constructor(props){
+      super(props);
+      this.state={error:null,epoch:0};
+      this.unsubscribe=null;
+    }
+    componentDidMount(){
+      var self=this;
+      this.unsubscribe=this.props.store.subscribe(function(){
+        if(self.state.error)self.setState(function(prev){return {error:null,epoch:prev.epoch+1};});
+      });
+    }
+    componentWillUnmount(){if(this.unsubscribe)this.unsubscribe();}
+    componentDidCatch(error){
+      this.setState({error:error||new Error('Runtime view render failed')});
+      try{console.error('MLBricks Studio runtime view render failed',error);}catch(_){}
+    }
+    render(){
+      if(this.state.error){
+        return h('section',{className:'mlb-runtime-section mlb-runtime-recovery'},
+          h('h3',null,'Live view recovering'),
+          h('div',{className:'mlb-runtime-recovery-copy'},'The model runtime is still active. Studio will rebuild this panel on the next telemetry update.'),
+          h('small',null,escText(this.state.error&&this.state.error.message)||'Display update failed.'));
+      }
+      return h('div',{key:this.state.epoch,className:'mlb-runtime-boundary'},this.props.children);
+    }
+  }
 
   function Section(props){return h('section',{className:'mlb-runtime-section'+(props.className?' '+props.className:'')},h('h3',null,props.title),props.children);}
   function StaticMetric(props){
@@ -114,7 +148,7 @@
       h('pre',null,x.sample))
   );},shallowEqual);
 
-  var EventLog=connected(function(s){return s.history||[];},function(history,props){
+  var EventLog=connected(function(s){return asArray(s.history);},function(history,props){
     var events=history.slice(-100);
     return h(Section,{title:props.title},h('div',{className:'mlb-training-log'},events.length?events.map(function(ev,index){
       var meta=[];if(ev.step!=null)meta.push('step '+ev.step);if(ev.generated_tokens!=null)meta.push(ev.generated_tokens+' tokens');if(ev.phase)meta.push(ev.phase);
@@ -132,7 +166,7 @@
     return 'Status';
   }
 
-  var TrainingEventLog=connected(function(s){return s.history||[];},function(history,props){
+  var TrainingEventLog=connected(function(s){return asArray(s.history);},function(history,props){
     var events=history.slice(-100);
     return h(Section,{title:'Training Log'},h('div',{className:'mlb-training-log mlb-training-log-structured'},events.length?[
       h('div',{className:'mlb-training-log-head',key:'head'},
@@ -195,7 +229,7 @@
 
   var GenerationRuntime=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{};return {
     device:d.label||'Auto',backend:c.backend||'auto',execution:c.execution_mode||'eager',compile:c.execution_mode==='compiled'?(c.compile_mode||'default'):'Not used',precision:c.precision||'auto',
-    source:l.runtime_source==='resident'?'Resident RAM/VRAM':l.runtime_source==='loaded'?'Loaded once':'Pending',path:l.generation_mode||'Pending',algos:(l.generation_algorithms||[]).join(' · ')||'Compatibility path',at:e.generated_at||'—'
+    source:l.runtime_source==='resident'?'Resident RAM/VRAM':l.runtime_source==='loaded'?'Loaded once':'Pending',path:l.generation_mode||'Pending',algos:displayList(l.generation_algorithms,'Compatibility path'),at:e.generated_at||'—'
   };},function(x){return h(Section,{title:'Runtime Used'},h(Grid,{className:'mlb-validation-status-grid'},
     h(StaticMetric,{label:'Device',value:x.device}),h(StaticMetric,{label:'Backend',value:x.backend}),h(StaticMetric,{label:'Execution',value:x.execution}),h(StaticMetric,{label:'Compile',value:x.compile}),h(StaticMetric,{label:'Precision',value:x.precision}),h(StaticMetric,{label:'Model Source',value:x.source}),h(StaticMetric,{label:'Generation Path',value:x.path}),h(StaticMetric,{label:'Algorithms',value:x.algos}),h(StaticMetric,{label:'Generated At',value:x.at})));
   },shallowEqual);
@@ -204,7 +238,7 @@
 
   var TrainingSide=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{},v=s.valid||{};var label=l.status==='running'?'TRAINING':l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':e.weights_ready?'TRAINED':'NOT STARTED';return {label:label,device:d.label||'Auto',backend:c.backend||'auto',execution:c.execution_mode||'eager',precision:c.precision||'auto',running:l.status==='running',valid:v.ok!==false,weights:!!e.weights_ready,locked:!!s.generationLocked,compat:v.compat||null};},function(x,props){var a=props.store.actions||{};return h('div',{className:'mlb-react-runtime-side'},
     h('div',{className:'mlb-runtime-summary'},h('h3',null,'Training Control'),h('div',null,h('span',null,'Status'),h('strong',null,x.label)),h('div',null,h('span',null,'Device'),h('strong',null,x.device)),h('div',null,h('span',null,'Backend'),h('strong',null,x.backend)),h('div',null,h('span',null,'Execution'),h('strong',null,x.execution)),h('div',null,h('span',null,'Precision'),h('strong',null,x.precision))),
-    x.compat?h('div',{className:'mlb-compat-card '+(x.compat.ok?'compatible':'incompatible')},h('div',{className:'mlb-compat-head'},h('strong',null,x.compat.ok?'✓ Compatible':'✕ Not Compatible'),h('span',null,x.compat.ok?'Ready for training':'Fix the items below')),(x.compat.checks||[]).map(function(c,i){return h('div',{className:'mlb-compat-row '+(c.ok?'pass':'fail'),key:i},h('span',null,(c.ok?'✓ ':'✕ ')+c.label),h('strong',null,c.detail));})):null,
+    x.compat?h('div',{className:'mlb-compat-card '+(x.compat.ok?'compatible':'incompatible')},h('div',{className:'mlb-compat-head'},h('strong',null,x.compat.ok?'✓ Compatible':'✕ Not Compatible'),h('span',null,x.compat.ok?'Ready for training':'Fix the items below')),asArray(x.compat.checks).map(function(c,i){c=c||{};return h('div',{className:'mlb-compat-row '+(c.ok?'pass':'fail'),key:i},h('span',null,(c.ok?'✓ ':'✕ ')+escText(c.label)),h('strong',null,escText(c.detail)));})):null,
     x.running?h('button',{type:'button',className:'mlb-runtime-stop',onClick:a.stop},'Stop Training'):h('button',{type:'button',className:'mlb-runtime-start',disabled:!x.valid,onClick:a.start,title:!x.valid?'Fix training compatibility/settings before starting':'Start training'},'Start Training'),
     h('button',{type:'button',className:'mlb-vram-clean-btn',disabled:x.running,onClick:a.cleanVram,title:x.running?'Stop the active runtime before cleaning GPU memory':'Release cached model runtimes and empty the CUDA allocator cache'},'Clean GPU VRAM'),
     h('button',{type:'button',className:'mlb-runtime-cancel',onClick:a.cancel},'Cancel'),
@@ -226,8 +260,8 @@
       try{ReactDOM.unmountComponentAtNode(old.main);}catch(_){}
       try{ReactDOM.unmountComponentAtNode(old.side);}catch(_){}
     }
-    ReactDOM.render(h(opts.mode==='train'?TrainingMain:GenerationMain,{store:store}),opts.main);
-    ReactDOM.render(h(opts.mode==='train'?TrainingSide:GenerationSide,{store:store}),opts.side);
+    ReactDOM.render(h(RuntimeErrorBoundary,{store:store},h(opts.mode==='train'?TrainingMain:GenerationMain,{store:store})),opts.main);
+    ReactDOM.render(h(RuntimeErrorBoundary,{store:store},h(opts.mode==='train'?TrainingSide:GenerationSide,{store:store})),opts.side);
     mounts.set(key,{main:opts.main,side:opts.side,instanceId:String(opts.instanceId)});
     return key;
   }

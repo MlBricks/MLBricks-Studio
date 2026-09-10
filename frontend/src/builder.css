@@ -3822,3 +3822,16 @@ body.mlb-local-app .mlb-root{
   max-height:100vh!important;
   margin-bottom:0!important;
 }
+
+/* Global render safety: a transient renderer exception must never leave the
+   Studio center blank. The recovery surface is intentionally lightweight so it
+   can render even when a specific workspace/status component failed. */
+.mlb-render-recovery{min-height:100%;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:#0b1118;color:#e8edf4}
+.mlb-render-recovery-card{width:min(520px,calc(100% - 24px));display:grid;gap:10px;padding:18px;border:1px solid #334252;border-radius:10px;background:#18222c;box-shadow:0 12px 28px rgba(0,0,0,.28)}
+.mlb-render-recovery-card>strong{font-size:15px;color:#f4f7fb}
+.mlb-render-recovery-card>span{font-size:12px;line-height:1.5;color:#aab6c5}
+.mlb-render-recovery-card>small{max-height:92px;overflow:auto;padding:8px 9px;border:1px solid #2a3745;border-radius:7px;background:#121a23;color:#8290a0;font:10.5px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-word}
+.mlb-render-recovery-actions{display:flex;justify-content:flex-end;margin-top:2px}
+.mlb-runtime-recovery{display:grid;gap:8px;align-content:start}
+.mlb-runtime-recovery-copy{font-size:12px;line-height:1.5;color:#aab6c5}
+.mlb-runtime-recovery small{display:block;color:#8290a0;font:10.5px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-word}

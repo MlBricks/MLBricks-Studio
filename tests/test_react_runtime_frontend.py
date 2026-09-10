@@ -37,3 +37,25 @@ def test_react_runtime_updates_slices_instead_of_rebuilding_studio_root():
     assert "store.subscribe" in react_runtime
     assert "updateStatus" in react_runtime
     assert "root.innerHTML" not in react_runtime
+
+
+def test_runtime_status_has_render_error_boundary_and_payload_normalization():
+    react_runtime = (FRONTEND / "src" / "react-runtime.js").read_text(encoding="utf-8")
+    assert "class RuntimeErrorBoundary extends React.Component" in react_runtime
+    assert "function asArray(value)" in react_runtime
+    assert "function displayList(value,fallback)" in react_runtime
+    assert "asArray(s.history)" in react_runtime
+    assert "displayList(l.generation_algorithms,'Compatibility path')" in react_runtime
+    assert "asArray(x.compat.checks).map" in react_runtime
+    assert "h(RuntimeErrorBoundary,{store:store}" in react_runtime
+
+
+def test_full_studio_draw_never_fails_to_blank_screen_silently():
+    legacy = (FRONTEND / "src" / "legacy-builder.js").read_text(encoding="utf-8")
+    assert "function renderDrawRecovery(error)" in legacy
+    assert "function drawUnsafe(force=false)" in legacy
+    assert 'console.error("MLBricks Studio full view render failed",error)' in legacy
+    assert 'retry.addEventListener("click",()=>{drawRecoveryAttempts=0;draw(true);});' in legacy
+    assert "One automatic retry handles transient host/React timing faults" in legacy
+    assert 'console.error("MLBricks Studio runtime status mount failed",error)' in legacy
+    assert 'console.error("MLBricks Studio runtime status update failed",error)' in legacy
