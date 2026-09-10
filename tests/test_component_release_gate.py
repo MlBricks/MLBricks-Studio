@@ -12,6 +12,8 @@ from mlb_studio.graph import (
     primitive_catalog,
     soup_30m_1l_project,
     soup_200m_project,
+    esa_200m_project,
+    slm_200m_project,
     stateaware_esa_200m_project,
     tinystories_30m_project,
 )
@@ -175,6 +177,7 @@ def test_all_component_cards_serialize_into_notebook_html():
     [
         new_project,
         tinystories_30m_project,
+        esa_200m_project,
         stateaware_esa_200m_project,
         soup_200m_project,
         soup_30m_1l_project,
@@ -219,10 +222,34 @@ def test_release_slm_presets_have_requested_depths_and_names():
     soup50_node = next(n for n in soup50["components"][soup50["root_component_id"]]["nodes"] if n.get("type") == "soup")
     assert soup50_node["params"]["depth"] == 2
 
-    slm200 = stateaware_esa_200m_project()
+    slm200 = esa_200m_project()
     assert slm200["project"]["name"] == "200M SLM"
-    esa200_node = next(n for n in slm200["components"][slm200["root_component_id"]]["nodes"] if n.get("type") == "stateaware_esa_stack")
-    assert esa200_node["params"]["layers"] == 12
+    assert slm200["project"]["model_settings"]["embedding_size"] == 1024
+    assert slm200["project"]["model_settings"]["heads"] == 16
+    model200 = slm200["components"][slm200["root_component_id"]]
+    layers200 = [n for n in model200["nodes"] if n.get("type") == "custom"]
+    assert len(layers200) == 12
+    assert any(n.get("type") == "learned_position" and n["params"]["dim"] == 1024 for n in model200["nodes"])
+    head200 = next(n for n in model200["nodes"] if n.get("type") == "lm_head")
+    assert head200["params"]["hidden_size"] == 1024
+    assert head200["params"]["vocab_size"] == 50257
+    assert head200["params"]["tie_embeddings"] is True
+    layer_def = slm200["custom_components"][layers200[0]["definition_id"]]
+    layer_types = [n["type"] for n in layer_def["nodes"]]
+    assert layer_types == ["dropout", "layernorm", "esa", "residual", "layernorm", "ffn", "residual"]
+    esa_node = next(n for n in layer_def["nodes"] if n["type"] == "esa")
+    ffn_node = next(n for n in layer_def["nodes"] if n["type"] == "ffn")
+    assert esa_node["params"]["embd"] == 1024
+    assert esa_node["params"]["head"] == 16
+    assert ffn_node["params"]["intermediate_size"] == 4096
+    residual_edges = [e for e in layer_def["edges"] if e.get("kind") == "residual"]
+    assert len(residual_edges) == 2
+    assert slm_200m_project()["project"]["name"] == "200M SLM"
+
+    stateaware200 = stateaware_esa_200m_project()
+    assert stateaware200["project"]["name"] == "200M SLM · StateAware"
+    stateaware_node = next(n for n in stateaware200["components"][stateaware200["root_component_id"]]["nodes"] if n.get("type") == "stateaware_esa_stack")
+    assert stateaware_node["params"]["layers"] == 12
 
     soup200 = soup_200m_project()
     assert soup200["project"]["name"] == "200M SLM · SOUP"

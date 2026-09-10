@@ -1,14 +1,28 @@
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Build / packaging
 build/
 dist/
 *.egg-info/
+
+# Virtual environments
 .venv/
 venv/
+env/
 
+# Frontend dependencies
 node_modules/
+frontend/node_modules/
 
-# Local Studio runtime artifact indexes
+# Local Studio runtime artifacts
 mlbricks_workspace/data/.mlbricks_data_index.json
 mlbricks_workspace/models/.mlbricks_model_index.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

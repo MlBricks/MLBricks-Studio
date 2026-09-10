@@ -850,13 +850,130 @@ def tinystories_50m_project():
     """Dataset-oriented alias for the 50M SLM preset."""
     return tinystories_30m_project()
 
+def esa_200m_project():
+    """12-layer standard ESA preset targeting the 200M SLM class.
+
+    This intentionally scales the same canonical Pre-LN + dual-residual
+    architecture used by the 50M SLM: Learned Position -> 12 physical ESA
+    layers -> Final LayerNorm -> tied LM Head.
+    """
+    project = new_project("200M SLM")
+    project["project"].update({
+        "context_length": 256,
+        "batch_size": 16,
+        "dataset": None,
+        "estimated_parameters": "~200M",
+        "description": "12-layer standard ESA SLM with Pre-LN dual residual blocks targeting the ~200M class",
+        "model_settings": {
+            "embedding_size": 1024,
+            "heads": 16,
+            "block": 256,
+            "default_batch": 16,
+            "vocab_size": 50257,
+            "precision": "fp16",
+        },
+    })
+
+    root_id = project["root_component_id"]
+    layer_def_id = _id("custom")
+    block_input = _node("dropout", "Block Input", {"p": 0.0})
+    ln1 = _node("layernorm", "LayerNorm 1", {
+        "normalized_shape": 1024, "eps": 1e-5,
+        "elementwise_affine": True, "bias": True,
+        "device": None, "dtype": None,
+    })
+    esa = _node("esa", "ESA", {
+        "embd": 1024, "head": 16, "batch": 16, "block": 256,
+        "backend": "pytorch", "precision": "fp16", "compass": 16,
+        "dropout": 0.0, "gate_min": 0.8, "gate_max": 0.995,
+        "eps": 1e-5, "device": "auto", "auto_compile": False,
+        "compile_mode": "default", "auto_move_input": True,
+        "strict_checks": False,
+    })
+    res1 = _node("residual", "ESA Residual", {"dropout": 0.0})
+    ln2 = _node("layernorm", "LayerNorm 2", {
+        "normalized_shape": 1024, "eps": 1e-5,
+        "elementwise_affine": True, "bias": True,
+        "device": None, "dtype": None,
+    })
+    ffn = _node("ffn", "FFN", {
+        "hidden_size": 1024, "intermediate_size": 4096,
+        "activation": "gelu", "dropout": 0.0, "bias": True,
+        "gated": False, "device": None, "dtype": None,
+    })
+    res2 = _node("residual", "FFN Residual", {"dropout": 0.0})
+
+    project["custom_components"][layer_def_id] = {
+        "id": layer_def_id,
+        "name": "200M SLM ESA Layer",
+        "description": "Pre-LN ESA + residual → Pre-LN FFN + residual",
+        "revision": 3,
+        "nodes": [block_input, ln1, esa, res1, ln2, ffn, res2],
+        "edges": [
+            _edge(block_input["id"], ln1["id"]),
+            _edge(ln1["id"], esa["id"]),
+            _edge(esa["id"], res1["id"]),
+            _edge(block_input["id"], res1["id"], kind="residual"),
+            _edge(res1["id"], ln2["id"]),
+            _edge(ln2["id"], ffn["id"]),
+            _edge(ffn["id"], res2["id"]),
+            _edge(res1["id"], res2["id"], kind="residual"),
+        ],
+        "exposed_api": [
+            {"source_node": esa["id"], "key": "embd", "label": "Embedding Dim"},
+            {"source_node": esa["id"], "key": "head", "label": "ESA Heads"},
+            {"source_node": esa["id"], "key": "compass", "label": "Compass"},
+            {"source_node": ffn["id"], "key": "intermediate_size", "label": "FFN Hidden Dim"},
+        ],
+    }
+
+    text_input = _node("text_input", "Text Input", {"prompt": "Once upon a time"})
+    emb = _node("embedding", "Token Embedding", {
+        "vocab_size": 50257, "embedding_dim": 1024,
+    })
+    pos = _node("learned_position", "Learned Position", {
+        "dim": 1024, "max_seq_len": 256,
+    })
+    drop = _node("dropout", "Embedding Dropout", {"p": 0.0})
+    nodes = [text_input, emb, pos, drop]
+
+    for i in range(1, 13):
+        nodes.append(_node(
+            "custom",
+            f"Layer {i}",
+            {"embd": 1024, "head": 16, "compass": 16, "intermediate_size": 4096},
+            definition_id=layer_def_id,
+        ))
+
+    final_norm = _node("layernorm", "Final LayerNorm", {
+        "normalized_shape": 1024, "eps": 1e-5,
+        "elementwise_affine": True, "bias": True,
+        "device": None, "dtype": None,
+    })
+    head = _node("lm_head", "LM Head", {
+        "hidden_size": 1024, "vocab_size": 50257, "bias": False,
+        "tie_embeddings": True, "device": None, "dtype": None,
+    })
+    out = _node("text_output", "Text Output", {
+        "max_new_tokens": 64, "temperature": 0.8, "top_p": 0.95,
+    })
+    nodes.extend([final_norm, head, out])
+
+    project["components"][root_id]["nodes"] = nodes
+    project["components"][root_id]["edges"] = [
+        _edge(left["id"], right["id"])
+        for left, right in zip(nodes[:-1], nodes[1:])
+    ]
+    return project
+
+
 def stateaware_esa_200m_project():
     """12-layer StateAware ESA preset targeting the 200M SLM class."""
-    project = new_project("200M SLM")
+    project = new_project("200M SLM · StateAware")
     project["project"].update({
         "context_length": 256, "batch_size": 16, "dataset": None,
         "estimated_parameters": "~200M",
-        "description": "12-layer StateAware ESA small language model targeting ~200M parameters",
+        "description": "Legacy 12-layer StateAware ESA variant targeting the ~200M class",
         "model_settings": {"embedding_size": 384, "heads": 6, "block": 256,
                            "default_batch": 16, "vocab_size": 50257, "precision": "fp16"},
     })
@@ -879,8 +996,8 @@ def stateaware_esa_200m_project():
 
 
 def slm_200m_project():
-    """Preferred public name for the 200M StateAware ESA SLM preset."""
-    return stateaware_esa_200m_project()
+    """Preferred public name for the standard 200M ESA SLM preset."""
+    return esa_200m_project()
 
 
 def soup_200m_project():

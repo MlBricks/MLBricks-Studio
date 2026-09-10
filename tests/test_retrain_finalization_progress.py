@@ -109,3 +109,71 @@ def test_training_runtime_reserves_final_progress_for_validation_and_save():
     assert '"phase":"final_save","overall":99' in source
     assert '"phase":"validation_generation"' in source
     assert "return min(95,max(2,round(ratio*95)))" in source
+
+
+def test_retrain_reaches_done_before_old_artifact_cleanup_finishes(tmp_path, monkeypatch):
+    """Large old checkpoints must not hold the Training panel at 99%."""
+    import threading
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MLBRICKS_STUDIO_HOME", str(tmp_path / ".studio"))
+    builder = Builder()
+    output_root = tmp_path / "models"
+    existing = output_root / "Model-1"
+    (existing / "last").mkdir(parents=True)
+    (existing / "last" / "model.pt").write_bytes(b"old")
+
+    builder.state["prepared_datasets"] = [{"id": "d1", "name": "Data"}]
+    builder.prepared_datasets["d1"] = {"train": [{"input_ids": [1, 2, 3]}]}
+    builder.state["model_outputs"] = [{
+        "id": "m1", "name": "Model 1", "selected_dataset_id": "d1",
+        "training_config": {"output_dir": str(output_root), "execution_mode": "eager"},
+    }]
+    info = {
+        "present": True, "resumable": True, "path": str(existing / "last"),
+        "kind": "trained_model", "resume_mode": "weights", "metadata": {}, "reason": None,
+    }
+    monkeypatch.setattr(builder, "_existing_model_training_artifact", lambda *a, **k: dict(info))
+
+    import mlb_studio.model_runtime as runtime
+    compiled = SimpleNamespace(compile_used=False)
+
+    def fake_train_builder_model(**kwargs):
+        staged = Path(kwargs["config"]["output_dir"]) / "Model-1"
+        (staged / "last").mkdir(parents=True)
+        (staged / "last" / "model.pt").write_bytes(b"new")
+        return {
+            "model_update": {
+                "training_status": "trained", "weights_ready": True,
+                "path": str(staged / "last"), "checkpoint_path": str(staged / "last"),
+                "execution_mode_used": "eager",
+            },
+            "compiled": compiled, "tokenizer": object(), "last_sample": None,
+        }
+
+    monkeypatch.setattr(runtime, "train_builder_model", fake_train_builder_model)
+
+    cleanup_started = threading.Event()
+    allow_cleanup = threading.Event()
+    original_remove = builder._remove_local_artifact_path
+
+    def slow_remove(path):
+        target = Path(path)
+        if ".mlb-override-backup-" in target.name:
+            cleanup_started.set()
+            allow_cleanup.wait(timeout=5)
+        return original_remove(target)
+
+    monkeypatch.setattr(builder, "_remove_local_artifact_path", slow_remove)
+
+    events = []
+    builder.train_model("m1", resume_existing=True, progress_callback=events.append)
+
+    # train_model already returned and terminal progress was delivered even
+    # though deletion of the old backup is deliberately still blocked.
+    assert events[-1]["phase"] == "done"
+    assert events[-1]["overall"] == 100
+    assert cleanup_started.wait(timeout=1)
+    assert (existing / "last" / "model.pt").read_bytes() == b"new"
+
+    allow_cleanup.set()

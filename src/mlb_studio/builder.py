@@ -27,7 +27,7 @@ from collections.abc import Mapping
 
 from .graph import (
     new_project, primitive_catalog, tinystories_30m_project,
-    stateaware_esa_200m_project, soup_200m_project, soup_30m_1l_project,
+    slm_200m_project, stateaware_esa_200m_project, soup_200m_project, soup_30m_1l_project,
 )
 from .runtime import get_mlbricks_info
 from .security import project_executable_features, safe_extract_zip, safe_torch_load
@@ -214,7 +214,9 @@ class Builder:
             self.state = project
         elif preset in {"tinystories", "tinystories-30m", "tinystories-50m", "50m", "50m-slm", "slm-50m", "demo"}:
             self.state = tinystories_30m_project()
-        elif preset in {"esa-200m", "stateaware-esa-200m", "stateaware_esa_200m", "200m", "200m-slm", "slm-200m"}:
+        elif preset in {"esa-200m", "200m", "200m-slm", "slm-200m"}:
+            self.state = slm_200m_project()
+        elif preset in {"stateaware-esa-200m", "stateaware_esa_200m", "200m-stateaware", "stateaware-200m"}:
             self.state = stateaware_esa_200m_project()
         elif preset in {"soup-200m", "soup-200m-3l", "soup_200m"}:
             self.state = soup_200m_project()
@@ -1133,11 +1135,50 @@ class Builder:
         shutil.move(str(target), str(backup))
         return {"target": str(target), "backup": str(backup)}
 
-    def _commit_local_directory_overrides(self, staged):
-        for item in staged or []:
-            backup = Path(item["backup"])
+    def _defer_local_artifact_cleanup(self, paths):
+        """Delete obsolete local artifacts without blocking the runtime UI.
+
+        Model/dataset overrides can leave a large previous artifact behind after
+        the new canonical directory has already been switched into place. On
+        notebook filesystems, recursively deleting checkpoints or Arrow shards
+        can take seconds or minutes. Finalization must not remain at 99% while
+        that best-effort housekeeping runs, so cleanup happens in a daemon thread.
+        """
+        targets = [Path(value) for value in (paths or []) if value]
+        if not targets:
+            return None
+
+        def cleanup():
+            for target in targets:
+                try:
+                    if target.exists() or target.is_symlink():
+                        self._remove_local_artifact_path(target)
+                except Exception:
+                    # The canonical artifact has already been committed. A stale
+                    # .mlb-* backup is recoverable and must never turn a successful
+                    # train/fetch into a failed or permanently-running UI state.
+                    pass
+
+        worker = threading.Thread(
+            target=cleanup,
+            name=f"mlbricks-artifact-cleanup-{uuid.uuid4().hex[:8]}",
+            daemon=True,
+        )
+        worker.start()
+        return worker
+
+    def _commit_local_directory_overrides(self, staged, *, defer_cleanup=False):
+        backups = [
+            Path(item["backup"])
+            for item in (staged or [])
+            if item and item.get("backup")
+        ]
+        if defer_cleanup:
+            return self._defer_local_artifact_cleanup(backups)
+        for backup in backups:
             if backup.exists() or backup.is_symlink():
                 self._remove_local_artifact_path(backup)
+        return None
 
     def _rollback_local_directory_overrides(self, staged):
         for item in reversed(staged or []):
@@ -1370,8 +1411,6 @@ class Builder:
                 overwrite_existing=overwrite_existing,
                 preflight=preflight,
             )
-            self._commit_local_directory_overrides(staged)
-            staged = []
 
             final_payload = dict(last_progress or {})
             final_payload.update({
@@ -1384,6 +1423,12 @@ class Builder:
             })
             if progress_callback:
                 progress_callback(final_payload)
+
+            # The replacement is already live. Removing a previous multi-shard
+            # dataset is housekeeping and must not hold Data Fetch at 99/100%.
+            if staged:
+                self._commit_local_directory_overrides(staged, defer_cleanup=True)
+                staged = []
             return self.last_data_result
         except Exception as exc:
             if staged:
@@ -1953,6 +1998,7 @@ class Builder:
         staged_output = None
         retrain_parent = None
         retrain_output = None
+        replacement_backup = None
 
         if resume_existing:
             # ``validated_existing`` was checked immediately after confirmation,
@@ -2183,7 +2229,6 @@ class Builder:
         # Commit a successful retrain atomically. Until this point the old model
         # directory has not been modified at all.
         if retrain_output is not None:
-            replacement_backup = None
             emit({
                 "status":"running","runtime_kind":"train","phase":"retrain_commit","overall":99,
                 "message":"Retraining finished · committing the new model artifact atomically…",
@@ -2194,14 +2239,11 @@ class Builder:
                 if output_path.exists() or output_path.is_symlink():
                     replacement_backup = self._stage_local_directory_override(output_path)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
+                # Both paths are siblings under the same model root, so this is a
+                # fast directory rename in normal Studio storage. Do not delete
+                # the old model here: a checkpoint-heavy backup can take minutes
+                # to remove and used to leave the Training UI stuck at 99%.
                 shutil.move(str(retrain_output), str(output_path))
-                if replacement_backup:
-                    self._commit_local_directory_overrides([replacement_backup])
-                if retrain_parent.exists():
-                    try:
-                        retrain_parent.rmdir()
-                    except OSError:
-                        self._remove_local_artifact_path(retrain_parent)
                 emit({
                     "status":"running","runtime_kind":"train","phase":"retrain_committed","overall":99,
                     "message":"Retrained model committed · updating Studio runtime and index…",
@@ -2219,30 +2261,58 @@ class Builder:
             update["retrained_from"] = str(resume_path) if resume_path and resume_mode != "checkpoint" else update.get("retrained_from")
             update["resumed_checkpoint"] = str(resume_path) if resume_path and resume_mode == "checkpoint" else update.get("resumed_checkpoint")
 
+        # Keep rollback backups until the canonical artifact, Studio state, index,
+        # and resident runtime are all finalized. Cleanup is scheduled only after
+        # the terminal 100% event has been delivered.
+        pending_overrides = []
+        if replacement_backup:
+            pending_overrides.append(replacement_backup)
         if staged_output:
-            self._commit_local_directory_overrides([staged_output])
-            staged_output = None
+            pending_overrides.append(staged_output)
 
-        entry.update(update)
-        # A successful new train/retrain changed the canonical model artifact.
-        # Refresh only Studio's shallow managed indexes; no weights are loaded.
-        self._refresh_managed_artifact_index()
-        resident_runtime_config = dict(active_config)
-        resident_runtime_config.pop("_studio_logical_output_dir", None)
-        resident_runtime_config["output_dir"] = str(config.get("output_dir") or "mlbricks_workspace/models")
-        self.trained_models[model_id] = {
-            "compiled": result["compiled"], "tokenizer": result["tokenizer"],
-            "runtime": resident_runtime_config,
-        }
-        mode_text = "Retraining complete" if resume_path else "Training complete"
-        payload = {
-            "status":"done","runtime_kind":"train","phase":"done","overall":100,
-            "message":f'{mode_text}: {entry.get("name", "model")}',
-            "model_id":model_id,"model_update":update,
-            "sample_text":result.get("last_sample"),
-        }
-        if progress_callback:
-            progress_callback(payload)
+        entry_before_finalize = copy.deepcopy(entry)
+        try:
+            entry.update(update)
+            # A successful new train/retrain changed the canonical model artifact.
+            # Refresh only Studio's shallow managed indexes; no weights are loaded.
+            self._refresh_managed_artifact_index()
+            resident_runtime_config = dict(active_config)
+            resident_runtime_config.pop("_studio_logical_output_dir", None)
+            resident_runtime_config["output_dir"] = str(config.get("output_dir") or "mlbricks_workspace/models")
+            self.trained_models[model_id] = {
+                "compiled": result["compiled"], "tokenizer": result["tokenizer"],
+                "runtime": resident_runtime_config,
+            }
+            mode_text = "Retraining complete" if resume_path else "Training complete"
+            payload = {
+                "status":"done","runtime_kind":"train","phase":"done","overall":100,
+                "message":f'{mode_text}: {entry.get("name", "model")}',
+                "model_id":model_id,"model_update":update,
+                "sample_text":result.get("last_sample"),
+            }
+            if progress_callback:
+                progress_callback(payload)
+        except Exception:
+            # Because old artifacts are retained until this point we can still
+            # restore the previous canonical model if final metadata/index work
+            # fails after the directory cutover.
+            if pending_overrides:
+                self._rollback_local_directory_overrides(pending_overrides)
+            entry.clear()
+            entry.update(entry_before_finalize)
+            self.trained_models.pop(model_id, None)
+            raise
+
+        if pending_overrides:
+            self._commit_local_directory_overrides(pending_overrides, defer_cleanup=True)
+            staged_output = None
+        if retrain_parent is not None and (retrain_parent.exists() or retrain_parent.is_symlink()):
+            # Usually this is now an empty staging parent and can disappear
+            # instantly. If not, never block successful finalization on cleanup.
+            try:
+                retrain_parent.rmdir()
+            except OSError:
+                self._defer_local_artifact_cleanup([retrain_parent])
         return update
 
     def _resident_generation_runtime(self, model_id, config, *, emit=None):

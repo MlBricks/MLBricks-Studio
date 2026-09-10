@@ -1722,7 +1722,8 @@ The separate-tab launcher is configured for `https://builder.mlbricks.io/`. Depl
 
 - **50M SLM** — 10 ESA layers, width 480, 6 ESA heads, context 512, target **~50M parameters**.
 - **50M SLM · SOUP** — 2 SOUP layers, width 448, 8-head ESA mixers, context 512, target **~50M parameters**.
-- **200M SLM** — 12 StateAware ESA layers, d_model 384, 6 ESA heads, state width 1824, context 256, target **~200M parameters**.
+- **200M SLM** — 12 standard Pre-LN ESA layers with dual residuals, d_model 1024, 16 ESA heads, FFN 1024 → 4096 → 1024, learned position, tied LM head, context 256, target **~200M class**.
+- **200M SLM · StateAware** — legacy 12-layer StateAware ESA variant, d_model 384, 6 ESA heads, state width 1824, context 256.
 - **200M SLM · SOUP** — 3 SOUP layers, d_model 1152, state width 2864, 18-head ESA mixers, observer memory 256, fusion hidden 1728, **199,916,160 parameters**.
 
 Preferred programmatic presets: `slm-50m`, `soup-50m-2l`, `slm-200m`, `soup-200m-3l`. Legacy preset aliases remain accepted for compatibility.

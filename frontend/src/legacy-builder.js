@@ -5415,7 +5415,7 @@ function studioChoice(title,message,actions,options={}){
       const builtInSampleModels=[
         {name:"50M SLM",meta:"10 layers · Context 512 · Batch 16 · ~50M parameters",action:"Load Model",load:loadTinyStories},
         {name:"50M SLM · SOUP",meta:"2 SOUP layers · Context 512 · Batch 16 · ~50M parameters",action:"Load Model",load:loadSOUP30M1L},
-        {name:"200M SLM",meta:"12 layers · Context 256 · Batch 16 · ~200M parameters",action:"Load Model",load:loadStateAwareESA200M},
+        {name:"200M SLM",meta:"12 layers · Context 256 · Batch 16 · ~200M parameters",action:"Load Model",load:loadESA200M},
         {name:"200M SLM · SOUP",meta:"3 SOUP layers · Context 256 · Batch 16 · 199,916,160 parameters",action:"Load Model",load:loadSOUP200M}
       ];
       const builtInSampleData=mlbricksDataPresets.map(preset=>({
@@ -5537,7 +5537,7 @@ function studioChoice(title,message,actions,options={}){
         sampleGrid.appendChild(card("50M SLM","Parameters ~50M · Batch 16 · Block 512 · 10 layers","MODEL",[loadTiny]));
         const loadSoup30=btn("Open Model","mlb-gallery-action sample");loadSoup30.addEventListener("click",openAndClose(loadSOUP30M1L));
         sampleGrid.appendChild(card("50M SLM · SOUP","Parameters ~50M · Batch 16 · Block 512 · 2 SOUP layers","MODEL",[loadSoup30]));
-        const loadEsa200=btn("Open Model","mlb-gallery-action sample");loadEsa200.addEventListener("click",openAndClose(loadStateAwareESA200M));
+        const loadEsa200=btn("Open Model","mlb-gallery-action sample");loadEsa200.addEventListener("click",openAndClose(loadESA200M));
         sampleGrid.appendChild(card("200M SLM","Parameters ~200M · Batch 16 · Block 256 · 12 layers","MODEL",[loadEsa200]));
         const loadSoup200=btn("Open Model","mlb-gallery-action sample");loadSoup200.addEventListener("click",openAndClose(loadSOUP200M));
         sampleGrid.appendChild(card("200M SLM · SOUP","Parameters 199,916,160 · Batch 16 · Block 256 · 3 SOUP layers","MODEL",[loadSoup200]));
@@ -9085,8 +9085,8 @@ function studioChoice(title,message,actions,options={}){
       return loadDataPreset(mlbricksDataPresets[0]);
     }
 
-    function loadTinyStories(){
-      checkpoint("Load 50M SLM");
+    function loadStandardESASLM(spec){
+      checkpoint("Load "+spec.name);
       rememberWorkspaceView();
       state.active_workspace="model";
       const rootId=state.workspaces.model.root_component_id;
@@ -9094,53 +9094,120 @@ function studioChoice(title,message,actions,options={}){
       state.view_component_id=rootId;
       state.project={
         ...(state.project||{}),
-        name:"50M SLM",
-        context_length:512,
-        batch_size:16,
+        name:spec.name,
+        context_length:spec.block,
+        batch_size:spec.batch,
         model_settings:{
-          embedding_size:480,
-          heads:6,
-          block:512,
-          default_batch:16,
-          vocab_size:50257,
-          precision:"fp16"
+          embedding_size:spec.dim,
+          heads:spec.heads,
+          block:spec.block,
+          default_batch:spec.batch,
+          vocab_size:spec.vocab,
+          precision:spec.precision||"fp16"
         },
-        dataset:"TinyStories",
-        estimated_parameters:"~50M",
-        description:"10-layer ESA small language model targeting ~50M parameters"
+        dataset:spec.dataset??null,
+        estimated_parameters:spec.parameters,
+        description:spec.description||""
       };
-      state.breadcrumbs=[{id:rootId,name:"50M SLM"}];
+      state.breadcrumbs=[{id:rootId,name:spec.name}];
       state.workspaces.model.view_component_id=rootId;
       state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
+
+      // One canonical Pre-LN ESA layer shared by the standard SLM presets:
+      // x -> LN -> ESA -> +x -> LN -> FFN -> +residual.
       const defId=uid("custom");
-      const esa=makeNode(cat(catalog,"esa")),norm=makeNode(cat(catalog,"rmsnorm")),ffn=makeNode(cat(catalog,"ffn")),res=makeNode(cat(catalog,"residual"));
-      esa.params={...(esa.params||{}),embd:480,dim:480,head:6,heads:6,batch:16,block:512,precision:"fp16",compass:16};
-      norm.params={...(norm.params||{}),normalized_shape:480,hidden_size:480,dim:480};
-      ffn.params={...(ffn.params||{}),hidden_size:480,dim:480,intermediate_size:1920,ffn_dim:1920};
+      const blockInput=makeNode(cat(catalog,"dropout"));
+      blockInput.name="Block Input";
+      blockInput.params={...(blockInput.params||{}),p:0.0};
+      const ln1=makeNode(cat(catalog,"layernorm"));
+      ln1.name="LayerNorm 1";
+      ln1.params={...(ln1.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
+      const esa=makeNode(cat(catalog,"esa"));
+      esa.name="ESA";
+      esa.params={...(esa.params||{}),embd:spec.dim,dim:spec.dim,head:spec.heads,heads:spec.heads,batch:spec.batch,block:spec.block,precision:spec.precision||"fp16",compass:16,dropout:0.0,gate_min:0.8,gate_max:0.995,eps:1e-5,device:"auto",auto_compile:false,compile_mode:"default",auto_move_input:true,strict_checks:false};
+      const res1=makeNode(cat(catalog,"residual"));
+      res1.name="ESA Residual";
+      res1.params={...(res1.params||{}),dropout:0.0};
+      const ln2=makeNode(cat(catalog,"layernorm"));
+      ln2.name="LayerNorm 2";
+      ln2.params={...(ln2.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
+      const ffn=makeNode(cat(catalog,"ffn"));
+      ffn.name="FFN";
+      ffn.params={...(ffn.params||{}),hidden_size:spec.dim,dim:spec.dim,intermediate_size:spec.ffn,ffn_dim:spec.ffn,activation:"gelu",dropout:0.0,bias:true,gated:false};
+      const res2=makeNode(cat(catalog,"residual"));
+      res2.name="FFN Residual";
+      res2.params={...(res2.params||{}),dropout:0.0};
+
       state.custom_components[defId]={
         id:defId,
-        name:"50M SLM ESA Block",
-        revision:2,
-        description:"ESA → RMSNorm → FFN → Residual",
+        name:spec.name+" ESA Layer",
+        revision:3,
+        description:"Pre-LN ESA + residual → Pre-LN FFN + residual",
         input_count:3,
         output_count:3,
-        nodes:[esa,norm,ffn,res],
+        nodes:[blockInput,ln1,esa,res1,ln2,ffn,res2],
         edges:[
-          edge(esa.id,norm.id),
-          edge(norm.id,ffn.id),
-          Object.assign(edge(ffn.id,res.id),{source_port:"main_out",target_port:"main_in"}),
-          Object.assign(edge(esa.id,res.id,"residual"),{source_port:"skip_out",target_port:"skip_in"})
+          edge(blockInput.id,ln1.id),
+          edge(ln1.id,esa.id),
+          edge(esa.id,res1.id),
+          edge(blockInput.id,res1.id,"residual"),
+          edge(res1.id,ln2.id),
+          edge(ln2.id,ffn.id),
+          edge(ffn.id,res2.id),
+          edge(res1.id,res2.id,"residual")
         ]
       };
+
       const nodes=[];
-      const input=makeNode(cat(catalog,"text_input"));configureTextInputForLatest(input);nodes.push(input);
-      const emb=makeNode(cat(catalog,"embedding"));emb.params={...(emb.params||{}),vocab_size:50257,embedding_dim:480,hidden_size:480,dim:480};nodes.push(emb);
-      for(let i=1;i<=10;i++)nodes.push({id:uid("node"),type:"custom",name:"Layer "+i,definition_id:defId,repeat:1,params:{},input_count:3,output_count:3,position:{x:0,y:0}});
-      const head=makeNode(cat(catalog,"lm_head")),out=makeNode(cat(catalog,"text_output"));nodes.push(head,out);
-      const edges=[];for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
-      state.components[rootId]={id:rootId,name:"50M SLM",kind:"model",revision:1,nodes,edges};
+      const input=makeNode(cat(catalog,"text_input"));
+      configureTextInputForLatest(input);
+      nodes.push(input);
+      const emb=makeNode(cat(catalog,"embedding"));
+      emb.name="Token Embedding";
+      emb.params={...(emb.params||{}),vocab_size:spec.vocab,embedding_dim:spec.dim,hidden_size:spec.dim,dim:spec.dim};
+      nodes.push(emb);
+      const pos=makeNode(cat(catalog,"learned_position"));
+      pos.name="Learned Position";
+      pos.params={...(pos.params||{}),dim:spec.dim,hidden_size:spec.dim,max_seq_len:spec.block};
+      nodes.push(pos);
+      const drop=makeNode(cat(catalog,"dropout"));
+      drop.name="Embedding Dropout";
+      drop.params={...(drop.params||{}),p:0.0};
+      nodes.push(drop);
+      for(let i=1;i<=spec.layers;i++){
+        nodes.push({id:uid("node"),type:"custom",name:"Layer "+i,definition_id:defId,repeat:1,params:{embd:spec.dim,head:spec.heads,compass:16,intermediate_size:spec.ffn},input_count:3,output_count:3,position:{x:0,y:0}});
+      }
+      const finalNorm=makeNode(cat(catalog,"layernorm"));
+      finalNorm.name="Final LayerNorm";
+      finalNorm.params={...(finalNorm.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
+      nodes.push(finalNorm);
+      const head=makeNode(cat(catalog,"lm_head"));
+      head.name="LM Head";
+      head.params={...(head.params||{}),hidden_size:spec.dim,dim:spec.dim,vocab_size:spec.vocab,bias:false,tie_embeddings:true};
+      nodes.push(head);
+      const out=makeNode(cat(catalog,"text_output"));
+      out.params={...(out.params||{}),max_new_tokens:64,temperature:0.8,top_p:0.95};
+      nodes.push(out);
+
+      const edges=[];
+      for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      state.components[rootId]={id:rootId,name:spec.name,kind:"model",revision:1,nodes,edges};
       syncModelSettingsToGraph(state.project.model_settings,state.project.model_settings);
-      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus("50M SLM starter loaded.");draw();
+      selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(spec.name+" starter loaded.");draw();
+    }
+
+    function loadTinyStories(){
+      return loadStandardESASLM({
+        name:"50M SLM",parameters:"~50M",description:"10-layer standard ESA SLM with Pre-LN dual residual blocks",dataset:"TinyStories",
+        dim:480,heads:6,layers:10,ffn:1920,block:512,batch:16,vocab:50257,precision:"fp16"
+      });
+    }
+
+    function loadESA200M(){
+      return loadStandardESASLM({
+        name:"200M SLM",parameters:"~200M",description:"12-layer standard ESA SLM with Pre-LN dual residual blocks targeting the ~200M class",dataset:null,
+        dim:1024,heads:16,layers:12,ffn:4096,block:256,batch:16,vocab:50257,precision:"fp16"
+      });
     }
 
     function loadSequentialPrebuiltModel(spec){
@@ -9160,7 +9227,7 @@ function studioChoice(title,message,actions,options={}){
       selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(spec.name+" loaded.");draw();
     }
 
-    function loadStateAwareESA200M(){loadSequentialPrebuiltModel({name:"200M SLM",parameters:"~200M",description:"12-layer StateAware ESA small language model targeting ~200M parameters",dataset:null,
+    function loadStateAwareESA200M(){loadSequentialPrebuiltModel({name:"200M SLM · StateAware",parameters:"~200M",description:"Legacy 12-layer StateAware ESA variant targeting the ~200M class",dataset:null,
       dim:384,heads:6,block:256,batch:16,vocab:50257,precision:"fp16",coreType:"stateaware_esa_stack",coreName:"StateAware ESA ×12",
       coreParams:{dim:384,state_dim:1824,layers:12,heads:6,block:256,batch:16,depth_dim:64,compass:16,update_ratio_start:0.20,update_ratio_end:0.14,stream_ratio:1.08}});}
 

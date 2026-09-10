@@ -78,7 +78,7 @@ def _root_children_signature(root: Path) -> str:
 
 def _dataset_index_record(path: Path) -> dict[str, Any] | None:
     """Build one metadata-only dataset index record without loading dataset rows."""
-    if not path.is_dir():
+    if not path.is_dir() or path.name.startswith(".mlb-"):
         return None
     marker = _read_json_file(path / "mlbricks_dataset.json") or {}
     looks_ready = (path / "dataset_dict.json").exists() or (

@@ -234,7 +234,7 @@ def test_blueprints_and_loaded_designs_start_with_workspace_collapsed():
     assert 'bottomView="outputs";' in text
     assert 'bottomExpanded=false;' in text
     assert 'collapseArtifactWorkspace();setStatus(entry.name+" loaded from Workshop.")' in text
-    assert 'collapseArtifactWorkspace();setStatus("50M SLM starter loaded.")' in text
+    assert 'collapseArtifactWorkspace();setStatus(spec.name+" starter loaded.")' in text
     assert 'collapseArtifactWorkspace();setStatus(spec.name+" loaded.")' in text
     assert 'selected=null;pendingPort=null;collapseArtifactWorkspace();switchingWorkspace=true;' in text
 
@@ -705,7 +705,18 @@ def test_workshop_name_and_slm_presets_are_release_configured():
     assert 'card("50M SLM · SOUP","Parameters ~50M · Batch 16 · Block 512 · 2 SOUP layers"' in js
     assert 'card("200M SLM","Parameters ~200M · Batch 16 · Block 256 · 12 layers"' in js
     assert 'card("200M SLM · SOUP","Parameters 199,916,160 · Batch 16 · Block 256 · 3 SOUP layers"' in js
-    assert 'for(let i=1;i<=10;i++)' in js
+    assert 'function loadStandardESASLM(spec)' in js
+    assert 'name:"50M SLM",parameters:"~50M"' in js
+    assert 'dim:480,heads:6,layers:10,ffn:1920,block:512' in js
+    assert 'name:"200M SLM",parameters:"~200M"' in js
+    assert 'dim:1024,heads:16,layers:12,ffn:4096,block:256' in js
+    assert 'description:"Pre-LN ESA + residual → Pre-LN FFN + residual"' in js
+    assert 'edge(blockInput.id,res1.id,"residual")' in js
+    assert 'edge(res1.id,res2.id,"residual")' in js
+    assert 'pos.name="Learned Position"' in js
+    assert 'finalNorm.name="Final LayerNorm"' in js
+    assert 'tie_embeddings:true' in js
+    assert 'loadEsa200.addEventListener("click",openAndClose(loadESA200M));' in js
     assert 'coreName:"StateAware ESA ×12"' in js
     assert 'layers:12' in js
     assert 'coreName:"SOUP ×2"' in js
