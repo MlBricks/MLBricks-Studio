@@ -743,3 +743,20 @@ def test_wire_click_opens_remove_connection_action():
     assert 'checkpoint("Remove connection")' in text
     assert '.mlb-edge-hit{fill:none;stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer}' in css
     assert '.mlb-edge-hover{stroke-width:3.4!important}' in css
+
+
+def test_abs_editor_uses_direct_boundary_ports_instead_of_visible_io_blocks():
+    text = _builder_js()
+    css = _builder_css()
+    assert 'function isAbstractBoundaryEditor()' in text
+    assert 'function renderAbstractBoundaryShell(flow,comp)' in text
+    assert 'className="mlb-abs-boundary-shell"' in text
+    assert 'abstractBoundaryPortMarkup(boundary.input,"input")' in text
+    assert 'abstractBoundaryPortMarkup(boundary.output,"output")' in text
+    assert '(comp.nodes||[]).filter(n=>n.type!=="abstract_input"&&n.type!=="abstract_output")' in text
+    assert 'Connect components directly to the boundary ports' in text
+    assert 'Boundary In → Component → Boundary Out' in text
+    assert '.mlb-flow.mlb-abs-boundary-flow{' in css
+    assert '.mlb-abs-boundary-port{' in css
+    assert '.mlb-abs-boundary-port-label{' in css
+    assert '.mlb-edge-abs-boundary{' in css

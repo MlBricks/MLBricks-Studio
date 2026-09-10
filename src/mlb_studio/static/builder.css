@@ -3838,3 +3838,111 @@ body.mlb-local-app .mlb-root{
 .mlb-runtime-recovery{display:grid;gap:8px;align-content:start}
 .mlb-runtime-recovery-copy{font-size:12px;line-height:1.5;color:#aab6c5}
 .mlb-runtime-recovery small{display:block;color:#8290a0;font:10.5px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-word}
+
+/* MLB Studio v32 — ABS boundary editor with direct internal wiring */
+.mlb-flow.mlb-abs-boundary-flow{
+  position:relative;
+  min-width:760px;
+  min-height:470px;
+  box-sizing:border-box;
+  padding:86px 110px 74px;
+  align-items:center;
+}
+.mlb-abs-boundary-shell{
+  position:absolute;
+  inset:12px;
+  border:1.5px solid #6f55ca;
+  border-radius:16px;
+  background:linear-gradient(180deg,rgba(67,48,105,.10),rgba(25,20,39,.035));
+  box-shadow:inset 0 0 0 1px rgba(163,137,255,.06),0 0 24px rgba(71,51,119,.10);
+  pointer-events:auto;
+  z-index:0;
+}
+.mlb-abs-boundary-shell::before{
+  content:"";
+  position:absolute;
+  inset:8px;
+  border:1px dashed rgba(141,112,221,.16);
+  border-radius:11px;
+  pointer-events:none;
+}
+.mlb-abs-boundary-title{
+  position:absolute;
+  left:18px;
+  top:14px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  max-width:310px;
+  padding:6px 8px;
+  border:1px solid rgba(119,91,185,.42);
+  border-radius:7px;
+  background:rgba(11,17,24,.88);
+  color:#dcd3ff;
+  z-index:3;
+}
+.mlb-abs-boundary-title strong{
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
+.mlb-abs-boundary-title span{
+  color:#8f9aac;
+  font-size:8.5px;
+  line-height:1.25;
+}
+.mlb-abs-boundary-anchor{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:5;
+}
+.mlb-abs-boundary-port{
+  pointer-events:auto!important;
+  z-index:12!important;
+}
+.mlb-abs-boundary-port.concept-input{
+  border-color:#c9bcff!important;
+}
+.mlb-abs-boundary-port.concept-output{
+  border-color:#e6ecf3!important;
+}
+.mlb-abs-boundary-port-label{
+  position:absolute;
+  z-index:8;
+  max-width:112px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  padding:3px 5px;
+  border:1px solid color-mix(in srgb,var(--named-port-color,#7087ff) 38%,#2f3b49);
+  border-radius:5px;
+  background:rgba(10,16,23,.90);
+  color:#ced7e3;
+  font-size:8.5px;
+  font-weight:800;
+  line-height:1.1;
+  pointer-events:none;
+}
+.mlb-abs-boundary-port-label.left{text-align:left}
+.mlb-abs-boundary-port-label.right{text-align:right}
+.mlb-abs-boundary-port-label.top,.mlb-abs-boundary-port-label.bottom{text-align:center}
+.mlb-abs-boundary-port-label.custom{
+  color:color-mix(in srgb,var(--named-port-color,#7087ff) 70%,#eef3f8);
+}
+.mlb-edge-abs-boundary{
+  stroke-width:2.05!important;
+  opacity:.94;
+}
+.mlb-abs-boundary-empty{
+  position:relative;
+  z-index:2;
+  min-width:310px;
+  margin:auto;
+  border:1px dashed #4a3c70;
+  background:rgba(16,19,28,.76);
+  border-radius:10px;
+  padding:22px 24px!important;
+  text-align:center;
+}

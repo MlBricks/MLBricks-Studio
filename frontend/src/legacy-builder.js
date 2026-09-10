@@ -809,6 +809,8 @@ function __MLB_STUDIO_FACTORY__(){
 
     function nodeDisplayName(node){
       if(!node)return "Component";
+      if(node.type==="abstract_input")return "ABS Boundary · Input";
+      if(node.type==="abstract_output")return "ABS Boundary · Output";
       if(node.type==="elasticbit_runtime"){
         const saved=String(node.display_name||node.name||"").trim();
         if(!saved || /^ElasticBit(?:\s+4[-–—]32)?$/i.test(saved))return "ElasticBit";
@@ -6657,10 +6659,20 @@ function studioChoice(title,message,actions,options={}){
       // though the model-level Auto Connect toggle is intentionally hidden.
       if(!state.auto_connect&&!isGraphCustomEditor())return;
       // In Auto Connect mode the middle lane represents the ordered model flow.
-      // Rebuild only that lane; Skip and Extra connections remain untouched.
+      // Rebuild only that lane; Skip, Extra and named connections remain untouched.
       c.edges=(c.edges||[]).filter(e=>!isMainLaneEdge(e));
-      for(let i=0;i<c.nodes.length-1;i++){
-        connect(c.nodes[i].id,c.nodes[i+1].id,"main","main_out","main_in",false);
+      let ordered=c.nodes||[];
+      // Abstract Layers keep runtime-compatible sentinel nodes in the serialized
+      // graph, but the editor now renders them as ports on the ABS frame. Always
+      // keep those sentinels at the ends of the automatic Main path regardless
+      // of legacy node ordering.
+      if(isAbstractBoundaryEditor()){
+        const boundary=abstractBoundaryNodes(c);
+        const inside=(c.nodes||[]).filter(n=>n!==boundary.input&&n!==boundary.output);
+        ordered=[...(boundary.input?[boundary.input]:[]),...inside,...(boundary.output?[boundary.output]:[])];
+      }
+      for(let i=0;i<ordered.length-1;i++){
+        connect(ordered[i].id,ordered[i+1].id,"main","main_out","main_in",false);
       }
     }
 
@@ -6670,6 +6682,15 @@ function studioChoice(title,message,actions,options={}){
       if(selected){
         const idx=c.nodes.findIndex(x=>x.id===selected);
         if(idx>=0) insertAt=idx+1;
+      }
+      if(isAbstractBoundaryEditor()){
+        const boundary=abstractBoundaryNodes(c);
+        const outputIndex=boundary.output?c.nodes.findIndex(x=>x.id===boundary.output.id):-1;
+        // With no selected internal component, insert immediately before the
+        // output boundary sentinel so a fresh ABS naturally becomes
+        // Boundary In → Component → Boundary Out.
+        if(!selected&&outputIndex>=0)insertAt=outputIndex;
+        if(outputIndex>=0)insertAt=Math.min(insertAt,outputIndex);
       }
       c.nodes.splice(insertAt,0,node);
       rebuildMainFlow();
@@ -7142,7 +7163,7 @@ function studioChoice(title,message,actions,options={}){
           box.appendChild(editorRow("Terminal Name",port.name||"",value=>{port.name=apiSafePortName(value,(kind==="in"?"input_":"output_")+(index+1));draw();}));
           box.appendChild(editorRow("Side",port.side||"top",value=>{checkpoint("Move Abstract Layer terminal side");changeCustomTerminalSide(iface,port,value);redrawCustomTerminalLayout();},{select:true,options:terminalSideOptions}));
           const hint=document.createElement("div");hint.className="mlb-terminal-map-hint";
-          hint.textContent=kind==="in"?"Inside the layer this appears as a named output on Layer Inputs.":"Inside the layer this appears as a named input on Layer Outputs.";box.appendChild(hint);
+          hint.textContent=kind==="in"?"Inside ABS this appears directly on the boundary as an incoming named terminal.":"Inside ABS this appears directly on the boundary as an outgoing named terminal.";box.appendChild(hint);
           appendMoveControls(box,port);body.appendChild(box);
         });
         const add=btn("+ Add Custom "+(kind==="in"?"Input":"Output"),"mlb-create mlb-custom-add-arg");
@@ -7380,6 +7401,20 @@ function studioChoice(title,message,actions,options={}){
     function isGraphCustomEditor(){
       const def=activeCustomDefinition();
       return !!def && String(def.implementation||"graph")!=="api";
+    }
+
+    function isAbstractBoundaryEditor(){
+      const c=current(state);
+      if(!c||c.kind!=="custom_edit")return false;
+      return isAbstractDefinition(state.custom_components?.[c.definition_id]);
+    }
+
+    function abstractBoundaryNodes(comp=current(state)){
+      const nodes=comp?.nodes||[];
+      return {
+        input:nodes.find(node=>node?.type==="abstract_input")||null,
+        output:nodes.find(node=>node?.type==="abstract_output")||null
+      };
     }
 
     function customDefinitionDependsOn(startId,targetId,seen=new Set()){
@@ -9013,6 +9048,103 @@ function studioChoice(title,message,actions,options={}){
       return side==="in"?"Input":"Output";
     }
 
+    function absBoundaryFixedStyle(visualSide,index){
+      const positions=[18,50,82];
+      const p=positions[Math.max(0,Math.min(2,Number(index)||0))];
+      if(visualSide==="left")return "left:-7px;top:"+p+"%;transform:translateY(-50%)";
+      return "right:-7px;top:"+p+"%;transform:translateY(-50%)";
+    }
+
+    function absBoundaryLabelStyle(visualSide,percent){
+      const p=Number(percent||50).toFixed(2);
+      if(visualSide==="top")return "left:"+p+"%;top:13px;transform:translateX(-50%)";
+      if(visualSide==="bottom")return "left:"+p+"%;bottom:13px;transform:translateX(-50%)";
+      if(visualSide==="left")return "left:13px;top:"+p+"%;transform:translateY(-50%)";
+      return "right:13px;top:"+p+"%;transform:translateY(-50%)";
+    }
+
+    function absBoundaryCustomStyle(item){
+      const percent=Number(item.percent||50);
+      const p=percent.toFixed(2);
+      if(item.visualSide==="top")return "left:"+p+"%;top:-7px;transform:translateX(-50%)";
+      if(item.visualSide==="bottom")return "left:"+p+"%;bottom:-7px;top:auto;transform:translateX(-50%)";
+      // The 30–70% custom-side layout intentionally avoids the fixed 18/50/82
+      // ABS terminals, so custom ports can share left/right surfaces cleanly.
+      if(item.visualSide==="left")return "left:-7px;top:"+p+"%;transform:translateY(-50%)";
+      return "right:-7px;top:"+p+"%;transform:translateY(-50%)";
+    }
+
+    function abstractBoundaryPortMarkup(node,boundaryKind){
+      if(!node)return "";
+      const isInputBoundary=boundaryKind==="input";
+      const internalSide=isInputBoundary?"out":"in";
+      const visualSide=isInputBoundary?"left":"right";
+      const fixed=isInputBoundary
+        ?[
+          {index:0,key:"skip_out",label:"Skip In",color:"#a96dff"},
+          {index:1,key:"main_out",label:"Main In",color:"#7087ff"},
+          {index:2,key:"extra_out",label:"Extra In",color:"#35c8b5"}
+        ]
+        :[
+          {index:0,key:"skip_in",label:"Skip Out",color:"#a96dff"},
+          {index:1,key:"main_in",label:"Main Out",color:"#7087ff"},
+          {index:2,key:"extra_in",label:"Extra Out",color:"#35c8b5"}
+        ];
+      let html="";
+      fixed.forEach(item=>{
+        const roleClass=internalSide==="in"?"mlb-input-socket":"mlb-output-socket";
+        const conceptClass=isInputBoundary?"concept-input":"concept-output";
+        html+='<button class="mlb-port '+internalSide+' '+roleClass+' mlb-abs-boundary-port mlb-abs-fixed-port '+conceptClass+'" data-node-id="'+node.id+'" data-side="'+internalSide+'" data-io-role="'+(internalSide==="in"?'input':'output')+'" data-visual-side="'+visualSide+'" data-port-index="'+item.index+'" data-port-mode="standard" data-port-key="" data-port-name="'+item.label+'" data-tooltip="'+item.label+'" style="'+absBoundaryFixedStyle(visualSide,item.index)+';--named-port-color:'+item.color+'" type="button" aria-label="'+item.label+'" title="'+item.label+'"></button>';
+        const p=[18,50,82][item.index];
+        html+='<span class="mlb-abs-boundary-port-label '+visualSide+' '+conceptClass+'" style="'+absBoundaryLabelStyle(visualSide,p)+';--named-port-color:'+item.color+'">'+item.label+'</span>';
+      });
+
+      customTerminalRecords(node).filter(item=>item.io===internalSide).forEach((item,customIndex)=>{
+        const port=item.port;
+        const key=String(port.id||((isInputBoundary?"abs_in_":"abs_out_")+(customIndex+1)));
+        const name=apiSafePortName(port.name||(isInputBoundary?"input":"output"),isInputBoundary?"input":"output");
+        const conceptLabel=(isInputBoundary?"Custom In · ":"Custom Out · ")+name;
+        const color=namedPortColor(key,customIndex);
+        const roleClass=internalSide==="in"?"mlb-input-socket":"mlb-output-socket";
+        const conceptClass=isInputBoundary?"concept-input":"concept-output";
+        html+='<button class="mlb-port '+internalSide+' '+roleClass+' named-port named-socket custom-terminal-socket mlb-abs-boundary-port '+conceptClass+' visual-'+item.visualSide+'" data-node-id="'+node.id+'" data-side="'+internalSide+'" data-io-role="'+(internalSide==="in"?'input':'output')+'" data-visual-side="'+item.visualSide+'" data-socket="abs_custom_'+key+'" data-port-index="'+(10+customIndex)+'" data-port-mode="named" data-port-key="'+key+'" data-port-name="'+name+'" data-port-keys="'+key+'" data-port-names="'+name+'" data-tooltip="'+conceptLabel+'" style="'+absBoundaryCustomStyle(item)+';--named-port-color:'+color+'" type="button" aria-label="'+conceptLabel+'" title="'+conceptLabel+'"></button>';
+        html+='<span class="mlb-abs-boundary-port-label '+item.visualSide+' '+conceptClass+' custom" style="'+absBoundaryLabelStyle(item.visualSide,item.percent)+';--named-port-color:'+color+'">'+name+'</span>';
+      });
+      return html;
+    }
+
+    function renderAbstractBoundaryShell(flow,comp){
+      const def=activeCustomDefinition();
+      if(!isAbstractDefinition(def))return null;
+      const boundary=abstractBoundaryNodes(comp);
+      if(!boundary.input||!boundary.output)return null;
+      const shell=document.createElement("div");
+      shell.className="mlb-abs-boundary-shell";
+      shell.setAttribute("aria-label","Abstract Layer boundary");
+      const title=document.createElement("div");title.className="mlb-abs-boundary-title";
+      const titleName=document.createElement("strong");titleName.textContent="ABS · "+String(def.name||"Abstract Layer");
+      const titleHint=document.createElement("span");titleHint.textContent="Connect components directly to the boundary ports";
+      title.append(titleName,titleHint);shell.appendChild(title);
+      shell.addEventListener("click",ev=>{
+        if(ev.target.closest(".mlb-port"))return;
+        selected=null;pendingPort=null;draw();
+      });
+
+      const inputAnchor=document.createElement("div");
+      inputAnchor.className="mlb-abs-boundary-anchor mlb-abs-boundary-input";
+      inputAnchor.dataset.nodeId=boundary.input.id;
+      inputAnchor.innerHTML=abstractBoundaryPortMarkup(boundary.input,"input");
+
+      const outputAnchor=document.createElement("div");
+      outputAnchor.className="mlb-abs-boundary-anchor mlb-abs-boundary-output";
+      outputAnchor.dataset.nodeId=boundary.output.id;
+      outputAnchor.innerHTML=abstractBoundaryPortMarkup(boundary.output,"output");
+
+      shell.append(inputAnchor,outputAnchor);
+      flow.appendChild(shell);
+      return shell;
+    }
+
     function portButtons(node, side){
       const namedPorts=namedUserPorts(node,side);
       const baseSockets=side==="in"?["top","back","bottom"]:["top","front","bottom"];
@@ -9116,7 +9248,7 @@ function studioChoice(title,message,actions,options={}){
       const wr=wrap.getBoundingClientRect();
       let skipRoute=0,extraRoute=0,namedRoute=0;
 
-      const nodeEls=[...flow.querySelectorAll(".mlb-node")];
+      const nodeEls=[...flow.querySelectorAll(".mlb-node,.mlb-abs-boundary-anchor")];
       const nodeById=new Map(nodeEls.map(el=>[el.dataset.nodeId,el]));
       const nodeRects=new Map(nodeEls.map(el=>[el,el.getBoundingClientRect()]));
       const portElCache=new Map();
@@ -9175,7 +9307,7 @@ function studioChoice(title,message,actions,options={}){
         let bottom=Math.max(ar.bottom-wr.top,br.bottom-wr.top);
         let blocked=false;
         for(const nodeEl of nodeEls){
-          if(nodeEl===a||nodeEl===b)continue;
+          if(nodeEl===a||nodeEl===b||nodeEl.classList.contains("mlb-abs-boundary-anchor"))continue;
           const nr=nodeRects.get(nodeEl);
           const nl=nr.left-wr.left,nrgt=nr.right-wr.left;
           if(nrgt>left+4&&nl<right-4){
@@ -9228,7 +9360,14 @@ function studioChoice(title,message,actions,options={}){
         const p=document.createElementNS("http://www.w3.org/2000/svg","path");
         p.setAttribute("data-edge-id",e.id);
 
-        if(lane==="named"){
+        const boundaryEdge=a.classList.contains("mlb-abs-boundary-anchor")||b.classList.contains("mlb-abs-boundary-anchor");
+        if(boundaryEdge){
+          const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"");
+          const targetVisual=portVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"");
+          p.setAttribute("d",namedBezier(x1,y1,sourceVisual,x2,y2,targetVisual));
+          p.setAttribute("class","mlb-edge-main mlb-edge-abs-boundary mlb-edge-side-aware"+(lane==="named"?" mlb-edge-named":""));
+          if(lane==="named")p.style.stroke=namedPortColor(targetKey||sourceKey,targetIndex);
+        }else if(lane==="named"){
           const sourceVisual=portVisualSide(a,"out",sourceIndex,sourceKey,e.source_socket||"");
           const targetVisual=portVisualSide(b,"in",targetIndex,targetKey,e.target_socket||"");
           p.setAttribute("d",namedNodeAvoidingPath(a,b,x1,y1,sourceVisual,x2,y2,targetVisual));
@@ -10195,9 +10334,10 @@ function studioChoice(title,message,actions,options={}){
       }
 
       const mini=document.createElement("div");mini.className="mlb-minimap";
-      const miniTitle=document.createElement("div");miniTitle.className="mlb-minimap-title";miniTitle.textContent=state.active_workspace==="data"?"DATA BLUEPRINT":(isGraphCustomEditor()?"MODULE BLUEPRINT":(isApiComposerView()?"API BLUEPRINT":"MODEL BLUEPRINT"));
+      const miniTitle=document.createElement("div");miniTitle.className="mlb-minimap-title";miniTitle.textContent=state.active_workspace==="data"?"DATA BLUEPRINT":(isAbstractBoundaryEditor()?"ABS BLUEPRINT":(isGraphCustomEditor()?"MODULE BLUEPRINT":(isApiComposerView()?"API BLUEPRINT":"MODEL BLUEPRINT")));
       const mg=document.createElement("div");mg.className="mlb-minimap-grid";
-      current(state).nodes.forEach(()=>{const m=document.createElement("div");m.className="mlb-mini-node";mg.appendChild(m);});
+      const miniNodes=isAbstractBoundaryEditor()?current(state).nodes.filter(n=>n.type!=="abstract_input"&&n.type!=="abstract_output"):current(state).nodes;
+      miniNodes.forEach(()=>{const m=document.createElement("div");m.className="mlb-mini-node";mg.appendChild(m);});
       mini.append(miniTitle,mg);
 
       if(dataProgress){
@@ -10211,18 +10351,26 @@ function studioChoice(title,message,actions,options={}){
       }
 
       wrap=document.createElement("div");wrap.className="mlb-flow-wrap"+(isApiComposerView()?" mlb-api-composer-wrap":"");
-      flow=document.createElement("div");flow.className="mlb-flow"+(isApiComposerView()?" mlb-api-composer-flow":"");
+      flow=document.createElement("div");flow.className="mlb-flow"+(isApiComposerView()?" mlb-api-composer-flow":"")+(isAbstractBoundaryEditor()?" mlb-abs-boundary-flow":"");
       flow.style.transformOrigin="left top";
       flow.style.transform="scale("+zoom+")";
       const comp=current(state);
+      const abstractBoundaryView=isAbstractBoundaryEditor();
+      const visibleNodes=abstractBoundaryView
+        ?(comp.nodes||[]).filter(n=>n.type!=="abstract_input"&&n.type!=="abstract_output")
+        :(comp.nodes||[]);
+      if(abstractBoundaryView)renderAbstractBoundaryShell(flow,comp);
 
-      if(!comp.nodes.length){
+      if(!visibleNodes.length){
         const e=document.createElement("div");e.className="mlb-empty";
         if(comp.kind==="custom_edit"){
           const def=state.custom_components?.[comp.definition_id];
+          e.classList.toggle("mlb-abs-boundary-empty",isAbstractDefinition(def));
           e.innerHTML=String(def?.implementation||"graph")==="api"
             ?"<strong>API Component execution graph.</strong><br><br>Use Add Function or Add Module in the top toolbar, or insert supported Components from the left."
-            :"<strong>Empty Module.</strong><br><br>Add Components from the left, or use Add Module above for a nested Module.";
+            :(isAbstractDefinition(def)
+              ?"<strong>Empty ABS layer.</strong><br><br>Add internal components, then connect them directly to the labeled ports on the ABS boundary."
+              :"<strong>Empty Module.</strong><br><br>Add Components from the left, or use Add Module above for a nested Module.");
         }else if(state.active_workspace==="data"){
           e.innerHTML="<strong>Build your data pipeline step by step.</strong><br><br>Start with Hugging Face, Kaggle, URL, Local or Manual Data.";
         }else{
@@ -10230,7 +10378,7 @@ function studioChoice(title,message,actions,options={}){
         }
         flow.appendChild(e);
       }else{
-        comp.nodes.forEach((n,i)=>{
+        visibleNodes.forEach((n,i)=>{
           if(i&&!isApiComposerView()){
             const a=document.createElement("div");a.className="mlb-arrow";a.textContent="→";flow.appendChild(a);
           }
@@ -10327,7 +10475,8 @@ function studioChoice(title,message,actions,options={}){
         const portEl=ev.target.closest(".mlb-port");
         if(!portEl||!flow.contains(portEl)||portEl.disabled)return;
         const card=portEl.closest(".mlb-node");
-        const nodeId=card?.dataset.nodeId||"";
+        const boundaryAnchor=portEl.closest(".mlb-abs-boundary-anchor");
+        const nodeId=portEl.dataset.nodeId||card?.dataset.nodeId||boundaryAnchor?.dataset.nodeId||"";
         const n=(current(state).nodes||[]).find(item=>item.id===nodeId);
         if(!n)return;
         const side=portEl.dataset.side,idx=Number(portEl.dataset.portIndex||0),key=portEl.dataset.portKey||"",name=portEl.dataset.portName||"",mode=portEl.dataset.portMode||"standard",socket=portEl.dataset.socket||"";
@@ -10346,7 +10495,7 @@ function studioChoice(title,message,actions,options={}){
       // bars are intentionally disabled across every Studio workspace.
       if(pendingPort){
         const hint=document.createElement("div");hint.className="mlb-hint";
-        hint.textContent="Choose a compatible socket: Top, Back/Front, or Bottom.";
+        hint.textContent=isAbstractBoundaryEditor()?"Choose a compatible component or ABS boundary port.":"Choose a compatible socket: Top, Back/Front, or Bottom.";
         canvas.appendChild(hint);
       }
 
@@ -10535,7 +10684,7 @@ function studioChoice(title,message,actions,options={}){
           if(isApiCustom){
             renderAPICustomOverview(body,defNow);
           }else if(isAbstractCustom){
-            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Build the layer internally between Layer Inputs and Layer Outputs. Fixed Skip/Main/Extra ports always exist; add up to five custom inputs and five custom outputs below.";body.appendChild(help);
+            const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Build directly inside the ABS boundary. Fixed Skip/Main/Extra ports live on the frame; add up to five custom inputs and five custom outputs below. Connect internal components straight to the boundary terminals.";body.appendChild(help);
             renderAbstractInterfaceEditor(body,defNow);
           }else{
             const help=document.createElement("div");help.className="mlb-api-path";help.textContent="Compose this reusable Module from built-in and saved components. You can nest Modules directly here without returning to Workshop.";body.appendChild(help);
