@@ -653,6 +653,22 @@ def test_popout_transport_deduplicates_multi_channel_packets():
     assert "if(!acceptPopoutPacket(msg))return;" in text
 
 
+def test_full_window_and_notebook_keep_navigation_state_in_sync():
+    text = _builder_js()
+    assert "function bridgeViewPayload()" in text
+    assert "function applyPeerView(view)" in text
+    assert 'runtime_panel:runtimePanel?cp(runtimePanel):null' in text
+    assert 'output_directory_selection:outputDirectorySelection' in text
+    assert 'source:isPopout?"popout":"host"' in text
+    assert 'if(!peerReady||!studioSurfaceHasFocus())return;' in text
+    assert 'if(msg.type==="state_sync")' in text
+    assert 'applyPeerView(msg.view);' in text
+    assert 'view:bridgeViewPayload(),execution:cp(execution)' in text
+    assert 'popPayload.initial_view=bridgeViewPayload();' in text
+    assert 'schedulePopoutStateSync();' in text
+    assert 'if(isPopout)schedulePopoutStateSync();' not in text
+
+
 def test_persistence_navigation_blocks_duplicate_open_and_stale_editor_transactions():
     text = _builder_js()
     assert "let persistenceNavigationInFlight=false;" in text

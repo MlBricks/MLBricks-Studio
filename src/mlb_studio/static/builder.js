@@ -1059,6 +1059,8 @@ function __MLB_STUDIO_FACTORY__(){
       if(typeof initialView.selected==="string"||initialView.selected===null)selected=initialView.selected;
       if(typeof initialView.inspector_tab==="string")inspectorTab=initialView.inspector_tab;
       if(Number.isFinite(Number(initialView.zoom)))zoom=Math.max(.65,Math.min(1.5,Number(initialView.zoom)));
+      if(Object.prototype.hasOwnProperty.call(initialView,"output_directory_selection"))
+        outputDirectorySelection=initialView.output_directory_selection==null?null:String(initialView.output_directory_selection);
     }
 
     if(!initialView)tryRestoreBrowserDraft();
@@ -2185,6 +2187,42 @@ function __MLB_STUDIO_FACTORY__(){
         }
       });
       return clean;
+    }
+
+    // Full Window and the notebook/Kaggle cell are two views of one Studio
+    // session. Project state alone is not enough: navigation such as Training,
+    // Generation, Workshop, Cloud, selected output, inspector tab and zoom lives
+    // outside `state`. Mirror that lightweight view state in both directions so
+    // switching either surface immediately moves the other surface to the same
+    // place. Only the focused surface broadcasts (see schedulePopoutStateSync),
+    // which prevents passive redraws from bouncing stale navigation back.
+    function bridgeViewPayload(){
+      return {
+        runtime_panel:runtimePanel?cp(runtimePanel):null,
+        gallery_workspace:cp(galleryWorkspace),
+        cloud_workspace:cp(cloudWorkspace),
+        bottom_expanded:!!bottomExpanded,
+        bottom_view:bottomView,
+        selected:selected,
+        inspector_tab:inspectorTab,
+        zoom:zoom,
+        output_directory_selection:outputDirectorySelection
+      };
+    }
+
+    function applyPeerView(view){
+      if(!view||typeof view!=="object")return;
+      if(Object.prototype.hasOwnProperty.call(view,"runtime_panel"))
+        runtimePanel=(view.runtime_panel&&typeof view.runtime_panel==="object")?cp(view.runtime_panel):null;
+      if(view.gallery_workspace&&typeof view.gallery_workspace==="object")galleryWorkspace=cp(view.gallery_workspace);
+      if(view.cloud_workspace&&typeof view.cloud_workspace==="object")cloudWorkspace=cp(view.cloud_workspace);
+      if(typeof view.bottom_expanded==="boolean")bottomExpanded=view.bottom_expanded;
+      if(typeof view.bottom_view==="string")bottomView=view.bottom_view;
+      if(typeof view.selected==="string"||view.selected===null)selected=view.selected;
+      if(typeof view.inspector_tab==="string")inspectorTab=view.inspector_tab;
+      if(Number.isFinite(Number(view.zoom)))zoom=Math.max(.65,Math.min(1.5,Number(view.zoom)));
+      if(Object.prototype.hasOwnProperty.call(view,"output_directory_selection"))
+        outputDirectorySelection=view.output_directory_selection==null?null:String(view.output_directory_selection);
     }
 
     function setBridgeState(){
@@ -3326,9 +3364,19 @@ function __MLB_STUDIO_FACTORY__(){
         if(msg.type==="hello_ack"){
           popoutHostConnected=true;
           if(popoutHelloTimer){clearInterval(popoutHelloTimer);popoutHelloTimer=null;}
-          if(msg.state?.components){state=cp(msg.state);ensureWorkspaces();selected=null;pendingPort=null;draw();}
+          if(msg.state?.components){state=cp(msg.state);ensureWorkspaces();selected=null;pendingPort=null;}
+          applyPeerView(msg.view);
+          if(msg.execution&&typeof msg.execution==="object")execution=cp(msg.execution);
+          draw();
           updateKernelBadge();
           setStatus("Full Window connected to notebook kernel.");
+          return;
+        }
+        if(msg.type==="state_sync"){
+          if(msg.state?.components){state=cp(msg.state);ensureWorkspaces();pendingPort=null;}
+          applyPeerView(msg.view);
+          if(msg.execution&&typeof msg.execution==="object")execution=cp(msg.execution);
+          draw();
           return;
         }
         if(msg.type==="progress"){
@@ -3344,11 +3392,16 @@ function __MLB_STUDIO_FACTORY__(){
       if(sourceWindow)popoutPeerWindow=sourceWindow;
       if(msg.type==="hello"){
         popoutPeerConnected=true;
-        sendHostReply(sourceWindow,{type:"hello_ack",state:cp(state),ts:Date.now()});
+        sendHostReply(sourceWindow,{
+          type:"hello_ack",state:cp(state),view:bridgeViewPayload(),execution:cp(execution),ts:Date.now()
+        });
         return;
       }
-      if(msg.type==="state_sync"&&msg.state?.components){
-        state=cp(msg.state);ensureWorkspaces();selected=null;pendingPort=null;draw();return;
+      if(msg.type==="state_sync"){
+        if(msg.state?.components){state=cp(msg.state);ensureWorkspaces();pendingPort=null;}
+        applyPeerView(msg.view);
+        if(msg.execution&&typeof msg.execution==="object")execution=cp(msg.execution);
+        draw();return;
       }
       if(msg.type==="stop"){
         const stopButton=bridgeControl(bridge?.stop,"button");
@@ -3396,6 +3449,8 @@ function __MLB_STUDIO_FACTORY__(){
           ){
             attachPopoutMessagePort(event.ports[0]);
             if(msg.state?.components){state=cp(msg.state);ensureWorkspaces();selected=null;pendingPort=null;}
+            applyPeerView(msg.view);
+            if(msg.execution&&typeof msg.execution==="object")execution=cp(msg.execution);
             popoutHostConnected=true;
             if(popoutHelloTimer){clearInterval(popoutHelloTimer);popoutHelloTimer=null;}
             sendPopoutMessage({type:"hello",source:"popout",ts:Date.now()});
@@ -3434,11 +3489,16 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function schedulePopoutStateSync(){
-      if(!isPopout)return;
+      const peerReady=isPopout?popoutHostConnected:popoutPeerConnected;
+      if(!peerReady||!studioSurfaceHasFocus())return;
       if(popoutSyncTimer)clearTimeout(popoutSyncTimer);
       popoutSyncTimer=setTimeout(()=>{
-        sendPopoutMessage({type:"state_sync",source:"popout",state:bridgeStatePayload(),ts:Date.now()});
-      },180);
+        if(!studioSurfaceHasFocus())return;
+        sendPopoutMessage({
+          type:"state_sync",source:isPopout?"popout":"host",
+          state:bridgeStatePayload(),view:bridgeViewPayload(),execution:cp(execution),ts:Date.now()
+        });
+      },120);
     }
 
     function fullWindowPage(){
@@ -3453,16 +3513,7 @@ function __MLB_STUDIO_FACTORY__(){
       const popPayload=cp(payload);
       delete popPayload.popout_assets;
       popPayload.state=bridgeStatePayload();
-      popPayload.initial_view={
-        runtime_panel:runtimePanel?cp(runtimePanel):null,
-        gallery_workspace:cp(galleryWorkspace),
-        cloud_workspace:cp(cloudWorkspace),
-        bottom_expanded:!!bottomExpanded,
-        bottom_view:bottomView,
-        selected:selected,
-        inspector_tab:inspectorTab,
-        zoom:zoom
-      };
+      popPayload.initial_view=bridgeViewPayload();
       // Preserve the real notebook widget selectors for direct progress mirroring
       // before replacing them with popout placeholders.
       popPayload.host_bridge=cp(payload.bridge||{});
@@ -3528,7 +3579,7 @@ function __MLB_STUDIO_FACTORY__(){
           const channel=new MessageChannel();
           attachPopoutMessagePort(channel.port1);
           popup.postMessage(
-            popoutPacket({type:"port_offer",source:"host",state:cp(state),ts:Date.now()}),
+            popoutPacket({type:"port_offer",source:"host",state:cp(state),view:bridgeViewPayload(),execution:cp(execution),ts:Date.now()}),
             "*",
             [channel.port2]
           );
@@ -3579,7 +3630,9 @@ function __MLB_STUDIO_FACTORY__(){
       }catch(_){cleanupProbe();}
 
       [120,350,700,1200,2200,3400].forEach(ms=>setTimeout(()=>{if(!launcherUpgraded)offerPort();},ms));
-      setTimeout(()=>sendHostReply(popup,{type:"hello_ack",state:cp(state),ts:Date.now()}),500);
+      setTimeout(()=>sendHostReply(popup,{
+        type:"hello_ack",state:cp(state),view:bridgeViewPayload(),execution:cp(execution),ts:Date.now()
+      }),500);
       setStatus("MLB Studio opened. Keep this notebook tab open for Python execution.");
       return true;
     }
@@ -11509,7 +11562,7 @@ function studioChoice(title,message,actions,options={}){
           }
         }
       });
-      if(isPopout)schedulePopoutStateSync();
+      schedulePopoutStateSync();
       scheduleDraftPersist();
     }
 
