@@ -419,6 +419,38 @@ def primitive_catalog():
             ],
         },
         {
+            "type": "layer_block",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Layer Block",
+            "icon": "LYR",
+            "category": "Core Blocks",
+            "description": "Explicit Pre-LN ESA layer with separate Signal and Residual input/output lanes.",
+            "accent": "purple",
+            "runtime_ports": {
+                "inputs": [
+                    {"id": "signal", "name": "Signal In", "socket": "back"},
+                    {"id": "residual", "name": "Residual In", "socket": "bottom"},
+                ],
+                "outputs": [
+                    {"id": "signal", "name": "Signal Out", "socket": "front"},
+                    {"id": "residual", "name": "Residual Out", "socket": "bottom"},
+                ],
+            },
+            "api": [
+                {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 480},
+                {"key": "heads", "label": "ESA Heads", "type": "number", "value": 6},
+                {"key": "ffn_dim", "label": "FFN Hidden Dim", "type": "number", "value": 1920},
+                {"key": "block", "label": "Context / Block", "type": "number", "value": 512},
+                {"key": "batch", "label": "Batch", "type": "number", "value": 16},
+                {"key": "compass", "label": "ESA Compass", "type": "number", "value": 16},
+                {"key": "activation", "label": "Activation", "type": "select", "value": "gelu",
+                 "options": ["gelu", "silu", "relu"]},
+                {"key": "dropout", "label": "Dropout", "type": "number", "value": 0.0},
+                {"key": "norm_eps", "label": "Norm Epsilon", "type": "number", "value": 0.00001},
+            ],
+        },
+        {
             "type": "residual",
             "name": "Residual Add",
             "icon": "ADD",
@@ -712,133 +744,112 @@ def new_project(name: str = "Untitled Model"):
     }
 
 
-def tinystories_30m_project():
-    """Compatibility entry point for the 50M SLM ESA starter.
-
-    The public preset was expanded from the older ~30M sample to a 10-layer,
-    ~50M small-language-model target while keeping the legacy function name so
-    existing notebooks continue to load.
-    """
-    project = new_project("50M SLM")
+def _standard_esa_layer_block_project(*, name, dim, heads, layers, ffn_dim, block, batch=16, dataset=None):
+    """Build a standard ESA SLM from explicit Signal/Residual Layer Blocks."""
+    project = new_project(name)
     project["project"].update({
-        "context_length": 512,
-        "batch_size": 16,
-        "dataset": "TinyStories",
-        "estimated_parameters": "~50M",
-        "description": "10-layer ESA small language model targeting ~50M parameters",
+        "context_length": block,
+        "batch_size": batch,
+        "dataset": dataset,
+        "estimated_parameters": "~50M" if dim == 480 else "~200M",
+        "description": f"{layers}-layer ESA SLM with explicit Signal/Residual Layer Blocks",
         "model_settings": {
-            "embedding_size": 480,
-            "heads": 6,
-            "block": 512,
-            "default_batch": 16,
+            "embedding_size": dim,
+            "heads": heads,
+            "block": block,
+            "default_batch": batch,
             "vocab_size": 50257,
             "precision": "fp16",
         },
     })
 
-    data_ws = (project.get("workspaces") or {}).get("data") or {}
-    data_root = data_ws.get("root_component_id")
-    for node in (project.get("components") or {}).get(data_root, {}).get("nodes", []):
-        if node.get("type") == "tokenize_text":
-            node.setdefault("params", {}).update({
-                "tokenizer_name": "EleutherAI/gpt-neo-125M",
-                "context_length": 512,
-                "truncation": "false",
-                "padding": "false",
-                "add_special_tokens": "false",
-            })
+    if dataset == "TinyStories":
+        data_ws = (project.get("workspaces") or {}).get("data") or {}
+        data_root = data_ws.get("root_component_id")
+        for node in (project.get("components") or {}).get(data_root, {}).get("nodes", []):
+            if node.get("type") == "tokenize_text":
+                node.setdefault("params", {}).update({
+                    "tokenizer_name": "EleutherAI/gpt-neo-125M",
+                    "context_length": block,
+                    "truncation": "false",
+                    "padding": "false",
+                    "add_special_tokens": "false",
+                })
 
     root_id = project["root_component_id"]
-    layer_def_id = _id("custom")
-    block_input = _node("dropout", "Block Input", {"p": 0.0})
-    ln1 = _node("layernorm", "LayerNorm 1", {
-        "normalized_shape": 480, "eps": 1e-5,
-        "elementwise_affine": True, "bias": True,
-        "device": None, "dtype": None,
-    })
-    esa = _node("esa", "ESA", {
-        "embd": 480, "head": 6, "batch": 16, "block": 512,
-        "backend": "pytorch", "precision": "fp16", "compass": 16,
-        "dropout": 0.0, "gate_min": 0.8, "gate_max": 0.995,
-        "eps": 1e-5, "device": "auto", "auto_compile": False,
-        "compile_mode": "default", "auto_move_input": True,
-        "strict_checks": False,
-    })
-    res1 = _node("residual", "ESA Residual", {"dropout": 0.0})
-    ln2 = _node("layernorm", "LayerNorm 2", {
-        "normalized_shape": 480, "eps": 1e-5,
-        "elementwise_affine": True, "bias": True,
-        "device": None, "dtype": None,
-    })
-    ffn = _node("ffn", "FFN", {
-        "hidden_size": 480, "intermediate_size": 1920,
-        "activation": "gelu", "dropout": 0.0, "bias": True,
-        "gated": False, "device": None, "dtype": None,
-    })
-    res2 = _node("residual", "FFN Residual", {"dropout": 0.0})
-
-    project["custom_components"][layer_def_id] = {
-        "id": layer_def_id,
-        "name": "50M SLM ESA Layer",
-        "description": "Pre-LN ESA + residual → Pre-LN FFN + residual",
-        "revision": 3,
-        "nodes": [block_input, ln1, esa, res1, ln2, ffn, res2],
-        "edges": [
-            _edge(block_input["id"], ln1["id"]),
-            _edge(ln1["id"], esa["id"]),
-            _edge(esa["id"], res1["id"]),
-            _edge(block_input["id"], res1["id"], kind="residual"),
-            _edge(res1["id"], ln2["id"]),
-            _edge(ln2["id"], ffn["id"]),
-            _edge(ffn["id"], res2["id"]),
-            _edge(res1["id"], res2["id"], kind="residual"),
-        ],
-        "exposed_api": [
-            {"source_node": esa["id"], "key": "embd", "label": "Embedding Dim"},
-            {"source_node": esa["id"], "key": "head", "label": "ESA Heads"},
-            {"source_node": esa["id"], "key": "compass", "label": "Compass"},
-            {"source_node": ffn["id"], "key": "intermediate_size", "label": "FFN Hidden Dim"},
-        ],
-    }
-
     text_input = _node("text_input", "Text Input", {"prompt": "Once upon a time"})
     emb = _node("embedding", "Token Embedding", {
-        "vocab_size": 50257, "embedding_dim": 480,
+        "vocab_size": 50257, "embedding_dim": dim,
     })
     pos = _node("learned_position", "Learned Position", {
-        "dim": 480, "max_seq_len": 512,
+        "dim": dim, "max_seq_len": block,
     })
     drop = _node("dropout", "Embedding Dropout", {"p": 0.0})
-    nodes = [text_input, emb, pos, drop]
-
-    for i in range(1, 11):
-        nodes.append(_node(
-            "custom",
-            f"Layer {i}",
-            {"embd": 480, "head": 6, "compass": 16, "intermediate_size": 1920},
-            definition_id=layer_def_id,
-        ))
-
+    layer_nodes = [
+        _node("layer_block", f"Layer {i}", {
+            "dim": dim,
+            "heads": heads,
+            "ffn_dim": ffn_dim,
+            "block": block,
+            "batch": batch,
+            "compass": 16,
+            "activation": "gelu",
+            "dropout": 0.0,
+            "norm_eps": 1e-5,
+        })
+        for i in range(1, layers + 1)
+    ]
     final_norm = _node("layernorm", "Final LayerNorm", {
-        "normalized_shape": 480, "eps": 1e-5,
+        "normalized_shape": dim, "eps": 1e-5,
         "elementwise_affine": True, "bias": True,
         "device": None, "dtype": None,
     })
     head = _node("lm_head", "LM Head", {
-        "hidden_size": 480, "vocab_size": 50257, "bias": False,
+        "hidden_size": dim, "vocab_size": 50257, "bias": False,
         "tie_embeddings": True, "device": None, "dtype": None,
     })
     out = _node("text_output", "Text Output", {
         "max_new_tokens": 64, "temperature": 0.8, "top_p": 0.95,
     })
-    nodes.extend([final_norm, head, out])
+
+    nodes = [text_input, emb, pos, drop, *layer_nodes, final_norm, head, out]
+    edges = [
+        _edge(text_input["id"], emb["id"]),
+        _edge(emb["id"], pos["id"]),
+        _edge(pos["id"], drop["id"]),
+    ]
+
+    # First layer receives the embedding stream explicitly on both lanes.
+    first = layer_nodes[0]
+    edges.extend([
+        _edge(drop["id"], first["id"], source_port="main_out", target_port="named_in:signal", kind="named"),
+        _edge(drop["id"], first["id"], source_port="main_out", target_port="named_in:residual", kind="named"),
+    ])
+
+    # Every physical layer now has two visible, independently routed lanes.
+    for left, right in zip(layer_nodes[:-1], layer_nodes[1:]):
+        edges.extend([
+            _edge(left["id"], right["id"], source_port="named_out:signal", target_port="named_in:signal", kind="named"),
+            _edge(left["id"], right["id"], source_port="named_out:residual", target_port="named_in:residual", kind="named"),
+        ])
+
+    edges.extend([
+        _edge(layer_nodes[-1]["id"], final_norm["id"], source_port="named_out:signal", target_port="main_in", kind="main"),
+        _edge(final_norm["id"], head["id"]),
+        _edge(head["id"], out["id"]),
+    ])
 
     project["components"][root_id]["nodes"] = nodes
-    project["components"][root_id]["edges"] = [
-        _edge(left["id"], right["id"])
-        for left, right in zip(nodes[:-1], nodes[1:])
-    ]
+    project["components"][root_id]["edges"] = edges
     return project
+
+
+def tinystories_30m_project():
+    """Compatibility entry point for the 50M SLM ESA starter."""
+    return _standard_esa_layer_block_project(
+        name="50M SLM", dim=480, heads=6, layers=10, ffn_dim=1920,
+        block=512, batch=16, dataset="TinyStories",
+    )
 
 
 def slm_50m_project():
@@ -850,121 +861,13 @@ def tinystories_50m_project():
     """Dataset-oriented alias for the 50M SLM preset."""
     return tinystories_30m_project()
 
+
 def esa_200m_project():
-    """12-layer standard ESA preset targeting the 200M SLM class.
-
-    This intentionally scales the same canonical Pre-LN + dual-residual
-    architecture used by the 50M SLM: Learned Position -> 12 physical ESA
-    layers -> Final LayerNorm -> tied LM Head.
-    """
-    project = new_project("200M SLM")
-    project["project"].update({
-        "context_length": 256,
-        "batch_size": 16,
-        "dataset": None,
-        "estimated_parameters": "~200M",
-        "description": "12-layer standard ESA SLM with Pre-LN dual residual blocks targeting the ~200M class",
-        "model_settings": {
-            "embedding_size": 1024,
-            "heads": 16,
-            "block": 256,
-            "default_batch": 16,
-            "vocab_size": 50257,
-            "precision": "fp16",
-        },
-    })
-
-    root_id = project["root_component_id"]
-    layer_def_id = _id("custom")
-    block_input = _node("dropout", "Block Input", {"p": 0.0})
-    ln1 = _node("layernorm", "LayerNorm 1", {
-        "normalized_shape": 1024, "eps": 1e-5,
-        "elementwise_affine": True, "bias": True,
-        "device": None, "dtype": None,
-    })
-    esa = _node("esa", "ESA", {
-        "embd": 1024, "head": 16, "batch": 16, "block": 256,
-        "backend": "pytorch", "precision": "fp16", "compass": 16,
-        "dropout": 0.0, "gate_min": 0.8, "gate_max": 0.995,
-        "eps": 1e-5, "device": "auto", "auto_compile": False,
-        "compile_mode": "default", "auto_move_input": True,
-        "strict_checks": False,
-    })
-    res1 = _node("residual", "ESA Residual", {"dropout": 0.0})
-    ln2 = _node("layernorm", "LayerNorm 2", {
-        "normalized_shape": 1024, "eps": 1e-5,
-        "elementwise_affine": True, "bias": True,
-        "device": None, "dtype": None,
-    })
-    ffn = _node("ffn", "FFN", {
-        "hidden_size": 1024, "intermediate_size": 4096,
-        "activation": "gelu", "dropout": 0.0, "bias": True,
-        "gated": False, "device": None, "dtype": None,
-    })
-    res2 = _node("residual", "FFN Residual", {"dropout": 0.0})
-
-    project["custom_components"][layer_def_id] = {
-        "id": layer_def_id,
-        "name": "200M SLM ESA Layer",
-        "description": "Pre-LN ESA + residual → Pre-LN FFN + residual",
-        "revision": 3,
-        "nodes": [block_input, ln1, esa, res1, ln2, ffn, res2],
-        "edges": [
-            _edge(block_input["id"], ln1["id"]),
-            _edge(ln1["id"], esa["id"]),
-            _edge(esa["id"], res1["id"]),
-            _edge(block_input["id"], res1["id"], kind="residual"),
-            _edge(res1["id"], ln2["id"]),
-            _edge(ln2["id"], ffn["id"]),
-            _edge(ffn["id"], res2["id"]),
-            _edge(res1["id"], res2["id"], kind="residual"),
-        ],
-        "exposed_api": [
-            {"source_node": esa["id"], "key": "embd", "label": "Embedding Dim"},
-            {"source_node": esa["id"], "key": "head", "label": "ESA Heads"},
-            {"source_node": esa["id"], "key": "compass", "label": "Compass"},
-            {"source_node": ffn["id"], "key": "intermediate_size", "label": "FFN Hidden Dim"},
-        ],
-    }
-
-    text_input = _node("text_input", "Text Input", {"prompt": "Once upon a time"})
-    emb = _node("embedding", "Token Embedding", {
-        "vocab_size": 50257, "embedding_dim": 1024,
-    })
-    pos = _node("learned_position", "Learned Position", {
-        "dim": 1024, "max_seq_len": 256,
-    })
-    drop = _node("dropout", "Embedding Dropout", {"p": 0.0})
-    nodes = [text_input, emb, pos, drop]
-
-    for i in range(1, 13):
-        nodes.append(_node(
-            "custom",
-            f"Layer {i}",
-            {"embd": 1024, "head": 16, "compass": 16, "intermediate_size": 4096},
-            definition_id=layer_def_id,
-        ))
-
-    final_norm = _node("layernorm", "Final LayerNorm", {
-        "normalized_shape": 1024, "eps": 1e-5,
-        "elementwise_affine": True, "bias": True,
-        "device": None, "dtype": None,
-    })
-    head = _node("lm_head", "LM Head", {
-        "hidden_size": 1024, "vocab_size": 50257, "bias": False,
-        "tie_embeddings": True, "device": None, "dtype": None,
-    })
-    out = _node("text_output", "Text Output", {
-        "max_new_tokens": 64, "temperature": 0.8, "top_p": 0.95,
-    })
-    nodes.extend([final_norm, head, out])
-
-    project["components"][root_id]["nodes"] = nodes
-    project["components"][root_id]["edges"] = [
-        _edge(left["id"], right["id"])
-        for left, right in zip(nodes[:-1], nodes[1:])
-    ]
-    return project
+    """12-layer standard ESA preset using explicit Signal/Residual Layer Blocks."""
+    return _standard_esa_layer_block_project(
+        name="200M SLM", dim=1024, heads=16, layers=12, ffn_dim=4096,
+        block=256, batch=16, dataset=None,
+    )
 
 
 def stateaware_esa_200m_project():

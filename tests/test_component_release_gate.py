@@ -26,7 +26,7 @@ EXPECTED_COMPONENT_TYPES = {
     "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset",
     "text_process", "train_test_split", "tokenize_text", "manual_dataset",
     "image_process", "audio_process", "batch_data", "prepared_dataset",
-    "embedding", "esa", "soup", "stateaware_esa_stack", "vesa", "rmsnorm",
+    "embedding", "esa", "layer_block", "soup", "stateaware_esa_stack", "vesa", "rmsnorm",
     "ffn", "saffn", "residual", "dropout", "bolt", "visualbolt",
     "value_buffer", "linear", "layernorm", "rescontroller", "micro_ffn",
     "virtual_saffn", "elasticbit_runtime", "rope", "learned_position",
@@ -72,10 +72,10 @@ def _topological_ok(component):
     return len(seen) == len(ids)
 
 
-def test_release_gate_catalog_has_exactly_the_41_supported_studio_components():
+def test_release_gate_catalog_has_exactly_the_42_supported_studio_components():
     catalog = primitive_catalog()
     types = [item.get("type") for item in catalog]
-    assert len(catalog) == 41
+    assert len(catalog) == 42
     assert len(types) == len(set(types))
     assert set(types) == EXPECTED_COMPONENT_TYPES
 
@@ -215,7 +215,10 @@ def test_release_slm_presets_have_requested_depths_and_names():
     assert slm50["project"]["name"] == "50M SLM"
     assert slm50["project"]["estimated_parameters"] == "~50M"
     model50 = slm50["components"][slm50["root_component_id"]]
-    assert len([n for n in model50["nodes"] if n.get("type") == "custom"]) == 10
+    layers50 = [n for n in model50["nodes"] if n.get("type") == "layer_block"]
+    assert len(layers50) == 10
+    assert all(n["params"]["dim"] == 480 for n in layers50)
+    assert all(n["params"]["ffn_dim"] == 1920 for n in layers50)
 
     soup50 = soup_30m_1l_project()
     assert soup50["project"]["name"] == "50M SLM · SOUP"
@@ -227,23 +230,22 @@ def test_release_slm_presets_have_requested_depths_and_names():
     assert slm200["project"]["model_settings"]["embedding_size"] == 1024
     assert slm200["project"]["model_settings"]["heads"] == 16
     model200 = slm200["components"][slm200["root_component_id"]]
-    layers200 = [n for n in model200["nodes"] if n.get("type") == "custom"]
+    layers200 = [n for n in model200["nodes"] if n.get("type") == "layer_block"]
     assert len(layers200) == 12
     assert any(n.get("type") == "learned_position" and n["params"]["dim"] == 1024 for n in model200["nodes"])
     head200 = next(n for n in model200["nodes"] if n.get("type") == "lm_head")
     assert head200["params"]["hidden_size"] == 1024
     assert head200["params"]["vocab_size"] == 50257
     assert head200["params"]["tie_embeddings"] is True
-    layer_def = slm200["custom_components"][layers200[0]["definition_id"]]
-    layer_types = [n["type"] for n in layer_def["nodes"]]
-    assert layer_types == ["dropout", "layernorm", "esa", "residual", "layernorm", "ffn", "residual"]
-    esa_node = next(n for n in layer_def["nodes"] if n["type"] == "esa")
-    ffn_node = next(n for n in layer_def["nodes"] if n["type"] == "ffn")
-    assert esa_node["params"]["embd"] == 1024
-    assert esa_node["params"]["head"] == 16
-    assert ffn_node["params"]["intermediate_size"] == 4096
-    residual_edges = [e for e in layer_def["edges"] if e.get("kind") == "residual"]
-    assert len(residual_edges) == 2
+    assert all(n["params"]["dim"] == 1024 for n in layers200)
+    assert all(n["params"]["heads"] == 16 for n in layers200)
+    assert all(n["params"]["ffn_dim"] == 4096 for n in layers200)
+    # Every adjacent Layer Block pair carries both explicit graph lanes.
+    edges200 = model200["edges"]
+    for left, right in zip(layers200[:-1], layers200[1:]):
+        pair = [e for e in edges200 if e.get("source") == left["id"] and e.get("target") == right["id"]]
+        assert {e.get("source_port") for e in pair} == {"named_out:signal", "named_out:residual"}
+        assert {e.get("target_port") for e in pair} == {"named_in:signal", "named_in:residual"}
     assert slm_200m_project()["project"]["name"] == "200M SLM"
 
     stateaware200 = stateaware_esa_200m_project()

@@ -371,6 +371,83 @@ def _api_binding_import_path(binding: dict[str, Any]) -> str:
     return ".".join(part for part in (module, symbol) if part)
 
 
+class _LayerBlock(nn.Module):
+    """Explicit ESA layer with separate Signal and Residual lanes.
+
+    Studio historically flattened nested layers into one main tensor lane.  This
+    block keeps the residual stream explicit at the graph boundary so layer-to-
+    layer wiring cannot lose or reinterpret the skip path.  Signal Out and
+    Residual Out intentionally carry the same post-residual tensor for the next
+    canonical Pre-LN block; they remain separate graph ports for architecture
+    visibility and future state-aware variants.
+    """
+
+    def __init__(
+        self, *, dim: int, heads: int, ffn_dim: int, batch: int, block: int,
+        backend: str, precision: str, compass: int = 16, activation: str = "gelu",
+        dropout: float = 0.0, norm_eps: float = 1e-5, device: str = "auto",
+    ):
+        super().__init__()
+        LayerNorm = IMPORT_POOL.resolve_component("layernorm")
+        ESA = IMPORT_POOL.resolve_component("esa")
+        FFN = IMPORT_POOL.resolve_component("ffn")
+
+        self.dim = int(dim)
+        self.norm1 = LayerNorm(self.dim, eps=float(norm_eps), elementwise_affine=True, bias=True)
+        self.esa = ESA(
+            embd=self.dim, head=int(heads), batch=int(batch), block=int(block),
+            backend=backend, precision=precision, compass=int(compass),
+            dropout=float(dropout), gate_min=0.8, gate_max=0.995, eps=1e-5,
+            device=device, auto_compile=False, auto_move_input=True, strict_checks=False,
+        )
+        self.norm2 = LayerNorm(self.dim, eps=float(norm_eps), elementwise_affine=True, bias=True)
+        self.ffn = FFN(
+            self.dim, int(ffn_dim), activation=activation, dropout=float(dropout),
+            bias=True, gated=False,
+        )
+        self.update_dropout = nn.Dropout(float(dropout)) if float(dropout) > 0 else nn.Identity()
+
+    @staticmethod
+    def _result(value):
+        # Named ports plus universal-lane aliases keep both explicit wiring and
+        # older Main/Skip graph consumers compatible.
+        return {
+            "main": value,
+            "skip": value,
+            "signal": value,
+            "residual": value,
+        }
+
+    def _finish(self, signal, residual, esa_update):
+        base = signal if residual is None else residual
+        residual_mid = base + self.update_dropout(esa_update)
+        ffn_update = self.ffn(self.norm2(residual_mid))
+        residual_out = residual_mid + self.update_dropout(ffn_update)
+        return self._result(residual_out)
+
+    def forward(self, signal, residual=None):
+        if signal is None:
+            raise ModelCompileError("Layer Block requires Signal In.")
+        esa_update = self.esa(self.norm1(signal))
+        return self._finish(signal, residual, esa_update)
+
+    @torch.no_grad()
+    def prefill(self, signal, residual=None):
+        prefill = getattr(self.esa, "prefill", None)
+        if not callable(prefill):
+            raise ModelCompileError("Layer Block ESA does not expose prefill().")
+        esa_update, state = prefill(self.norm1(signal))
+        return self._finish(signal, residual, esa_update), state
+
+    @torch.no_grad()
+    def decode_step(self, signal, state, residual=None):
+        decode = getattr(self.esa, "decode_step", None)
+        if not callable(decode):
+            raise ModelCompileError("Layer Block ESA does not expose decode_step().")
+        esa_update, state = decode(self.norm1(signal), state)
+        return self._finish(signal, residual, esa_update), state
+
+
 class _APILaneOutputs:
     """Internal three-lane result produced by an API/User Function node."""
     __slots__ = ("main", "skip", "extra")
@@ -1037,6 +1114,21 @@ class TensorGraph(nn.Module):
         if t=="dropout":
             probability=p.get("p") if p.get("p") is not None else p.get("dropout")
             return nn.Dropout(runtime_float(probability,0.1,f"{node.get('name','Dropout')} probability",minimum=0.0,maximum=1.0))
+        if t=="layer_block":
+            dim=runtime_int(p.get("dim") or p.get("hidden_size"),384,f"{node.get('name','Layer Block')} hidden dim",minimum=1)
+            return _LayerBlock(
+                dim=dim,
+                heads=runtime_int(p.get("heads") or p.get("head"),4,f"{node.get('name','Layer Block')} ESA heads",minimum=1),
+                ffn_dim=runtime_int(p.get("ffn_dim") or p.get("intermediate_size"),4*dim,f"{node.get('name','Layer Block')} FFN hidden dim",minimum=1),
+                batch=runtime_int(p.get("batch"),16,f"{node.get('name','Layer Block')} batch",minimum=1),
+                block=runtime_int(p.get("block"),512,f"{node.get('name','Layer Block')} block size",minimum=1),
+                backend=backend, precision=precision,
+                compass=runtime_int(p.get("compass"),16,f"{node.get('name','Layer Block')} compass",minimum=1),
+                activation=str(p.get("activation") or "gelu"),
+                dropout=runtime_float(p.get("dropout"),0.0,f"{node.get('name','Layer Block')} dropout",minimum=0.0,maximum=1.0),
+                norm_eps=runtime_float(p.get("norm_eps"),1e-5,f"{node.get('name','Layer Block')} norm epsilon",minimum=0.0),
+                device=device,
+            )
         if t=="custom":
             did=node.get("definition_id"); definition=deepcopy(self.custom_components.get(did) or {})
             if not definition: raise ModelCompileError(f"Custom component definition not found for {node.get('name')}.")
@@ -1239,6 +1331,20 @@ class TensorGraph(nn.Module):
                     result = contract.execute(mod, contract_inputs)
                     y = result.get("main")
                 stored_value = result if len(result) > 1 or set(result) != {"main"} else y
+            elif t=="layer_block":
+                signal_value=named_inputs.get("signal", x)
+                residual_value=named_inputs.get("residual")
+                if residual_value is None:
+                    if len(skip_sources)>1:
+                        raise ModelCompileError(f"Layer Block {node.get('name')} has multiple Residual inputs.")
+                    residual_value=edge_value(self.in_skip_edges[nid][0], "skip") if skip_sources else signal_value
+                y=mod(signal_value,residual_value)
+                repeat=max(1,int(node.get("repeat") or 1))
+                for _ in range(1,repeat):
+                    feedback=_named_output(y,"signal")
+                    residual_feedback=_named_output(y,"residual")
+                    y=mod(feedback,residual_feedback)
+                stored_value=y
             elif t=="residual":
                 if len(skip_sources)!=1: raise ModelCompileError(f"Residual {node.get('name')} needs exactly one Skip input.")
                 if extra_sources: raise ModelCompileError(f"Residual {node.get('name')} does not accept an Extra input.")
@@ -1292,7 +1398,7 @@ class TensorGraph(nn.Module):
             nid=node["id"]
             component_type=str(node.get("type") or "")
             module=self.mods[nid]
-            if self.in_named.get(nid):
+            if self.in_named.get(nid) and component_type != "layer_block":
                 return False, f"{node.get('name', component_type)} uses named state ports"
             if component_type == "esa":
                 if not callable(getattr(module,"prefill",None)) or not callable(getattr(module,"decode_step",None)):
@@ -1304,6 +1410,9 @@ class TensorGraph(nn.Module):
             elif component_type == "soup":
                 if not callable(getattr(module,"prefill",None)) or not callable(getattr(module,"decode_step",None)):
                     return False, f"{node.get('name','SOUP')} does not expose recurrent generation"
+            elif component_type == "layer_block":
+                if not callable(getattr(module,"prefill",None)) or not callable(getattr(module,"decode_step",None)):
+                    return False, f"{node.get('name','Layer Block')} does not expose recurrent ESA generation"
             elif component_type == "custom" and isinstance(module,TensorGraph):
                 if self.in_skip.get(nid) or self.in_extra.get(nid):
                     return False, f"{node.get('name','Module')} uses external Skip/Extra generation inputs"
@@ -1328,6 +1437,7 @@ class TensorGraph(nn.Module):
             if component_type == "esa": algorithms.append("ESA Thunder prefill + Lightning decode")
             elif component_type == "bolt": algorithms.append("BOLT fixed C/rho cache decode")
             elif component_type == "soup": algorithms.append("SOUP recurrent generation")
+            elif component_type == "layer_block": algorithms.append("ESA Layer Block recurrent generation")
             elif component_type == "learned_position": algorithms.append("Cyclic learned-position continuation")
             elif component_type == "custom" and isinstance(module,TensorGraph):
                 algorithms.extend(module.recurrent_generation_algorithms())
@@ -1425,10 +1535,27 @@ class TensorGraph(nn.Module):
         values={}
         def edge_value(edge,lane):
             source_id=edge.get("source")
+            source_port=str(edge.get("source_port") or "")
+            if source_port.startswith("named_out:"):
+                return _named_output(values[source_id], source_port.replace("named_out:","",1))
             return _lane_output(values[source_id],lane)
         for node in self.order:
             nid=node["id"]; component_type=node.get("type"); module=self.mods[nid]
             main_sources=self.in_main[nid]; skip_sources=self.in_skip[nid]; extra_sources=self.in_extra[nid]
+            named_inputs={}
+            for named_edge in self.in_named[nid]:
+                source_id=named_edge.get("source")
+                source_port=str(named_edge.get("source_port") or "main_out")
+                if source_port.startswith("named_out:"):
+                    source_key=source_port.replace("named_out:","",1)
+                elif "skip" in source_port:
+                    source_key="skip"
+                elif "extra" in source_port:
+                    source_key="extra"
+                else:
+                    source_key="main"
+                target_key=str(named_edge.get("target_port") or "").replace("named_in:","",1)
+                named_inputs[target_key]=_named_output(values[source_id],source_key)
             if main_sources:
                 if len(main_sources)!=1: raise ModelCompileError(f"{node.get('name')} has {len(main_sources)} Main inputs; merge execution is not implemented.")
                 x=edge_value(self.in_main_edges[nid][0],"main")
@@ -1438,6 +1565,18 @@ class TensorGraph(nn.Module):
             if component_type=="bolt":
                 if skip_sources or extra_sources: raise ModelCompileError("BOLT recurrent generation accepts only its Main input.")
                 y=self._generation_transform(node,module,x,run)
+            elif component_type=="layer_block":
+                signal_value=named_inputs.get("signal",x)
+                residual_value=named_inputs.get("residual")
+                if residual_value is None:
+                    residual_value=edge_value(self.in_skip_edges[nid][0],"skip") if skip_sources else signal_value
+                states=[] if run["phase"]=="prefill" else list(run["states"].get(nid) or [])
+                state=states[0] if states else None
+                if run["phase"]=="prefill":
+                    y,state=module.prefill(signal_value,residual_value)
+                else:
+                    y,state=module.decode_step(signal_value,state,residual_value)
+                run["next_states"][nid]=[state]
             elif contract is not None:
                 declared=set(contract.input_ports); inputs={}
                 if "main" in declared: inputs["main"]=x

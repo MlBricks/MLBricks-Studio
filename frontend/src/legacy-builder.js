@@ -7239,7 +7239,7 @@ function studioChoice(title,message,actions,options={}){
     // blocks with supported built-in MLBricks/PyTorch components, while saved
     // custom components remain excluded to avoid recursive/circular nesting.
     const apiComposerBuiltInTypes=new Set([
-      "embedding","esa","stateaware_esa_stack","soup","rmsnorm","layernorm",
+      "embedding","esa","layer_block","stateaware_esa_stack","soup","rmsnorm","layernorm",
       "linear","ffn","residual","dropout","learned_position","sinusoidal_position","lm_head"
     ]);
     function apiComposerAllowsCatalogItem(item){
@@ -9086,111 +9086,62 @@ function studioChoice(title,message,actions,options={}){
     }
 
     function loadStandardESASLM(spec){
-      checkpoint("Load "+spec.name);
-      rememberWorkspaceView();
-      state.active_workspace="model";
-      const rootId=state.workspaces.model.root_component_id;
-      state.root_component_id=rootId;
-      state.view_component_id=rootId;
-      state.project={
-        ...(state.project||{}),
-        name:spec.name,
-        context_length:spec.block,
-        batch_size:spec.batch,
-        model_settings:{
-          embedding_size:spec.dim,
-          heads:spec.heads,
-          block:spec.block,
-          default_batch:spec.batch,
-          vocab_size:spec.vocab,
-          precision:spec.precision||"fp16"
-        },
-        dataset:spec.dataset??null,
-        estimated_parameters:spec.parameters,
-        description:spec.description||""
-      };
-      state.breadcrumbs=[{id:rootId,name:spec.name}];
-      state.workspaces.model.view_component_id=rootId;
-      state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
-
-      // One canonical Pre-LN ESA layer shared by the standard SLM presets:
-      // x -> LN -> ESA -> +x -> LN -> FFN -> +residual.
-      const defId=uid("custom");
-      const blockInput=makeNode(cat(catalog,"dropout"));
-      blockInput.name="Block Input";
-      blockInput.params={...(blockInput.params||{}),p:0.0};
-      const ln1=makeNode(cat(catalog,"layernorm"));
-      ln1.name="LayerNorm 1";
-      ln1.params={...(ln1.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
-      const esa=makeNode(cat(catalog,"esa"));
-      esa.name="ESA";
-      esa.params={...(esa.params||{}),embd:spec.dim,dim:spec.dim,head:spec.heads,heads:spec.heads,batch:spec.batch,block:spec.block,precision:spec.precision||"fp16",compass:16,dropout:0.0,gate_min:0.8,gate_max:0.995,eps:1e-5,device:"auto",auto_compile:false,compile_mode:"default",auto_move_input:true,strict_checks:false};
-      const res1=makeNode(cat(catalog,"residual"));
-      res1.name="ESA Residual";
-      res1.params={...(res1.params||{}),dropout:0.0};
-      const ln2=makeNode(cat(catalog,"layernorm"));
-      ln2.name="LayerNorm 2";
-      ln2.params={...(ln2.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
-      const ffn=makeNode(cat(catalog,"ffn"));
-      ffn.name="FFN";
-      ffn.params={...(ffn.params||{}),hidden_size:spec.dim,dim:spec.dim,intermediate_size:spec.ffn,ffn_dim:spec.ffn,activation:"gelu",dropout:0.0,bias:true,gated:false};
-      const res2=makeNode(cat(catalog,"residual"));
-      res2.name="FFN Residual";
-      res2.params={...(res2.params||{}),dropout:0.0};
-
-      state.custom_components[defId]={
-        id:defId,
-        name:spec.name+" ESA Layer",
-        revision:3,
-        description:"Pre-LN ESA + residual → Pre-LN FFN + residual",
-        input_count:3,
-        output_count:3,
-        nodes:[blockInput,ln1,esa,res1,ln2,ffn,res2],
-        edges:[
-          edge(blockInput.id,ln1.id),
-          edge(ln1.id,esa.id),
-          edge(esa.id,res1.id),
-          edge(blockInput.id,res1.id,"residual"),
-          edge(res1.id,ln2.id),
-          edge(ln2.id,ffn.id),
-          edge(ffn.id,res2.id),
-          edge(res1.id,res2.id,"residual")
-        ]
-      };
+      checkpoint("Load "+spec.name);rememberWorkspaceView();state.active_workspace="model";
+      const rootId=state.workspaces.model.root_component_id;state.root_component_id=rootId;state.view_component_id=rootId;
+      state.project={...(state.project||{}),name:spec.name,context_length:spec.block,batch_size:spec.batch,
+        model_settings:{embedding_size:spec.dim,heads:spec.heads,block:spec.block,default_batch:spec.batch,vocab_size:spec.vocab,precision:spec.precision||"fp16"},
+        dataset:spec.dataset??null,estimated_parameters:spec.parameters,
+        description:spec.description||((spec.layers||0)+"-layer ESA SLM with explicit Signal/Residual Layer Blocks")};
+      state.breadcrumbs=[{id:rootId,name:spec.name}];state.workspaces.model.view_component_id=rootId;state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
 
       const nodes=[];
-      const input=makeNode(cat(catalog,"text_input"));
-      configureTextInputForLatest(input);
-      nodes.push(input);
-      const emb=makeNode(cat(catalog,"embedding"));
-      emb.name="Token Embedding";
-      emb.params={...(emb.params||{}),vocab_size:spec.vocab,embedding_dim:spec.dim,hidden_size:spec.dim,dim:spec.dim};
-      nodes.push(emb);
-      const pos=makeNode(cat(catalog,"learned_position"));
-      pos.name="Learned Position";
-      pos.params={...(pos.params||{}),dim:spec.dim,hidden_size:spec.dim,max_seq_len:spec.block};
-      nodes.push(pos);
-      const drop=makeNode(cat(catalog,"dropout"));
-      drop.name="Embedding Dropout";
-      drop.params={...(drop.params||{}),p:0.0};
-      nodes.push(drop);
+      const input=makeNode(cat(catalog,"text_input"));configureTextInputForLatest(input);nodes.push(input);
+      const emb=makeNode(cat(catalog,"embedding"));emb.name="Token Embedding";emb.params={...(emb.params||{}),vocab_size:spec.vocab,embedding_dim:spec.dim,hidden_size:spec.dim,dim:spec.dim};nodes.push(emb);
+      const pos=makeNode(cat(catalog,"learned_position"));pos.name="Learned Position";pos.params={...(pos.params||{}),dim:spec.dim,hidden_size:spec.dim,max_seq_len:spec.block};nodes.push(pos);
+      const drop=makeNode(cat(catalog,"dropout"));drop.name="Embedding Dropout";drop.params={...(drop.params||{}),p:0.0};nodes.push(drop);
+
+      const layers=[];
       for(let i=1;i<=spec.layers;i++){
-        nodes.push({id:uid("node"),type:"custom",name:"Layer "+i,definition_id:defId,repeat:1,params:{embd:spec.dim,head:spec.heads,compass:16,intermediate_size:spec.ffn},input_count:3,output_count:3,position:{x:0,y:0}});
+        const layer=makeNode(cat(catalog,"layer_block"));
+        layer.name="Layer "+i;
+        layer.params={...(layer.params||{}),dim:spec.dim,heads:spec.heads,ffn_dim:spec.ffn,block:spec.block,batch:spec.batch,compass:16,activation:"gelu",dropout:0.0,norm_eps:1e-5};
+        layers.push(layer);nodes.push(layer);
       }
-      const finalNorm=makeNode(cat(catalog,"layernorm"));
-      finalNorm.name="Final LayerNorm";
-      finalNorm.params={...(finalNorm.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};
-      nodes.push(finalNorm);
-      const head=makeNode(cat(catalog,"lm_head"));
-      head.name="LM Head";
-      head.params={...(head.params||{}),hidden_size:spec.dim,dim:spec.dim,vocab_size:spec.vocab,bias:false,tie_embeddings:true};
-      nodes.push(head);
-      const out=makeNode(cat(catalog,"text_output"));
-      out.params={...(out.params||{}),max_new_tokens:64,temperature:0.8,top_p:0.95};
-      nodes.push(out);
+
+      const finalNorm=makeNode(cat(catalog,"layernorm"));finalNorm.name="Final LayerNorm";finalNorm.params={...(finalNorm.params||{}),normalized_shape:spec.dim,hidden_size:spec.dim,dim:spec.dim,eps:1e-5,elementwise_affine:true,bias:true};nodes.push(finalNorm);
+      const head=makeNode(cat(catalog,"lm_head"));head.name="LM Head";head.params={...(head.params||{}),hidden_size:spec.dim,dim:spec.dim,vocab_size:spec.vocab,bias:false,tie_embeddings:true};nodes.push(head);
+      const out=makeNode(cat(catalog,"text_output"));out.params={...(out.params||{}),max_new_tokens:64,temperature:0.8,top_p:0.95};nodes.push(out);
 
       const edges=[];
-      for(let i=0;i<nodes.length-1;i++)edges.push(edge(nodes[i].id,nodes[i+1].id));
+      edges.push(edge(input.id,emb.id));
+      edges.push(edge(emb.id,pos.id));
+      edges.push(edge(pos.id,drop.id));
+
+      function namedEdge(source,target,sourcePort,targetPort){
+        const e=edge(source.id,target.id,"named");
+        e.source_port=sourcePort;e.target_port=targetPort;e.kind="named";
+        return e;
+      }
+
+      if(layers.length){
+        // Explicitly initialize both the signal and residual streams from the
+        // embedding path.  The block no longer relies on hidden graph ordering.
+        edges.push(namedEdge(drop,layers[0],"main_out","named_in:signal"));
+        edges.push(namedEdge(drop,layers[0],"main_out","named_in:residual"));
+
+        for(let i=0;i<layers.length-1;i++){
+          edges.push(namedEdge(layers[i],layers[i+1],"named_out:signal","named_in:signal"));
+          edges.push(namedEdge(layers[i],layers[i+1],"named_out:residual","named_in:residual"));
+        }
+
+        const finish=edge(layers[layers.length-1].id,finalNorm.id);
+        finish.source_port="named_out:signal";finish.target_port="main_in";finish.kind="main";edges.push(finish);
+      }else{
+        edges.push(edge(drop.id,finalNorm.id));
+      }
+      edges.push(edge(finalNorm.id,head.id));
+      edges.push(edge(head.id,out.id));
+
       state.components[rootId]={id:rootId,name:spec.name,kind:"model",revision:1,nodes,edges};
       syncModelSettingsToGraph(state.project.model_settings,state.project.model_settings);
       selected=null;pendingPort=null;collapseArtifactWorkspace();setStatus(spec.name+" starter loaded.");draw();
