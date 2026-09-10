@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib.metadata
 from pathlib import Path
@@ -134,7 +134,7 @@ def test_windows_runtime_capabilities_show_torch_visible_cuda_devices(monkeypatc
     )
     gpu = next(item for item in capabilities["devices"] if item["kind"] == "cuda")
     assert gpu["id"] == "cuda:0"
-    assert gpu["label"] == "GPU 0 â€” NVIDIA GeForce RTX 2050"
+    assert gpu["label"] == "GPU 0 — NVIDIA GeForce RTX 2050"
     assert gpu["compute_capability"] == "8.6"
     assert capabilities["cuda_version"] == "12.8"
 
@@ -177,7 +177,7 @@ def test_macos_runtime_capabilities_show_available_mps_device(monkeypatch):
     )
     gpu = next(item for item in capabilities["devices"] if item["kind"] == "mps")
     assert gpu["id"] == "mps"
-    assert gpu["label"] == "GPU â€” Apple Metal (MPS)"
+    assert gpu["label"] == "GPU — Apple Metal (MPS)"
     assert capabilities["mps_available"] is True
 
 
@@ -261,4 +261,3 @@ def test_generation_start_clears_stale_output():
     start = source.index("function startGenerationFromRuntime")
     end = source.index("function generationActionButton", start)
     assert 'entry.last_generation="";' in source[start:end]
-
