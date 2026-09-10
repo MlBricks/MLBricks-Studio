@@ -72,6 +72,26 @@
     return text||fallback;
   }
 
+  function inputActionSpec(config){
+    config=config||{};
+    var kind=String(config.input_kind||'text').toLowerCase();
+    var mode=String(config.input_mode||'single').toLowerCase();
+    var task=String(config.task_type||'generate').toLowerCase();
+    if(kind==='video'&&(mode==='live'||mode==='cctv'))return {start:'Start Monitoring',stop:'Stop Monitoring',running:'MONITORING',noun:'video stream'};
+    if(kind==='signal'&&mode==='continuous')return {start:'Start Stream',stop:'Stop Stream',running:'STREAMING',noun:'signal stream'};
+    if(kind==='audio'&&(mode==='live'||mode==='continuous'))return {start:'Start Listening',stop:'Stop Listening',running:'LISTENING',noun:'audio stream'};
+    if(kind==='image'&&mode==='live')return {start:'Start Monitoring',stop:'Stop Monitoring',running:'MONITORING',noun:'live image stream'};
+    if(kind==='image'&&mode==='sequence')return {start:'Analyze Frames',stop:'Stop Sequence',running:'PROCESSING',noun:'image sequence'};
+    if(kind==='image'&&task==='edit')return {start:'Edit Image',stop:'Stop',running:'PROCESSING',noun:'image'};
+    if(kind==='image')return {start:'Process Image',stop:'Stop',running:'PROCESSING',noun:'image'};
+    if(kind==='video')return {start:'Process Video',stop:'Stop Video',running:'PROCESSING',noun:'video'};
+    if(kind==='signal')return {start:'Analyze Signal',stop:'Stop',running:'PROCESSING',noun:'signal'};
+    if(kind==='audio')return {start:task==='transcribe'?'Transcribe Audio':'Process Audio',stop:'Stop',running:'PROCESSING',noun:'audio'};
+    if(kind==='file')return {start:'Process File',stop:'Stop',running:'PROCESSING',noun:'file'};
+    if(kind==='multimodal')return {start:'Run Multimodal',stop:'Stop',running:'PROCESSING',noun:'multimodal input'};
+    return {start:'Generate Tokens',stop:'Stop Generation',running:'GENERATING',noun:'text'};
+  }
+
   function maybeObject(value){return value&&typeof value==='object'&&!Array.isArray(value)?value:null;}
   function pickText(value){return value==null?'':String(value);}
   function guessOutputKind(kind,mime,data){
@@ -332,27 +352,35 @@
     h(TrainingCheckpoint,{store:store})
   );}
 
-  var GenerationHero=connected(function(s){var l=s.live||{},c=s.config||{};var label=l.status==='running'?'GENERATING':l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':'READY';return {
-    status:l.status||'idle',label:label,message:l.message||'Configure generation, then press Generate Tokens.',overall:pct(l.overall),phase:l.phase||'idle',generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0),tok:l.tokens_per_sec,path:l.generation_mode||'Pending',temp:c.temperature,topk:c.top_k,topp:c.top_p,seed:c.seed
-  };},function(x){return h(Section,{title:'Generation Status',className:'mlb-training-status-hero'},
+  var GenerationHero=connected(function(s){var l=s.live||{},c=s.config||{},spec=inputActionSpec(c),isText=String(c.input_kind||'text')==='text';var label=l.status==='running'?spec.running:l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':'READY';return {
+    status:l.status||'idle',label:label,message:l.message||('Configure input, then press '+spec.start+'.'),overall:pct(l.overall),phase:l.phase||'idle',isText:isText,
+    generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0),tok:l.tokens_per_sec,path:l.generation_mode||'Pending',temp:c.temperature,topk:c.top_k,topp:c.top_p,seed:c.seed,
+    kind:String(c.input_kind||'text'),mode:String(c.input_mode||'single'),task:String(c.task_type||'generate'),processed:Number(l.processed_items||0),items:l.items_per_sec,source:String(c.input_source_type||'inline')
+  };},function(x){return h(Section,{title:'Runtime Status',className:'mlb-training-status-hero'},
     h('div',{className:'mlb-training-status-top'},h('div',{className:'mlb-training-state '+x.status},h('strong',null,x.label),h('span',null,x.message)),h('div',{className:'mlb-training-percent'},h('strong',null,Math.round(x.overall)+'%'),h('span',null,x.phase))),
     h('div',{className:'mlb-status-progress'},h('i',{style:{width:x.overall+'%'}})),
-    h(Grid,null,h(StaticMetric,{label:'Generated',value:x.generated.toLocaleString()}),h(StaticMetric,{label:'Target',value:x.target.toLocaleString()}),h(StaticMetric,{label:'Tok/s',value:x.tok==null?'—':fmtFloat(x.tok,1)}),h(StaticMetric,{label:'Path',value:x.path}),h(StaticMetric,{label:'Temperature',value:x.temp}),h(StaticMetric,{label:'Top K',value:x.topk}),h(StaticMetric,{label:'Top P',value:x.topp}),h(StaticMetric,{label:'Seed',value:x.seed}))
+    x.isText
+      ?h(Grid,null,h(StaticMetric,{label:'Generated',value:x.generated.toLocaleString()}),h(StaticMetric,{label:'Target',value:x.target.toLocaleString()}),h(StaticMetric,{label:'Tok/s',value:x.tok==null?'—':fmtFloat(x.tok,1)}),h(StaticMetric,{label:'Path',value:x.path}),h(StaticMetric,{label:'Temperature',value:x.temp}),h(StaticMetric,{label:'Top K',value:x.topk}),h(StaticMetric,{label:'Top P',value:x.topp}),h(StaticMetric,{label:'Seed',value:x.seed}))
+      :h(Grid,null,h(StaticMetric,{label:'Input',value:x.kind.toUpperCase()}),h(StaticMetric,{label:'Mode',value:x.mode}),h(StaticMetric,{label:'Task',value:x.task}),h(StaticMetric,{label:'Processed',value:x.processed.toLocaleString()}),h(StaticMetric,{label:'Items/s',value:x.items==null?'—':fmtFloat(x.items,2)}),h(StaticMetric,{label:'Source',value:x.source}))
   );},shallowEqual);
 
-  var GenerationOutput=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{};return {prompt:c.prompt||'',output:normalizeOutputEnvelope(l,e),generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0)};},function(x){return h(Section,{title:'Generated Output'},
-    h('div',{className:'mlb-status-prompt'},h('strong',null,'PROMPT'),h('pre',null,x.prompt)),
+  var GenerationInput=connected(function(s){var c=s.config||{};return {kind:c.input_kind||'text',mode:c.input_mode||'single',task:c.task_type||'generate',sourceType:c.input_source_type||'inline',source:c.input_source||'',prompt:c.prompt||''};},function(x){return h(Section,{title:'Active Input'},
+    h(Grid,{className:'mlb-validation-status-grid'},h(StaticMetric,{label:'Type',value:x.kind}),h(StaticMetric,{label:'Mode',value:x.mode}),h(StaticMetric,{label:'Task',value:x.task}),h(StaticMetric,{label:'Source Type',value:x.sourceType}),x.source?h(StaticMetric,{label:'Source',value:x.source}):null),
+    x.prompt?h('div',{className:'mlb-status-prompt'},h('strong',null,'PROMPT / INSTRUCTION'),h('pre',null,x.prompt)):null
+  );},shallowEqual);
+
+  var GenerationOutput=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{};return {output:normalizeOutputEnvelope(l,e),generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0)};},function(x){return h(Section,{title:'Generated Output'},
     renderUniversalOutput(x.output,{generated:x.generated,target:x.target})
   );},shallowEqual);
 
-  var GenerationRuntime=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{};return {
-    device:d.label||'Auto',backend:c.backend||'auto',execution:c.execution_mode||'eager',compile:c.execution_mode==='compiled'?(c.compile_mode||'default'):'Not used',precision:c.precision||'auto',
+  var GenerationRuntime=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{};var isText=String(c.input_kind||'text')==='text';return {
+    device:d.label||'Auto',backend:c.backend||'auto',execution:c.execution_mode||'eager',compile:c.execution_mode==='compiled'?(c.compile_mode||'default'):'Not used',precision:c.precision||'auto',isText:isText,
     source:l.runtime_source==='resident'?'Resident RAM/VRAM':l.runtime_source==='loaded'?'Loaded once':'Pending',path:l.generation_mode||'Pending',algos:displayList(l.generation_algorithms,'Compatibility path'),at:e.generated_at||'—'
   };},function(x){return h(Section,{title:'Runtime Used'},h(Grid,{className:'mlb-validation-status-grid'},
-    h(StaticMetric,{label:'Device',value:x.device}),h(StaticMetric,{label:'Backend',value:x.backend}),h(StaticMetric,{label:'Execution',value:x.execution}),h(StaticMetric,{label:'Compile',value:x.compile}),h(StaticMetric,{label:'Precision',value:x.precision}),h(StaticMetric,{label:'Model Source',value:x.source}),h(StaticMetric,{label:'Generation Path',value:x.path}),h(StaticMetric,{label:'Algorithms',value:x.algos}),h(StaticMetric,{label:'Generated At',value:x.at})));
+    h(StaticMetric,{label:'Device',value:x.device}),h(StaticMetric,{label:'Backend',value:x.backend}),h(StaticMetric,{label:'Execution',value:x.execution}),h(StaticMetric,{label:'Compile',value:x.compile}),h(StaticMetric,{label:'Precision',value:x.precision}),h(StaticMetric,{label:'Model Source',value:x.source}),x.isText?h(StaticMetric,{label:'Generation Path',value:x.path}):null,x.isText?h(StaticMetric,{label:'Algorithms',value:x.algos}):null,h(StaticMetric,{label:'Completed At',value:x.at})));
   },shallowEqual);
 
-  function GenerationMain(props){var store=props.store;return h('div',{className:'mlb-react-runtime-stack'},h(GenerationHero,{store:store}),h(GenerationOutput,{store:store}),h(EventLog,{store:store,title:'Generation Log',emptyText:'Generation has not started yet.'}),h(GenerationRuntime,{store:store}));}
+  function GenerationMain(props){var store=props.store;return h('div',{className:'mlb-react-runtime-stack'},h(GenerationHero,{store:store}),h(GenerationInput,{store:store}),h(GenerationOutput,{store:store}),h(EventLog,{store:store,title:'Runtime Log',emptyText:'Runtime has not started yet.'}),h(GenerationRuntime,{store:store}));}
 
   var TrainingSide=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{},v=s.valid||{};var label=l.status==='running'?'TRAINING':l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':e.weights_ready?'TRAINED':'NOT STARTED';return {label:label,device:d.label||'Auto',backend:c.backend||'auto',execution:c.execution_mode||'eager',precision:c.precision||'auto',running:l.status==='running',valid:v.ok!==false,weights:!!e.weights_ready,locked:!!s.generationLocked,compat:v.compat||null};},function(x,props){var a=props.store.actions||{};return h('div',{className:'mlb-react-runtime-side'},
     h('div',{className:'mlb-runtime-summary'},h('h3',null,'Training Control'),h('div',null,h('span',null,'Status'),h('strong',null,x.label)),h('div',null,h('span',null,'Device'),h('strong',null,x.device)),h('div',null,h('span',null,'Backend'),h('strong',null,x.backend)),h('div',null,h('span',null,'Execution'),h('strong',null,x.execution)),h('div',null,h('span',null,'Precision'),h('strong',null,x.precision))),
@@ -363,9 +391,9 @@
     x.weights?h('button',{type:'button',className:'mlb-generate-btn',disabled:x.locked,onClick:a.openGeneration,title:x.locked?'Generation is disabled while training is running':'Open generation'},'Open Generation'):null
   );},shallowEqual);
 
-  var GenerationSide=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{};var label=l.status==='running'?'GENERATING':l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':'READY';return {label:label,device:d.label||'Auto',generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0),weights:!!e.weights_ready,running:l.status==='running',locked:!!s.generationLocked,busy:!!s.otherRuntimeBusy};},function(x,props){var a=props.store.actions||{};var disabled=!x.weights||x.locked||x.busy;return h('div',{className:'mlb-react-runtime-side'},
-    h('div',{className:'mlb-runtime-summary'},h('h3',null,'Generation Control'),h('div',null,h('span',null,'Status'),h('strong',null,x.label)),h('div',null,h('span',null,'Device'),h('strong',null,x.device)),h('div',null,h('span',null,'Generated'),h('strong',null,x.generated+' / '+x.target)),h('div',null,h('span',null,'Weights'),h('strong',null,x.weights?'Available':'Missing'))),
-    x.running?h('button',{type:'button',className:'mlb-runtime-stop',onClick:a.stop},'Stop Generation'):h('button',{type:'button',className:'mlb-runtime-start',disabled:disabled,onClick:a.start,title:!x.weights?'Train or load model weights before generation':x.locked?'Generation is disabled while training is running':'Generate tokens'},'Generate Tokens'),
+  var GenerationSide=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{},spec=inputActionSpec(c);var label=l.status==='running'?spec.running:l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':'READY';return {label:label,device:d.label||'Auto',kind:c.input_kind||'text',mode:c.input_mode||'single',task:c.task_type||'generate',processed:Number(l.processed_items||0),generated:Number(l.generated_tokens||0),target:Number(c.max_new_tokens||0),weights:!!e.weights_ready,running:l.status==='running',locked:!!s.generationLocked,busy:!!s.otherRuntimeBusy,spec:spec};},function(x,props){var a=props.store.actions||{};var disabled=!x.weights||x.locked||x.busy;return h('div',{className:'mlb-react-runtime-side'},
+    h('div',{className:'mlb-runtime-summary'},h('h3',null,'Runtime Control'),h('div',null,h('span',null,'Status'),h('strong',null,x.label)),h('div',null,h('span',null,'Input'),h('strong',null,x.kind+' · '+x.mode)),h('div',null,h('span',null,'Task'),h('strong',null,x.task)),h('div',null,h('span',null,'Device'),h('strong',null,x.device)),h('div',null,h('span',null,x.kind==='text'?'Generated':'Processed'),h('strong',null,x.kind==='text'?(x.generated+' / '+x.target):String(x.processed))),h('div',null,h('span',null,'Weights'),h('strong',null,x.weights?'Available':'Missing'))),
+    x.running?h('button',{type:'button',className:'mlb-runtime-stop',onClick:a.stop},x.spec.stop):h('button',{type:'button',className:'mlb-runtime-start',disabled:disabled,onClick:a.start,title:!x.weights?'Train or load model weights before running input':x.locked?'Runtime input is disabled while training is running':x.spec.start},x.spec.start),
     h('button',{type:'button',className:'mlb-runtime-cancel',onClick:a.cancel},'Cancel')
   );},shallowEqual);
 

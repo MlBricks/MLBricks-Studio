@@ -10,6 +10,7 @@ import copy
 import random
 import re
 import time
+import inspect
 from typing import Any, Callable
 
 import torch
@@ -1025,7 +1026,7 @@ class TensorGraph(nn.Module):
                 label=node.get("name") or "API Function",
                 object_registry=self.api_object_registry,
             )
-        if t in {"text_input","image_input","audio_input","text_output","logits_output","abstract_input","abstract_output"}: return _Identity()
+        if t in {"text_input","image_input","audio_input","video_input","signal_input","stream_input","text_output","logits_output","abstract_input","abstract_output"}: return _Identity()
         if t=="classifier":
             default_dim = runtime_int(
                 self.runtime.get("model_dim"),
@@ -1488,7 +1489,7 @@ class TensorGraph(nn.Module):
         one token; arbitrary API/user functions are not guessed to be causal.
         """
         pointwise = {
-            "text_input", "image_input", "audio_input", "text_output", "logits_output",
+            "text_input", "image_input", "audio_input", "video_input", "signal_input", "stream_input", "text_output", "logits_output",
             "embedding", "lm_head", "learned_position", "sinusoidal_position",
             "rmsnorm", "layernorm", "linear", "ffn", "residual", "dropout",
             "value_buffer", "abstract_input", "abstract_output",
@@ -1870,6 +1871,14 @@ def _tokenizer_for(meta, *, local_only_first=True, tokenizer_path=None):
     return tok
 
 
+def _model_requires_tokenizer(model_entry):
+    requirements = dict((model_entry or {}).get("requirements") or {})
+    modality = str(requirements.get("modality") or "text").strip().lower()
+    # Older saved Studio builds did not record modality. Preserve their language
+    # model behavior by treating unknown/blank as text.
+    return modality in {"", "unknown", "text"}
+
+
 def compile_builder_model(state, model_entry, dataset_meta, runtime, *, progress=None, for_training=False):
     """Build a Builder model against the current public MLBricks runtime.
 
@@ -1885,19 +1894,22 @@ def compile_builder_model(state, model_entry, dataset_meta, runtime, *, progress
     )
     device=resolve_device(runtime.get("device","auto"))
     precision,dtype=resolve_precision(runtime.get("precision","fp16"),device)
-    if progress:
-        progress({
-            "status":"running","runtime_kind":"train" if for_training else "generate",
-            "phase":"tokenizer","overall":0,
-            "message":f"Loading tokenizer for {device}…",
-        })
-    tokenizer=_tokenizer_for(dataset_meta, tokenizer_path=(model_entry or {}).get("tokenizer_path"))
+    tokenizer=None
+    requires_tokenizer=for_training or _model_requires_tokenizer(model_entry)
+    if requires_tokenizer:
+        if progress:
+            progress({
+                "status":"running","runtime_kind":"train" if for_training else "generate",
+                "phase":"tokenizer","overall":0,
+                "message":f"Loading tokenizer for {device}…",
+            })
+        tokenizer=_tokenizer_for(dataset_meta, tokenizer_path=(model_entry or {}).get("tokenizer_path"))
     graph_vocab=_graph_vocab(graph)
-    tokenizer_vocab=len(tokenizer)
+    tokenizer_vocab=len(tokenizer) if tokenizer is not None else graph_vocab
     effective_vocab=max(graph_vocab,tokenizer_vocab)
     if progress:
         msg=f"Building model on {device}"
-        if effective_vocab!=graph_vocab: msg+=f" · vocab {graph_vocab:,} → {effective_vocab:,} to match tokenizer"
+        if tokenizer is not None and effective_vocab!=graph_vocab: msg+=f" · vocab {graph_vocab:,} → {effective_vocab:,} to match tokenizer"
         progress({"status":"running","runtime_kind":"train" if for_training else "generate","phase":"compile","overall":1,"message":msg})
 
     # Preflight only the MLBricks APIs actually referenced by this graph.
@@ -1982,6 +1994,166 @@ def compile_builder_model(state, model_entry, dataset_meta, runtime, *, progress
         inference_model,raw,training_model,device,precision,effective_vocab,
         params,compile_used,compile_error,
     ),tokenizer
+
+
+def _universal_tensor_for_runtime(value, *, kind, device, precision):
+    """Move a universal numeric/media sample onto the model runtime device."""
+    if not isinstance(value, torch.Tensor):
+        return value
+    tensor=value
+    if kind in {"image", "audio", "video", "signal"} and not tensor.is_floating_point():
+        tensor=tensor.float()
+    if tensor.is_floating_point():
+        dtype={"fp16":torch.float16,"bf16":torch.bfloat16,"fp32":torch.float32}.get(str(precision),torch.float32)
+        # CPU FP16 kernels are frequently incomplete; keep CPU media/signal
+        # inference in FP32 unless BF16 was explicitly selected.
+        if device.type=="cpu" and dtype==torch.float16:
+            dtype=torch.float32
+        tensor=tensor.to(device=device,dtype=dtype)
+    else:
+        tensor=tensor.to(device=device)
+    return tensor
+
+
+def _tensor_image_data_uri(value):
+    """Best-effort PNG preview for image-like model output tensors."""
+    import base64
+    import io
+    import numpy as np
+    from PIL import Image
+
+    tensor=value.detach().float().cpu()
+    if tensor.ndim==4 and tensor.shape[0]==1:
+        tensor=tensor[0]
+    if tensor.ndim==3 and tensor.shape[0] in {1,3,4}:
+        tensor=tensor.permute(1,2,0)
+    if tensor.ndim==2:
+        tensor=tensor.unsqueeze(-1)
+    if tensor.ndim!=3 or tensor.shape[-1] not in {1,3,4}:
+        return None
+    arr=tensor.numpy()
+    finite=np.isfinite(arr)
+    if not finite.any():
+        return None
+    arr=np.nan_to_num(arr,nan=0.0,posinf=1.0,neginf=0.0)
+    lo=float(arr.min()); hi=float(arr.max())
+    if lo<0.0 or hi>1.0:
+        span=hi-lo
+        arr=(arr-lo)/(span if span>1e-12 else 1.0)
+    arr=(arr.clip(0.0,1.0)*255.0).astype("uint8")
+    if arr.shape[-1]==1:
+        arr=arr[...,0]
+    image=Image.fromarray(arr)
+    buff=io.BytesIO(); image.save(buff,format="PNG")
+    payload=base64.b64encode(buff.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{payload}", {"width":image.width,"height":image.height,"format":"png"}
+
+
+def universal_output_envelope(value, *, output_type="unknown", input_kind="unknown", task="run"):
+    """Serialize arbitrary model results into the Studio universal output contract."""
+    output_type=str(output_type or "unknown").lower()
+    input_kind=str(input_kind or "unknown").lower()
+    task=str(task or "run").lower()
+    # Common image-generation pipelines return PIL images directly.
+    try:
+        from PIL import Image
+        if isinstance(value, Image.Image):
+            import base64
+            import io
+            buff=io.BytesIO(); value.save(buff,format="PNG")
+            data_uri="data:image/png;base64,"+base64.b64encode(buff.getvalue()).decode("ascii")
+            return {"kind":"image","mime":"image/png","data":data_uri,"metadata":{"width":value.width,"height":value.height,"format":"png"}}
+    except Exception:
+        pass
+    try:
+        import numpy as np
+        if isinstance(value,np.ndarray):
+            value=torch.from_numpy(value)
+    except Exception:
+        pass
+    if isinstance(value, torch.Tensor):
+        tensor=value.detach().cpu()
+        shape=list(tensor.shape)
+        meta={"shape":shape,"dtype":str(tensor.dtype).replace("torch.","")}
+        image_hint=("image" in output_type or task in {"edit","generate_image","image_edit"})
+        if image_hint:
+            preview=_tensor_image_data_uri(tensor)
+            if preview is not None:
+                data_uri,image_meta=preview
+                meta.update(image_meta)
+                return {"kind":"image","mime":"image/png","data":data_uri,"metadata":meta}
+        if input_kind in {"signal","audio"} and tensor.numel()<=65536:
+            flat=tensor.reshape(-1).float().tolist()
+            meta["samples"]=len(flat)
+            return {"kind":"signal","mime":"application/x-mlbricks-signal","data":flat,"metadata":meta}
+        flat=tensor.reshape(-1)
+        limit=4096
+        preview_values=flat[:limit].tolist()
+        if flat.numel()>limit:
+            meta["truncated"]=True
+            meta["total_values"]=int(flat.numel())
+        kind="classification" if output_type in {"classifier","classification","logits_output"} else "tensor"
+        return {"kind":kind,"mime":"application/x-mlbricks-tensor","data":preview_values,"metadata":meta}
+    if isinstance(value, dict):
+        return {"kind":"json","mime":"application/json","data":value,"metadata":{}}
+    if isinstance(value, (list,tuple)):
+        try:
+            data=[item.detach().cpu().tolist() if isinstance(item,torch.Tensor) else item for item in value]
+        except Exception:
+            data=[str(item) for item in value]
+        return {"kind":"json","mime":"application/json","data":data,"metadata":{}}
+    if isinstance(value, (bytes,bytearray)):
+        import base64
+        encoded=base64.b64encode(bytes(value)).decode("ascii")
+        return {"kind":"file","mime":"application/octet-stream","data":f"data:application/octet-stream;base64,{encoded}","metadata":{"bytes":len(value)}}
+    if isinstance(value,str):
+        return {"kind":"text","mime":"text/plain","data":value,"metadata":{"characters":len(value)}}
+    if value is None:
+        return {"kind":"json","mime":"application/json","data":None,"metadata":{}}
+    return {"kind":"json","mime":"application/json","data":str(value),"metadata":{"python_type":type(value).__name__}}
+
+
+def _call_universal_adapter(fn, sample, *, prompt, task, metadata):
+    """Call a custom model adapter with only the context it declares."""
+    kwargs={"prompt":prompt,"task":task,"metadata":metadata or {}}
+    try:
+        signature=inspect.signature(fn)
+        accepts_kwargs=any(p.kind==inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
+        if not accepts_kwargs:
+            kwargs={key:value for key,value in kwargs.items() if key in signature.parameters}
+    except (TypeError,ValueError):
+        kwargs={}
+    return fn(sample,**kwargs)
+
+
+def run_universal_inference(compiled, value, *, input_kind, output_type="unknown", task="run", prompt="", metadata=None):
+    """Run one universal input through a compiled/runtime model.
+
+    Custom/pretrained modules may expose ``process_input`` or ``predict`` and
+    receive prompt/task/metadata when their signatures accept those fields.
+    Visual TensorGraph models fall back to ordinary tensor ``forward``.
+    """
+    sample=_universal_tensor_for_runtime(
+        value,kind=input_kind,device=compiled.device,precision=compiled.precision
+    )
+    raw=compiled.raw_model
+    with torch.inference_mode():
+        process=getattr(raw,"process_input",None)
+        predict=getattr(raw,"predict",None)
+        if callable(process):
+            result=_call_universal_adapter(process,sample,prompt=prompt,task=task,metadata=metadata)
+        elif callable(predict):
+            result=_call_universal_adapter(predict,sample,prompt=prompt,task=task,metadata=metadata)
+        else:
+            if not isinstance(sample,torch.Tensor):
+                raise RuntimeError(
+                    f"{input_kind.title()} input produced {type(sample).__name__}; this model needs a custom process_input()/predict() adapter or a tensor-compatible input component."
+                )
+            with _autocast_context(compiled.device,compiled.precision):
+                result=compiled.model(sample)
+    return universal_output_envelope(
+        result,output_type=output_type,input_kind=input_kind,task=task
+    )
 
 
 class _PackedLMBatcher:
@@ -2807,14 +2979,16 @@ def load_trained_for_generation(*,state,model_entry,dataset_meta,config,checkpoi
     if direct_ok:
         device=resolve_device(config.get("device","auto"))
         precision,dtype=resolve_precision(config.get("precision","auto"),device)
-        if progress:
-            progress({
-                "status":"running","runtime_kind":"generate","phase":"tokenizer","overall":0,
-                "message":f"Loading tokenizer for {device}…",
-            })
-        tokenizer=_tokenizer_for(
-            dataset_meta, tokenizer_path=(model_entry or {}).get("tokenizer_path")
-        )
+        tokenizer=None
+        if _model_requires_tokenizer(model_entry):
+            if progress:
+                progress({
+                    "status":"running","runtime_kind":"generate","phase":"tokenizer","overall":0,
+                    "message":f"Loading tokenizer for {device}…",
+                })
+            tokenizer=_tokenizer_for(
+                dataset_meta, tokenizer_path=(model_entry or {}).get("tokenizer_path")
+            )
         if progress:
             progress({
                 "status":"running","runtime_kind":"generate","phase":"weights","overall":0,
@@ -2832,7 +3006,8 @@ def load_trained_for_generation(*,state,model_entry,dataset_meta,config,checkpoi
         # and moving a second graph first.
         loaded.to(device=device,dtype=dtype)
         graph=copy.deepcopy((model_entry or {}).get("architecture") or _root_model(state))
-        effective_vocab=max(_graph_vocab(graph),len(tokenizer))
+        graph_vocab=_graph_vocab(graph)
+        effective_vocab=max(graph_vocab,len(tokenizer)) if tokenizer is not None else graph_vocab
         params=sum(p.numel() for p in loaded.parameters())
         inference_model=loaded
         compile_used=False

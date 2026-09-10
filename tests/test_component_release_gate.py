@@ -22,7 +22,7 @@ from mlb_studio.runner import EXECUTABLE_TYPES, SOURCE_TYPES, validate_data_pipe
 
 
 EXPECTED_COMPONENT_TYPES = {
-    "text_input", "image_input", "audio_input",
+    "text_input", "image_input", "audio_input", "video_input", "signal_input",
     "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset",
     "text_process", "train_test_split", "tokenize_text", "manual_dataset",
     "image_process", "audio_process", "batch_data", "prepared_dataset",
@@ -72,10 +72,10 @@ def _topological_ok(component):
     return len(seen) == len(ids)
 
 
-def test_release_gate_catalog_has_exactly_the_45_supported_studio_components():
+def test_release_gate_catalog_has_exactly_the_47_supported_studio_components():
     catalog = primitive_catalog()
     types = [item.get("type") for item in catalog]
-    assert len(catalog) == 45
+    assert len(catalog) == 47
     assert len(types) == len(set(types))
     assert set(types) == EXPECTED_COMPONENT_TYPES
 

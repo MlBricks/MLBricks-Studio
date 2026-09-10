@@ -72,6 +72,14 @@ serve = [
   "pyngrok>=7.2,<8"
 ]
 
+# Optional live-source adapters. Core text, image, WAV, TCP signal and growing-
+# file signal inputs do not require these packages.
+streams = [
+  "opencv-python-headless>=4.8,<5",
+  "pyserial>=3.5,<4",
+  "sounddevice>=0.4,<1"
+]
+
 
 dev = [
   "pytest>=8,<10",

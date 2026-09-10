@@ -1293,12 +1293,15 @@ function __MLB_STUDIO_FACTORY__(){
       entry=liveBuiltModel(entry);
       if(!entry || generationIsRunning() || !entry.weights_ready)return;
       if(trainingLocksGeneration(entry)){
-        setStatus("Generation is unavailable while training is updating this model. Stop or finish training first.");
+        setStatus("Model runtime is unavailable while training is updating this model. Stop or finish training first.");
         return;
       }
       entry.generation_history=[];
       entry.last_generation="";
-      entry.generation_live={status:"running",phase:"starting",overall:0,generated_tokens:0,message:"Starting generation in Python…",generated_text:""};
+      entry.last_generated_output=null;
+      const actionSpec=inputActionSpec(entry.generation_config||{});
+      entry.generation_live={status:"running",phase:"starting",overall:0,generated_tokens:0,processed_items:0,
+        input_envelope:null,message:"Starting "+actionSpec.noun+" runtime in Python…",generated_text:""};
       const alreadyStatus=runtimePanel?.mode==="generate"&&runtimePanel?.modelId===entry.id&&runtimePanel?.tab==="status";
       runtimePanel={mode:"generate",modelId:entry.id,tab:"status"};
       if(alreadyStatus)refreshReactRuntimeStatus(entry,"generate");
@@ -1307,19 +1310,21 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function generationActionButton(entry){
+      ensureRuntimeConfigs(entry);
+      const spec=inputActionSpec(entry?.generation_config||{});
       if(generationIsRunning()){
-        const stop=btn("Stop Generation","mlb-runtime-stop");
+        const stop=btn(spec.stop,"mlb-runtime-stop");
         stop.addEventListener("click",requestStop);
         return stop;
       }
-      const start=btn("Generate Tokens","mlb-runtime-start");
+      const start=btn(spec.start,"mlb-runtime-start");
       const trainingLocked=trainingLocksGeneration(entry);
       start.disabled=!entry?.weights_ready || trainingLocked || execution.status==="running";
       start.title=!entry?.weights_ready
-        ?"Train or load model weights before generation"
+        ?"Train or load model weights before running input"
         :trainingLocked
-          ?"Generation is disabled while training is running"
-          :"Generate tokens";
+          ?"Runtime input is disabled while training is running"
+          :spec.start;
       start.addEventListener("click",()=>startGenerationFromRuntime(entry));
       return start;
     }
@@ -1902,7 +1907,8 @@ function __MLB_STUDIO_FACTORY__(){
 
       const progressInput=bridgeControl(bridge.progress,"textarea");
       lastProgressRaw=progressInput?.value||lastProgressRaw;
-      execution={status:"running",runtime_kind:action,phase:"starting",overall:0,model_id:entry.id,message:action==="train"?"Starting training in Python…":"Preparing resident generation…",nodes:{}};
+      const runtimeStartMessage=action==="train"?"Starting training in Python…":("Preparing "+inputActionSpec(entry.generation_config||{}).noun+" runtime…");
+      execution={status:"running",runtime_kind:action,phase:"starting",overall:0,model_id:entry.id,message:runtimeStartMessage,nodes:{}};
       applyExecutionProgress(execution);setStatus(execution.message);
 
       // Training is state-sensitive just like Data Fetch. Send the exact project
@@ -2732,7 +2738,9 @@ function __MLB_STUDIO_FACTORY__(){
       if(!box)return;
       box.className="mlb-runtime-live "+(next.status||"idle");
       const pct=Math.max(0,Math.min(100,Number(next.overall||0)));
-      let html="<div class='mlb-runtime-live-head'><strong>"+(next.runtime_kind==="train"?"LIVE TRAINING":"LIVE GENERATION")+"</strong><span>"+pct+"%</span></div>";
+      const inputKind=String(next.input_envelope?.kind||"").toLowerCase();
+      const liveLabel=next.runtime_kind==="train"?"LIVE TRAINING":(inputKind&&inputKind!=="text"?"LIVE RUNTIME":"LIVE GENERATION");
+      let html="<div class='mlb-runtime-live-head'><strong>"+liveLabel+"</strong><span>"+pct+"%</span></div>";
       html+="<div class='mlb-runtime-live-message'>"+(next.message||"Working…")+"</div>";
       if(next.runtime_kind==="train"){
         const memNow=next.memory_allocated_gb==null?"—":Number(next.memory_allocated_gb).toFixed(2)+" GB";
@@ -3824,6 +3832,8 @@ function studioChoice(title,message,actions,options={}){
       if(types.has("text_input"))modality="text";
       else if(types.has("image_input"))modality="image";
       else if(types.has("audio_input"))modality="audio";
+      else if(types.has("video_input"))modality="video";
+      else if(types.has("signal_input"))modality="signal";
 
       const terminal=[...nodes].reverse().find(n=>
         ["text_output","logits_output","classifier","lm_head"].includes(n.type)
@@ -3858,7 +3868,7 @@ function studioChoice(title,message,actions,options={}){
       // ports and Skip/Extra lanes must count as connectivity just like Main.
       // Restrict only to edges whose endpoints still exist in this model.
       const executionEdges=(model.edges||[]).filter(e=>byId.has(e.source)&&byId.has(e.target));
-      const inputTypes=new Set(["text_input","image_input","audio_input"]);
+      const inputTypes=new Set(["text_input","image_input","audio_input","video_input","signal_input"]);
       const outputTypes=new Set(["text_output","logits_output","classifier","lm_head"]);
 
       const inputs=nodes.filter(n=>inputTypes.has(n.type));
@@ -4143,8 +4153,109 @@ function studioChoice(title,message,actions,options={}){
       };
     }
 
+    function inferredRuntimeInputKind(entry){
+      const modality=String(entry?.requirements?.modality||"text").toLowerCase();
+      return ["text","image","audio","video","signal","file","multimodal"].includes(modality)?modality:"text";
+    }
+
+    function inputModeOptions(kind){
+      kind=String(kind||"text").toLowerCase();
+      if(kind==="image")return [{value:"single",label:"Single Image"},{value:"sequence",label:"Image Sequence"},{value:"live",label:"Live Frames"}];
+      if(kind==="audio")return [{value:"file",label:"Audio File"},{value:"live",label:"Live Audio"},{value:"continuous",label:"Continuous Audio"}];
+      if(kind==="video")return [{value:"file",label:"Video File"},{value:"live",label:"Live Camera"},{value:"cctv",label:"CCTV / Stream"}];
+      if(kind==="signal")return [{value:"static",label:"Static Signal"},{value:"continuous",label:"Continuous Signal"}];
+      if(kind==="file")return [{value:"single",label:"Single File"},{value:"batch",label:"Batch / Directory"}];
+      if(kind==="multimodal")return [{value:"single",label:"Single Request"},{value:"live",label:"Live Multimodal"}];
+      return [{value:"single",label:"Single Prompt"},{value:"batch",label:"Prompt Batch"}];
+    }
+
+    function inputTaskOptions(kind,mode){
+      kind=String(kind||"text").toLowerCase();mode=String(mode||"").toLowerCase();
+      if(kind==="image")return [{value:"analyze",label:"Analyze"},{value:"edit",label:"Edit Image"},{value:"detect",label:"Detect"},{value:"classify",label:"Classify"},{value:"caption",label:"Caption"}];
+      if(kind==="video")return mode==="live"||mode==="cctv"
+        ?[{value:"monitor",label:"Monitor"},{value:"detect",label:"Detect"},{value:"track",label:"Track"}]
+        :[{value:"analyze",label:"Analyze"},{value:"detect",label:"Detect"},{value:"track",label:"Track"},{value:"caption",label:"Caption / Summarize"}];
+      if(kind==="signal")return mode==="continuous"
+        ?[{value:"monitor",label:"Monitor"},{value:"detect",label:"Detect Events"},{value:"anomaly",label:"Anomaly Detection"},{value:"classify",label:"Classify"}]
+        :[{value:"analyze",label:"Analyze"},{value:"classify",label:"Classify"},{value:"forecast",label:"Forecast"},{value:"denoise",label:"Denoise"}];
+      if(kind==="audio")return mode==="live"||mode==="continuous"
+        ?[{value:"listen",label:"Listen / Monitor"},{value:"transcribe",label:"Transcribe"},{value:"detect",label:"Detect Events"}]
+        :[{value:"analyze",label:"Analyze"},{value:"transcribe",label:"Transcribe"},{value:"classify",label:"Classify"}];
+      if(kind==="file")return [{value:"process",label:"Process"},{value:"analyze",label:"Analyze"},{value:"classify",label:"Classify"}];
+      if(kind==="multimodal")return [{value:"run",label:"Run Multimodal"},{value:"analyze",label:"Analyze"},{value:"generate",label:"Generate"}];
+      return [{value:"generate",label:"Generate"},{value:"complete",label:"Complete"},{value:"summarize",label:"Summarize"},{value:"classify",label:"Classify"}];
+    }
+
+    function inputSourceTypeOptions(kind,mode){
+      kind=String(kind||"text").toLowerCase();mode=String(mode||"").toLowerCase();
+      if(kind==="image")return mode==="sequence"
+        ?[{value:"directory",label:"Image Directory"},{value:"path_or_url",label:"Path / URL"}]
+        :mode==="live"
+          ?[{value:"camera",label:"Camera"},{value:"cctv",label:"CCTV / Stream URL"}]
+          :[{value:"path_or_url",label:"Path / URL"},{value:"inline",label:"Inline / Data URL"}];
+      if(kind==="video")return mode==="live"
+        ?[{value:"camera",label:"Camera"},{value:"cctv",label:"Stream URL"}]
+        :mode==="cctv"
+          ?[{value:"cctv",label:"CCTV / RTSP URL"},{value:"camera",label:"Camera"}]
+          :[{value:"path_or_url",label:"Path / URL"}];
+      if(kind==="signal")return mode==="continuous"
+        ?[{value:"serial",label:"Serial Port"},{value:"sensor",label:"Sensor / Serial"},{value:"antenna",label:"Antenna / Serial"},{value:"tcp",label:"TCP Stream"},{value:"file_tail",label:"Growing File"}]
+        :[{value:"inline",label:"Inline Samples"},{value:"file",label:"Signal File"}];
+      if(kind==="audio")return mode==="file"
+        ?[{value:"path_or_url",label:"WAV Path / URL"},{value:"inline",label:"Inline Samples"}]
+        :[{value:"microphone",label:"Microphone / Adapter"},{value:"sensor",label:"Audio Sensor"}];
+      if(kind==="file")return [{value:"path_or_url",label:"Path / URL"}];
+      if(kind==="multimodal")return [{value:"inline",label:"JSON / Inline"},{value:"path_or_url",label:"Manifest Path / URL"}];
+      return [{value:"inline",label:"Inline Prompt"}];
+    }
+
+    function firstOptionValue(options,fallback){return options?.[0]?.value??fallback;}
+
+    function normalizeInputConfigInPlace(config,entry){
+      const kind=String(config.input_kind||inferredRuntimeInputKind(entry));
+      config.input_kind=kind;
+      const modes=inputModeOptions(kind);
+      if(!modes.some(x=>String(x.value)===String(config.input_mode)))config.input_mode=firstOptionValue(modes,"single");
+      const tasks=inputTaskOptions(kind,config.input_mode);
+      if(!tasks.some(x=>String(x.value)===String(config.task_type)))config.task_type=firstOptionValue(tasks,"generate");
+      const sources=inputSourceTypeOptions(kind,config.input_mode);
+      if(!sources.some(x=>String(x.value)===String(config.input_source_type)))config.input_source_type=firstOptionValue(sources,kind==="text"?"inline":"path_or_url");
+      return config;
+    }
+
+    function inputActionSpec(config){
+      const kind=String(config?.input_kind||"text").toLowerCase();
+      const mode=String(config?.input_mode||"single").toLowerCase();
+      const task=String(config?.task_type||"generate").toLowerCase();
+      if(kind==="video"&&(mode==="live"||mode==="cctv"))return {start:"Start Monitoring",stop:"Stop Monitoring",running:"MONITORING",noun:"video stream"};
+      if(kind==="signal"&&mode==="continuous")return {start:"Start Stream",stop:"Stop Stream",running:"STREAMING",noun:"signal stream"};
+      if(kind==="audio"&&(mode==="live"||mode==="continuous"))return {start:"Start Listening",stop:"Stop Listening",running:"LISTENING",noun:"audio stream"};
+      if(kind==="image"&&mode==="live")return {start:"Start Monitoring",stop:"Stop Monitoring",running:"MONITORING",noun:"live image stream"};
+      if(kind==="image"&&mode==="sequence")return {start:"Analyze Frames",stop:"Stop Sequence",running:"PROCESSING",noun:"image sequence"};
+      if(kind==="image"&&task==="edit")return {start:"Edit Image",stop:"Stop",running:"PROCESSING",noun:"image"};
+      if(kind==="image")return {start:"Process Image",stop:"Stop",running:"PROCESSING",noun:"image"};
+      if(kind==="video")return {start:"Process Video",stop:"Stop Video",running:"PROCESSING",noun:"video"};
+      if(kind==="signal")return {start:"Analyze Signal",stop:"Stop",running:"PROCESSING",noun:"signal"};
+      if(kind==="audio")return {start:task==="transcribe"?"Transcribe Audio":"Process Audio",stop:"Stop",running:"PROCESSING",noun:"audio"};
+      if(kind==="file")return {start:"Process File",stop:"Stop",running:"PROCESSING",noun:"file"};
+      if(kind==="multimodal")return {start:"Run Multimodal",stop:"Stop",running:"PROCESSING",noun:"multimodal input"};
+      return {start:"Generate Tokens",stop:"Stop Generation",running:"GENERATING",noun:"text"};
+    }
+
     function defaultGenerationConfig(entry){
-      return {
+      const kind=inferredRuntimeInputKind(entry);
+      const base={
+        input_kind:kind,
+        input_mode:firstOptionValue(inputModeOptions(kind),"single"),
+        task_type:firstOptionValue(inputTaskOptions(kind,firstOptionValue(inputModeOptions(kind),"single")),"generate"),
+        input_source_type:firstOptionValue(inputSourceTypeOptions(kind,firstOptionValue(inputModeOptions(kind),"single")),kind==="text"?"inline":"path_or_url"),
+        input_source:"",
+        input_data:"",
+        input_mime:"",
+        input_sample_rate:16000,
+        input_fps:5,
+        input_buffer_size:256,
+        input_channel:"",
         prompt:"Once upon a time",
         max_new_tokens:128,
         temperature:0.8,
@@ -4157,6 +4268,7 @@ function studioChoice(title,message,actions,options={}){
         compile_mode:"reduce-overhead",
         precision:"auto",
       };
+      return normalizeInputConfigInPlace(base,entry);
     }
 
     function mergeRuntimeDefaults(defaults,saved){
@@ -4198,6 +4310,7 @@ function studioChoice(title,message,actions,options={}){
       const dataset=preparedDatasetById(entry?.selected_dataset_id)||null;
       entry.training_config=mergeRuntimeDefaultsInPlace(defaultTrainingConfig(entry,dataset),entry.training_config);
       entry.generation_config=mergeRuntimeDefaultsInPlace(defaultGenerationConfig(entry),entry.generation_config);
+      normalizeInputConfigInPlace(entry.generation_config,entry);
       entry.serve_config=mergeRuntimeDefaultsInPlace(defaultServeConfig(entry),entry.serve_config);
       serveSecrets[entry.id]=serveSecrets[entry.id]||{api_key:"",ngrok_token:""};
     }
@@ -4216,7 +4329,7 @@ function studioChoice(title,message,actions,options={}){
       if(mode==="train"||mode==="generate")bottomExpanded=false;
       selected=null;
       outputDirectorySelection=entry.id;
-      setStatus(mode==="train"?"Training setup opened.":mode==="generate"?"Generation setup opened.":"Model API server setup opened.");
+      setStatus(mode==="train"?"Training setup opened.":mode==="generate"?"Universal input setup opened.":"Model API server setup opened.");
       draw();
     }
 
@@ -4387,6 +4500,9 @@ function studioChoice(title,message,actions,options={}){
           generated_output_kind:event.generated_output_kind||entry.generation_live?.generated_output_kind||entry.last_generated_output_kind||null,
           generated_output_mime:event.generated_output_mime||entry.generation_live?.generated_output_mime||entry.last_generated_output_mime||null,
           generated_output_meta:event.generated_output_meta||entry.generation_live?.generated_output_meta||entry.last_generated_output_meta||null,
+          processed_items:event.processed_items??entry.generation_live?.processed_items??0,
+          items_per_sec:event.items_per_sec??entry.generation_live?.items_per_sec,
+          input_envelope:event.input_envelope||entry.generation_live?.input_envelope||null,
           message:event.message,generated_text:next.generated_text||entry.generation_live?.generated_text||entry.last_generation||""
         };
         if(next.generated_text)entry.last_generation=next.generated_text;
@@ -4644,7 +4760,10 @@ function studioChoice(title,message,actions,options={}){
           generated_output:execution.generated_output??live.generated_output,
           generated_output_kind:execution.generated_output_kind||live.generated_output_kind,
           generated_output_mime:execution.generated_output_mime||live.generated_output_mime,
-          generated_output_meta:execution.generated_output_meta||live.generated_output_meta};
+          generated_output_meta:execution.generated_output_meta||live.generated_output_meta,
+          processed_items:execution.processed_items??live.processed_items,
+          items_per_sec:execution.items_per_sec??live.items_per_sec,
+          input_envelope:execution.input_envelope||live.input_envelope};
       }return live;
     }
 
@@ -4766,10 +4885,10 @@ function studioChoice(title,message,actions,options={}){
       cleanVram.addEventListener("click",requestGpuVramCleanup);side.appendChild(cleanVram);
       const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=trainingIsRunning()?"Stop training and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelTrainingToModelEditor(entry));side.appendChild(cancel);
       if(entry.weights_ready){
-        const gen=btn("Open Generation","mlb-generate-btn");
+        const gen=btn("Open Runtime","mlb-generate-btn");
         const trainingLocked=trainingLocksGeneration(entry);
         gen.disabled=trainingLocked;
-        gen.title=trainingLocked?"Generation is disabled while training is running":"Open generation";
+        gen.title=trainingLocked?"Runtime input is disabled while training is running":"Open universal input runtime";
         gen.addEventListener("click",()=>openRuntimePanel("generate",entry));
         side.appendChild(gen);
       }
@@ -4777,29 +4896,46 @@ function studioChoice(title,message,actions,options={}){
 
     function renderGenerationStatus(main,side,entry){
       const config=entry.generation_config||{},live=generationLive(entry),history=runtimeHistory(entry,"generate");
-      const hero=runtimeSection("Generation Status");hero.classList.add("mlb-training-status-hero");
+      normalizeInputConfigInPlace(config,entry);
+      const spec=inputActionSpec(config),isText=String(config.input_kind||"text")==="text";
+      const hero=runtimeSection("Runtime Status");hero.classList.add("mlb-training-status-hero");
       const top=document.createElement("div");top.className="mlb-training-status-top";
       const stateBox=document.createElement("div");stateBox.className="mlb-training-state "+(live.status||"idle");
-      const stateLabel=live.status==="running"?"GENERATING":live.status==="done"?"COMPLETE":live.status==="error"?"ERROR":live.status==="stopped"?"STOPPED":"READY";
-      stateBox.innerHTML="<strong>"+stateLabel+"</strong><span>"+escapeRuntimeText(live.message||"Configure generation, then press Generate Tokens.")+"</span>";
+      const stateLabel=live.status==="running"?spec.running:live.status==="done"?"COMPLETE":live.status==="error"?"ERROR":live.status==="stopped"?"STOPPED":"READY";
+      stateBox.innerHTML="<strong>"+stateLabel+"</strong><span>"+escapeRuntimeText(live.message||("Configure input, then press "+spec.start+"."))+"</span>";
       const pct=document.createElement("div");pct.className="mlb-training-percent";pct.innerHTML="<strong>"+Math.round(Number(live.overall||0))+"%</strong><span>"+(live.phase||"idle")+"</span>";
       top.append(stateBox,pct);hero.appendChild(top);
       const bar=document.createElement("div");bar.className="mlb-status-progress";bar.innerHTML="<i style='width:"+Math.max(0,Math.min(100,Number(live.overall||0)))+"%'></i>";hero.appendChild(bar);
       const metrics=document.createElement("div");metrics.className="mlb-status-metrics";
-      metrics.append(statusMetric("Generated",Number(live.generated_tokens||0).toLocaleString()),statusMetric("Target",Number(config.max_new_tokens||0).toLocaleString()),
-        statusMetric("Tok/s",live.tokens_per_sec==null?"—":Number(live.tokens_per_sec).toFixed(1)),statusMetric("Path",live.generation_mode||"Pending"),
-        statusMetric("Temperature",config.temperature),statusMetric("Top K",config.top_k),statusMetric("Top P",config.top_p),statusMetric("Seed",config.seed));hero.appendChild(metrics);main.appendChild(hero);
+      if(isText){
+        metrics.append(statusMetric("Generated",Number(live.generated_tokens||0).toLocaleString()),statusMetric("Target",Number(config.max_new_tokens||0).toLocaleString()),
+          statusMetric("Tok/s",live.tokens_per_sec==null?"—":Number(live.tokens_per_sec).toFixed(1)),statusMetric("Path",live.generation_mode||"Pending"),
+          statusMetric("Temperature",config.temperature),statusMetric("Top K",config.top_k),statusMetric("Top P",config.top_p),statusMetric("Seed",config.seed));
+      }else{
+        metrics.append(statusMetric("Input",String(config.input_kind||"unknown").toUpperCase()),statusMetric("Mode",config.input_mode||"single"),
+          statusMetric("Task",config.task_type||"run"),statusMetric("Processed",Number(live.processed_items||0).toLocaleString()),
+          statusMetric("Items/s",live.items_per_sec==null?"—":Number(live.items_per_sec).toFixed(2)),statusMetric("Source",config.input_source_type||"—"));
+      }
+      hero.appendChild(metrics);main.appendChild(hero);
 
-      const output=runtimeSection("Generated Output");const prompt=document.createElement("div");prompt.className="mlb-status-prompt";prompt.innerHTML="<strong>PROMPT</strong><pre>"+escapeRuntimeText(config.prompt||"")+"</pre>";output.appendChild(prompt);
-      renderUniversalOutputPanel(output,entry,live,config);main.appendChild(output);
+      const input=runtimeSection("Active Input");const ig=document.createElement("div");ig.className="mlb-validation-status-grid";
+      ig.append(statusMetric("Type",config.input_kind||"text"),statusMetric("Mode",config.input_mode||"single"),statusMetric("Task",config.task_type||"generate"),statusMetric("Source Type",config.input_source_type||"inline"));
+      if(config.input_source)ig.appendChild(statusMetric("Source",config.input_source));
+      input.appendChild(ig);
+      if(config.prompt){const prompt=document.createElement("div");prompt.className="mlb-status-prompt";prompt.innerHTML="<strong>PROMPT / INSTRUCTION</strong><pre>"+escapeRuntimeText(config.prompt)+"</pre>";input.appendChild(prompt);}
+      main.appendChild(input);
 
-      const logs=runtimeSection("Generation Log");renderEventLog(logs,history,"Generation has not started yet.");main.appendChild(logs);
+      const output=runtimeSection("Generated Output");renderUniversalOutputPanel(output,entry,live,config);main.appendChild(output);
+
+      const logs=runtimeSection("Runtime Log");renderEventLog(logs,history,"Runtime has not started yet.");main.appendChild(logs);
       const runtime=runtimeSection("Runtime Used");const rg=document.createElement("div");rg.className="mlb-validation-status-grid";const dev=selectedRuntimeDevice(config);
-      rg.append(statusMetric("Device",dev.label),statusMetric("Backend",config.backend),statusMetric("Execution",config.execution_mode),statusMetric("Compile",config.execution_mode==="compiled"?config.compile_mode:"Not used"),statusMetric("Precision",config.precision),statusMetric("Model Source",live.runtime_source==="resident"?"Resident RAM/VRAM":live.runtime_source==="loaded"?"Loaded once":"Pending"),statusMetric("Generation Path",live.generation_mode||"Pending"),statusMetric("Algorithms",(live.generation_algorithms||[]).join(" · ")||"Compatibility path"),statusMetric("Generated At",entry.generated_at||"—"));runtime.appendChild(rg);main.appendChild(runtime);
+      rg.append(statusMetric("Device",dev.label),statusMetric("Backend",config.backend),statusMetric("Execution",config.execution_mode),statusMetric("Compile",config.execution_mode==="compiled"?config.compile_mode:"Not used"),statusMetric("Precision",config.precision),statusMetric("Model Source",live.runtime_source==="resident"?"Resident RAM/VRAM":live.runtime_source==="loaded"?"Loaded once":"Pending"));
+      if(isText){rg.append(statusMetric("Generation Path",live.generation_mode||"Pending"),statusMetric("Algorithms",(live.generation_algorithms||[]).join(" · ")||"Compatibility path"));}
+      rg.appendChild(statusMetric("Completed At",entry.generated_at||"—"));runtime.appendChild(rg);main.appendChild(runtime);
 
-      const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Generation Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Generated</span><strong>"+Number(live.generated_tokens||0)+" / "+Number(config.max_new_tokens||0)+"</strong></div><div><span>Weights</span><strong>"+(entry.weights_ready?"Available":"Missing")+"</strong></div>";side.appendChild(summary);
+      const summary=document.createElement("div");summary.className="mlb-runtime-summary";summary.innerHTML="<h3>Runtime Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Input</span><strong>"+String(config.input_kind||"text")+" · "+String(config.input_mode||"single")+"</strong></div><div><span>Task</span><strong>"+String(config.task_type||"generate")+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Weights</span><strong>"+(entry.weights_ready?"Available":"Missing")+"</strong></div>";side.appendChild(summary);
       side.appendChild(generationActionButton(entry));
-      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=generationIsRunning()?"Stop generation and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
+      const cancel=btn("Cancel","mlb-runtime-cancel");cancel.title=generationIsRunning()?"Stop runtime and return to Model Builder":"Return to Model Builder";cancel.addEventListener("click",()=>cancelRuntimeToModelEditor(entry,"generate"));side.appendChild(cancel);
     }
 
     async function copyTextRobust(text,label="Text"){
@@ -4999,11 +5135,11 @@ function studioChoice(title,message,actions,options={}){
       if(mode==="serve"){renderServingWorkspace(canvas,entry);return;}
       const outer=document.createElement("div");outer.className="mlb-runtime-workspace";
       const top=document.createElement("div");top.className="mlb-runtime-head";
-      const title=document.createElement("div");title.innerHTML="<strong>"+(mode==="train"?"TRAIN MODEL":"GENERATE TOKENS")+"</strong><span>"+entry.name+"</span>";
+      const title=document.createElement("div");title.innerHTML="<strong>"+(mode==="train"?"TRAIN MODEL":"RUN MODEL")+"</strong><span>"+entry.name+"</span>";
       const tabs=document.createElement("div");tabs.className="mlb-runtime-tabs";
       tabs.append(
-        runtimeTabButton(mode==="train"?"Training Setup":"Generation Setup","setup",entry,mode),
-        runtimeTabButton(mode==="train"?"Training Status":"Generation Status","status",entry,mode)
+        runtimeTabButton(mode==="train"?"Training Setup":"Input Setup","setup",entry,mode),
+        runtimeTabButton(mode==="train"?"Training Status":"Runtime Status","status",entry,mode)
       );
       top.append(title,tabs);outer.appendChild(top);
 
@@ -5078,16 +5214,69 @@ function studioChoice(title,message,actions,options={}){
         if(config.generate_on_validation)val.appendChild(runtimeField("Validation Prompt","textarea",config.validation_prompt,v=>update("validation_prompt",v)));
         main.appendChild(val);
       }else{
-        const gen=runtimeSection("Prompt + Sampling");
-        gen.appendChild(runtimeField("Prompt","textarea",config.prompt,v=>update("prompt",v)));
-        const genGrid=document.createElement("div");genGrid.className="mlb-runtime-grid";
-        genGrid.append(
-          runtimeField("New Token Count","number",config.max_new_tokens,v=>update("max_new_tokens",v)),
-          runtimeField("Temperature","number",config.temperature,v=>update("temperature",v)),
-          runtimeField("Top K","number",config.top_k,v=>update("top_k",v)),
-          runtimeField("Top P","number",config.top_p,v=>update("top_p",v)),
-          runtimeField("Seed","number",config.seed,v=>update("seed",v))
-        );gen.appendChild(genGrid);main.appendChild(gen);
+        normalizeInputConfigInPlace(config,entry);
+        const input=runtimeSection("Universal Input");
+        const inputGrid=document.createElement("div");inputGrid.className="mlb-runtime-grid";
+        inputGrid.append(
+          runtimeField("Input Type","select",config.input_kind,v=>update("input_kind",v),[
+            {value:"text",label:"Text"},{value:"image",label:"Image"},{value:"audio",label:"Audio"},
+            {value:"video",label:"Video / CCTV"},{value:"signal",label:"Signal / Sensor"},
+            {value:"file",label:"File"},{value:"multimodal",label:"Multimodal"}
+          ]),
+          runtimeField("Input Mode","select",config.input_mode,v=>update("input_mode",v),inputModeOptions(config.input_kind)),
+          runtimeField("Task","select",config.task_type,v=>update("task_type",v),inputTaskOptions(config.input_kind,config.input_mode)),
+          runtimeField("Source Type","select",config.input_source_type,v=>update("input_source_type",v),inputSourceTypeOptions(config.input_kind,config.input_mode))
+        );input.appendChild(inputGrid);
+
+        const kind=String(config.input_kind||"text"),inputMode=String(config.input_mode||"single");
+        if(kind!=="text" && config.input_source_type!=="inline"){
+          input.appendChild(runtimeField(
+            kind==="signal"&&["serial","sensor","antenna"].includes(config.input_source_type)?"Port / Source":
+            kind==="signal"&&config.input_source_type==="tcp"?"TCP host:port":
+            kind==="video"&&(inputMode==="live"||inputMode==="cctv")?"Camera Index / Stream URL":
+            kind==="image"&&inputMode==="sequence"?"Image Directory":"Input Path / URL",
+            "textarea",config.input_source,v=>update("input_source",v)
+          ));
+        }
+        if(kind==="signal" && inputMode==="static"){
+          input.appendChild(runtimeField("Signal Samples","textarea",config.input_data,v=>update("input_data",v)));
+        }else if(kind==="multimodal"){
+          input.appendChild(runtimeField("Multimodal JSON / Inline Data","textarea",config.input_data,v=>update("input_data",v)));
+        }else if(kind==="audio" && config.input_source_type==="inline"){
+          input.appendChild(runtimeField("Audio Samples","textarea",config.input_data,v=>update("input_data",v)));
+        }else if(kind==="image" && config.input_source_type==="inline"){
+          input.appendChild(runtimeField("Image Data URL","textarea",config.input_data,v=>update("input_data",v)));
+        }
+
+        if(["text","image","video","audio","multimodal"].includes(kind)){
+          input.appendChild(runtimeField(kind==="text"?"Prompt":"Prompt / Instruction","textarea",config.prompt,v=>update("prompt",v)));
+        }
+
+        if(kind==="signal"||kind==="audio"||kind==="video"||inputMode==="live"||inputMode==="continuous"||inputMode==="cctv"){
+          const streamGrid=document.createElement("div");streamGrid.className="mlb-runtime-grid";
+          if(kind==="signal"||kind==="audio")streamGrid.appendChild(runtimeField("Sample Rate","number",config.input_sample_rate,v=>update("input_sample_rate",v)));
+          if(kind==="video"||kind==="image")streamGrid.appendChild(runtimeField("Process FPS","number",config.input_fps,v=>update("input_fps",v)));
+          if(kind==="signal"&&inputMode==="continuous")streamGrid.appendChild(runtimeField("UI Update Hz","number",config.input_fps,v=>update("input_fps",v)));
+          if(kind==="signal"||kind==="audio")streamGrid.appendChild(runtimeField("Buffer Size","number",config.input_buffer_size,v=>update("input_buffer_size",v)));
+          if(kind==="signal")streamGrid.appendChild(runtimeField("Channel / Port","text",config.input_channel,v=>update("input_channel",v)));
+          if(streamGrid.children.length)input.appendChild(streamGrid);
+        }
+
+        const action=inputActionSpec(config);
+        const inputNote=document.createElement("div");inputNote.className="mlb-runtime-note";
+        inputNote.textContent="Studio separates input type, delivery mode, and task. Current action: "+action.start+". Live CCTV/video uses OpenCV when available; serial sensor/antenna sources use pyserial; TCP and growing-file signal streams use core Python adapters.";
+        input.appendChild(inputNote);main.appendChild(input);
+
+        if(kind==="text"){
+          const gen=runtimeSection("Text Sampling");const genGrid=document.createElement("div");genGrid.className="mlb-runtime-grid";
+          genGrid.append(
+            runtimeField("New Token Count","number",config.max_new_tokens,v=>update("max_new_tokens",v)),
+            runtimeField("Temperature","number",config.temperature,v=>update("temperature",v)),
+            runtimeField("Top K","number",config.top_k,v=>update("top_k",v)),
+            runtimeField("Top P","number",config.top_p,v=>update("top_p",v)),
+            runtimeField("Seed","number",config.seed,v=>update("seed",v))
+          );gen.appendChild(genGrid);main.appendChild(gen);
+        }
       }
 
       const runtime=runtimeSection("Runtime");const runtimeGrid=document.createElement("div");runtimeGrid.className="mlb-runtime-grid";
@@ -5104,6 +5293,7 @@ function studioChoice(title,message,actions,options={}){
       const device=selectedRuntimeDevice(config);
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";
       summary.innerHTML="<h3>Runtime Summary</h3>"+
+        (mode==="generate"?"<div><span>Input</span><strong>"+String(config.input_kind||"text")+" · "+String(config.input_mode||"single")+"</strong></div><div><span>Task</span><strong>"+String(config.task_type||"generate")+"</strong></div>":"")+
         "<div><span>Device</span><strong>"+device.label+"</strong></div>"+
         "<div><span>Backend</span><strong>"+config.backend+"</strong></div>"+
         "<div><span>Execution</span><strong>"+config.execution_mode+"</strong></div>"+
@@ -5142,7 +5332,9 @@ function studioChoice(title,message,actions,options={}){
       live.innerHTML="<div class='mlb-runtime-live-head'><strong>RUNTIME</strong><span>"+Math.round(Number(execution.overall||0))+"%</span></div><div class='mlb-runtime-live-message'>"+(execution.runtime_kind===mode?(execution.message||"Ready"):"Ready")+"</div><div class='mlb-runtime-progress'><i style='width:"+(execution.runtime_kind===mode?Number(execution.overall||0):0)+"%'></i></div>";
       side.appendChild(live);
       const note=document.createElement("div");note.className="mlb-runtime-executor-note";
-      note.textContent="Training uses packed fixed-shape causal-LM batches for both eager and compiled execution. Compiled mode captures one full model + LM-head + loss graph with fullgraph=True and dynamic=False. Supported training components include Embedding, Learned/Sinusoidal Position, ESA, StateAware ESA Stack, SOUP, RMSNorm/LayerNorm, Linear, FFN, Residual, Dropout, LM Head and reusable Modules built from them.";side.appendChild(note);
+      note.textContent=mode==="train"
+        ?"Training uses packed fixed-shape causal-LM batches for both eager and compiled execution. Compiled mode captures one full model + LM-head + loss graph with fullgraph=True and dynamic=False. Supported training components include Embedding, Learned/Sinusoidal Position, ESA, StateAware ESA Stack, SOUP, RMSNorm/LayerNorm, Linear, FFN, Residual, Dropout, LM Head and reusable Modules built from them."
+        :"Universal Input keeps modality, delivery mode and task independent. Single inputs run once; image sequences and video process frame-by-frame; CCTV and continuous signal sources stay active until Stop is pressed.";side.appendChild(note);
 
       canvas.appendChild(outer);
     }
@@ -5289,18 +5481,20 @@ function studioChoice(title,message,actions,options={}){
         actions.appendChild(blocked);
       }
 
-      if(req.modality==="text"){
-        const generate=btn(entry.weights_ready?"Generate Tokens":"Configure Generation","mlb-generate-btn");
-        const trainingLocked=trainingLocksGeneration(entry);
-        generate.disabled=trainingLocked;
-        generate.title=trainingLocked
-          ?"Generation is disabled while training is running"
-          :entry.weights_ready
-            ?"Open generation settings"
-            :"Configure generation now; actual token generation needs trained/loaded weights";
-        generate.addEventListener("click",()=>requestTokenGeneration(entry));
-        actions.appendChild(generate);
+      ensureRuntimeConfigs(entry);
+      const runSpec=inputActionSpec(entry.generation_config||{});
+      const run=btn(entry.weights_ready?runSpec.start:"Configure Input","mlb-generate-btn");
+      const trainingLocked=trainingLocksGeneration(entry);
+      run.disabled=trainingLocked;
+      run.title=trainingLocked
+        ?"Model runtime is disabled while training is running"
+        :entry.weights_ready
+          ?"Open universal input runtime"
+          :"Configure the universal input now; running inference needs trained/loaded weights";
+      run.addEventListener("click",()=>requestTokenGeneration(entry));
+      actions.appendChild(run);
 
+      if(req.modality==="text"){
         const serve=btn("Serve Model / API","mlb-serve-btn");
         serve.disabled=!entry.weights_ready;
         serve.title=entry.weights_ready
@@ -5316,8 +5510,8 @@ function studioChoice(title,message,actions,options={}){
 
       const note=document.createElement("div");note.className="mlb-runtime-note";
       note.textContent=entry.weights_ready
-        ?"Weights are available. Train/Generation open the runtime workspace in the center."
-        :"Train opens full runtime settings. Generation can be configured now, but token generation needs trained/loaded weights.";
+        ?"Weights are available. Train and Universal Input open the runtime workspace in the center."
+        :"Train opens full runtime settings. Universal Input can be configured now; inference needs trained/loaded weights.";
       body.appendChild(note);
     }
 

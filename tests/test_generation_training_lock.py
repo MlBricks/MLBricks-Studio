@@ -29,5 +29,5 @@ def test_generation_controls_are_locked_while_training_is_live():
     assert 'mode==="generate"&&trainingLocksGeneration(entry)' in panel_block
 
     assert 'gen.disabled=trainingLocked;' in source
-    assert 'generate.disabled=trainingLocked;' in source
-    assert 'Generation is disabled while training is running' in source
+    assert 'run.disabled=trainingLocked;' in source
+    assert 'Model runtime is disabled while training is running' in source

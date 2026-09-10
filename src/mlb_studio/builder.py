@@ -2330,7 +2330,9 @@ class Builder:
             return None
         resident = cached.get("compiled")
         tokenizer = cached.get("tokenizer")
-        if resident is None or tokenizer is None or getattr(resident, "raw_model", None) is None:
+        modality = str(config.get("input_kind") or "text").lower()
+        needs_tokenizer = modality in {"", "unknown", "text"}
+        if resident is None or (needs_tokenizer and tokenizer is None) or getattr(resident, "raw_model", None) is None:
             return None
 
         from .model_runtime import CompiledModel, resolve_device, resolve_precision
@@ -2399,21 +2401,131 @@ class Builder:
             })
         return compiled, tokenizer
 
+    @staticmethod
+    def _runtime_input_image_size(entry):
+        for node in ((entry or {}).get("architecture") or {}).get("nodes") or []:
+            if str(node.get("type") or "") in {"image_input", "video_input", "stream_input"}:
+                try:
+                    value = int((node.get("params") or {}).get("image_size") or 0)
+                except (TypeError, ValueError):
+                    value = 0
+                if value > 0:
+                    return value
+        return None
+
+    def _run_universal_input_runtime(self, compiled, entry, envelope, emit):
+        """Run finite or live non-text input through the current model runtime."""
+        from .model_runtime import TrainingStopped, run_universal_inference
+        from .universal_io import iter_input_stream, load_single_input
+
+        output_type = str((entry.get("requirements") or {}).get("output_type") or "unknown")
+        image_size = self._runtime_input_image_size(entry)
+        stream_like = bool(
+            envelope.continuous
+            or envelope.kind == "video"
+            or envelope.mode in {"sequence", "batch"}
+        )
+        processed = 0
+        last_output = None
+        last_live_emit = 0.0
+        live_emit_interval = 1.0 / max(float(envelope.fps or 5.0), 0.25)
+
+        emit({
+            "status":"running","runtime_kind":"generate","phase":"input_ready","overall":0,
+            "message":f"{envelope.kind.title()} input ready · {envelope.mode} · {envelope.task}",
+            "input_envelope":envelope.public_dict(),"processed_items":0,
+        })
+
+        if stream_like:
+            samples = iter_input_stream(
+                envelope, image_size=image_size, stop_event=self._stop_event
+            )
+        else:
+            value, meta = load_single_input(envelope, image_size=image_size)
+            samples = iter(((value, meta),))
+
+        for value, input_meta in samples:
+            if self._stop_event.is_set():
+                raise TrainingStopped("Universal input runtime stopped.")
+            started = time.perf_counter()
+            output = run_universal_inference(
+                compiled, value, input_kind=envelope.kind,
+                output_type=output_type, task=envelope.task,
+                prompt=envelope.prompt, metadata=input_meta,
+            )
+            processed += 1
+            elapsed = max(time.perf_counter() - started, 1e-9)
+            output_meta = dict(output.get("metadata") or {})
+            output_meta["input"] = dict(input_meta or {})
+            output_meta["processed_items"] = processed
+            output["metadata"] = output_meta
+            last_output = output
+            now = time.monotonic()
+            should_emit = (not envelope.continuous) or processed == 1 or (now - last_live_emit) >= live_emit_interval
+            if should_emit:
+                last_live_emit = now
+                emit({
+                    "status":"running","runtime_kind":"generate",
+                    "phase":"monitor" if envelope.continuous else "process",
+                    "overall":0 if stream_like else 100,
+                    "message":(
+                        f"Monitoring {envelope.kind} · processed {processed} item(s)"
+                        if envelope.continuous else
+                        f"Processed {processed} {envelope.kind} item(s)"
+                    ),
+                    "processed_items":processed,"items_per_sec":1.0/elapsed,
+                    "input_envelope":envelope.public_dict(),
+                    "generated_output":output,
+                    "generated_output_kind":output.get("kind"),
+                    "generated_output_mime":output.get("mime"),
+                    "generated_output_meta":output_meta,
+                })
+
+        if self._stop_event.is_set():
+            raise TrainingStopped("Universal input runtime stopped.")
+        if last_output is None:
+            raise RuntimeError("The input source ended before Studio received a sample.")
+
+        entry["last_generated_output"] = last_output
+        entry["last_generated_output_kind"] = last_output.get("kind")
+        entry["last_generated_output_mime"] = last_output.get("mime")
+        entry["last_generated_output_meta"] = dict(last_output.get("metadata") or {})
+        entry["generated_at"] = datetime.now(timezone.utc).isoformat()
+        emit({
+            "status":"done","runtime_kind":"generate","phase":"done","overall":100,
+            "message":f"{envelope.task.title()} complete · processed {processed} item(s).",
+            "processed_items":processed,"input_envelope":envelope.public_dict(),
+            "generated_output":last_output,
+            "generated_output_kind":last_output.get("kind"),
+            "generated_output_mime":last_output.get("mime"),
+            "generated_output_meta":last_output.get("metadata") or {},
+            "model_update":{
+                "last_generated_output":last_output,
+                "last_generated_output_kind":last_output.get("kind"),
+                "last_generated_output_mime":last_output.get("mime"),
+                "last_generated_output_meta":last_output.get("metadata") or {},
+                "generated_at":entry["generated_at"],
+            },
+        })
+        return last_output
+
     def generate_model(self, model_id, *, progress_callback=None):
-        """Generate tokens from a trained Builder language model."""
+        """Run the universal Studio input runtime; text keeps the token-generation fast path."""
         if progress_callback:
             progress_callback({
                 "status":"running","runtime_kind":"generate","phase":"runtime_import",
                 "overall":0,"model_id":model_id,
-                "message":"Preparing generation runtime…",
+                "message":"Preparing model runtime…",
             })
         from .model_runtime import load_trained_for_generation, generate_text
+        from .universal_io import normalize_input_config
         entry = self._model_output(model_id)
         if not entry.get("weights_ready"):
             raise RuntimeError("This model has no trained/loaded weights yet.")
         dataset_id = entry.get("selected_dataset_id")
         meta = self._dataset_meta(dataset_id) if dataset_id else copy.deepcopy(entry.get("hub_dataset_meta") or {})
         config = self._runtime_with_project_trust(entry.get("generation_config") or {}, checkpoint_path=entry.get("checkpoint_path") or entry.get("path"))
+        input_envelope = normalize_input_config(config, entry)
         self._stop_event.clear()
 
         def emit(payload):
@@ -2439,6 +2551,12 @@ class Builder:
                 "overall":0,"runtime_source":"loaded",
                 "message":f"Model loaded once and kept resident on {compiled.device} for following responses",
             })
+
+        if input_envelope.kind != "text":
+            return self._run_universal_input_runtime(
+                compiled, entry, input_envelope, emit
+            )
+
         from .model_runtime import runtime_int, runtime_float
         context = runtime_int(
             entry.get("context_length") or self.state.get("project",{}).get("context_length"),
@@ -2468,6 +2586,7 @@ class Builder:
             "status":"done","runtime_kind":"generate","phase":"done","overall":100,
             "message":f"Generated {count} tokens.","model_id":model_id,
             "generated_tokens":count,"generated_text":text,
+            "input_envelope":input_envelope.public_dict(),
             "generated_output":entry["last_generated_output"],"generated_output_kind":"text",
             "generated_output_mime":"text/plain","generated_output_meta":{"tokens": count},
             "model_update":{"last_generation":text,"generated_at":entry["generated_at"]},
@@ -4525,7 +4644,7 @@ class Builder:
                 if type(exc).__name__ in {"TrainingStopped", "PipelineStopped"}:
                     self._publish_bridge_progress({
                         "status":"stopped","runtime_kind":"generate","phase":"generate","overall":0,
-                        "model_id":model_id,"message":"Generation stopped.",
+                        "model_id":model_id,"message":"Runtime stopped.",
                     })
                 else:
                     self._remember_run_error(exc)
