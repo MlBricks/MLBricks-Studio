@@ -8,3 +8,5 @@ dist/
 venv/
 
 node_modules/
+mlbricks_workspace/data/.mlbricks_data_index.json
+mlbricks_workspace/models/.mlbricks_model_index.json
