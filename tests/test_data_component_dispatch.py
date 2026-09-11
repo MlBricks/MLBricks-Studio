@@ -45,7 +45,9 @@ PROCESSOR_DISPATCH = {
     "train_test_split": "train_validation_test_split",
     "tokenize_text": "tokenize_text_dataset",
     "image_process": "process_image_dataset",
+    "detection_process": "process_detection_dataset",
     "audio_process": "process_audio_dataset",
+    "signal_process": "process_signal_dataset",
     "batch_data": "make_torch_dataloader",
 }
 

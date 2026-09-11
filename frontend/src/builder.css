@@ -3956,3 +3956,63 @@ body.mlb-local-app .mlb-root{
   padding:22px 24px!important;
   text-align:center;
 }
+
+/* ------------------------------------------------------------------
+   Component/Data category picker
+   ------------------------------------------------------------------ */
+.mlb-library-category-box{margin-bottom:9px}
+.mlb-category-trigger span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mlb-category-trigger small{
+  flex:0 0 auto;min-width:22px;padding:2px 6px;border:1px solid #3a4a5a;border-radius:999px;
+  background:#111a23;color:#8fa0b2;font-size:10px;font-weight:800;text-align:center
+}
+.mlb-category-menu{max-height:min(420px,52vh);overflow-y:auto}
+.mlb-category-menu .mlb-workspace-option{justify-content:space-between;gap:10px}
+.mlb-category-menu .mlb-workspace-option span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mlb-category-menu .mlb-workspace-option small{flex:0 0 auto;color:#8ea0b2;font-size:10px;font-weight:800}
+.mlb-category-menu .mlb-workspace-option.active small{color:#e8f2ff}
+
+/* ------------------------------------------------------------------
+   Data Gallery categories - educational/research dataset catalog
+   ------------------------------------------------------------------ */
+.mlb-gallery-category-bar{
+  display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;
+  margin:0 0 14px;padding:10px 12px;border:1px solid #2a3947;border-radius:10px;
+  background:#0f1821;color:#8fa0b1;
+}
+.mlb-gallery-category-bar label{
+  font-size:10px;font-weight:900;letter-spacing:.08em;color:#9cabb9;white-space:nowrap;
+}
+.mlb-gallery-category-select{
+  min-width:220px;height:30px;padding:0 30px 0 10px;border:1px solid #3a4d5e;border-radius:7px;
+  background:#121e29;color:#e3eaf1;font-size:11px;font-weight:800;outline:none;
+}
+.mlb-gallery-category-select:focus{border-color:#7b65d9;box-shadow:0 0 0 2px rgba(123,101,217,.15)}
+.mlb-gallery-category-bar>span{margin-left:auto;font-size:10px;color:#758696;font-weight:700}
+.mlb-central-gallery-section.data-category-section{margin-bottom:12px!important}
+.mlb-central-gallery-card-grid.data-preset-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+
+/* Step 2 — categorized educational model gallery */
+.mlb-gallery-action.staged{opacity:.62;cursor:not-allowed;border-style:dashed;color:#8d9aa7;background:#121a22}
+.model-category-section .mlb-central-gallery-section-head strong{letter-spacing:.075em}
+.model-preset-grid .mlb-central-gallery-card{min-height:76px}
+
+
+/* Step 9 — Learn / Build / Research workbench */
+.mlb-studio-mode-switch{display:flex;gap:4px;padding:3px;border:1px solid var(--line,#2b3440);border-radius:8px;background:rgba(10,14,20,.5)}
+.mlb-studio-mode-btn{border:0;background:transparent;color:var(--muted,#98a2b3);font-size:11px;font-weight:700;padding:6px 9px;border-radius:6px;cursor:pointer}
+.mlb-studio-mode-btn:hover{color:var(--text,#f4f6f8);background:rgba(255,255,255,.05)}
+.mlb-studio-mode-btn.active{color:var(--text,#fff);background:rgba(99,102,241,.18);box-shadow:inset 0 0 0 1px rgba(129,140,248,.32)}
+.mlb-mode-learn .mlb-workspace-badge:after{content:" · LEARN";color:#7dd3fc}
+.mlb-mode-research .mlb-workspace-badge:after{content:" · RESEARCH";color:#c4b5fd}
+.mlb-step9-diagnostics{display:flex;flex-direction:column;gap:6px;padding:9px;border:1px solid var(--line,#2b3440);border-radius:8px;background:rgba(8,12,18,.5)}
+.mlb-step9-summary,.mlb-step9-check{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px}
+.mlb-step9-summary span,.mlb-step9-check small{color:var(--muted,#98a2b3)}
+.mlb-step9-summary strong.ok,.mlb-step9-check.ok span{color:#86efac}.mlb-step9-summary strong.bad,.mlb-step9-check.bad span{color:#fca5a5}.mlb-step9-check.warn span{color:#fde68a}
+.mlb-step9-check small{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%}
+.mlb-step9-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:5px;padding-top:8px;border-top:1px solid var(--line,#2b3440)}
+.mlb-step9-profile-grid>div{display:flex;flex-direction:column;gap:2px;padding:7px;border-radius:6px;background:rgba(255,255,255,.025)}
+.mlb-step9-profile-grid span{font-size:9px;color:var(--muted,#98a2b3);text-transform:uppercase}.mlb-step9-profile-grid strong{font-size:12px}
+.mlb-step9-actions{margin-top:8px}.mlb-step9-learn-note{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:9px;border-left:3px solid #38bdf8;background:rgba(56,189,248,.07);font-size:11px}.mlb-step9-learn-note span{color:var(--muted,#98a2b3);line-height:1.45}
+.mlb-step9-history{display:flex;flex-direction:column;gap:5px}.mlb-step9-history>div{display:flex;flex-direction:column;gap:2px;padding:7px;border:1px solid var(--line,#2b3440);border-radius:6px}.mlb-step9-history span{font-size:10px;color:var(--muted,#98a2b3)}
+.mlb-mode-learn .mlb-code-preview{opacity:.72}.mlb-mode-research .mlb-inspector{min-width:320px}

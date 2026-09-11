@@ -6,6 +6,8 @@ import unicodedata
 from urllib.parse import urlparse, quote
 from urllib.request import Request, urlopen
 import json
+import math
+import random
 from typing import Any
 
 
@@ -701,6 +703,277 @@ def prepare_text_input(
 
 
 
+
+def generate_demo_dataset(
+    demo_type: str = "tabular_regression",
+    *,
+    samples: int = 512,
+    seed: int = 42,
+    sequence_length: int = 32,
+    feature_count: int = 8,
+    classes: int = 3,
+):
+    """Generate deterministic, offline demo data for Studio Gallery templates.
+
+    The generator intentionally uses simple synthetic structures so Gallery
+    examples can be opened and executed without downloading external datasets.
+    It returns a normal Hugging Face ``Dataset`` so the existing split,
+    preprocessing, batching, and Prepared Dataset nodes keep working unchanged.
+    """
+    ds = _datasets()
+    kind = str(demo_type or "tabular_regression").strip().lower()
+    n = max(8, int(samples or 512))
+    seq = max(4, int(sequence_length or 32))
+    feats = max(1, int(feature_count or 8))
+    n_classes = max(2, int(classes or 3))
+    rng = random.Random(int(seed or 42))
+
+    def noise(scale=1.0):
+        return (rng.random() * 2.0 - 1.0) * scale
+
+    def wave(length, freq=1.0, phase=0.0, noise_scale=0.0):
+        denom = max(1, length - 1)
+        return [
+            math.sin(2.0 * math.pi * freq * (i / denom) + phase) + noise(noise_scale)
+            for i in range(length)
+        ]
+
+    def image(label=0, size=16):
+        # Nested numeric image tensor: [H, W]. Distinct deterministic patterns
+        # make it useful for educational CNN/classification examples.
+        out = []
+        for y in range(size):
+            row = []
+            for x in range(size):
+                if label % 3 == 0:
+                    base = 1.0 if abs(x - size // 2) <= 1 else 0.0
+                elif label % 3 == 1:
+                    base = 1.0 if abs(y - size // 2) <= 1 else 0.0
+                else:
+                    base = 1.0 if abs(x - y) <= 1 else 0.0
+                row.append(max(0.0, min(1.0, base + noise(0.05))))
+            out.append(row)
+        return out
+
+    if kind in {"tabular_regression", "neuron_regression"}:
+        fc = 1 if kind == "neuron_regression" else max(2, feats)
+        cols = {f"feature_{j+1}": [] for j in range(fc)}
+        targets = []
+        weights = [1.25 + 0.4 * j for j in range(fc)]
+        for _ in range(n):
+            xs = [noise(2.0) for _ in range(fc)]
+            for j, value in enumerate(xs):
+                cols[f"feature_{j+1}"].append(value)
+            targets.append(sum(w * x for w, x in zip(weights, xs)) + 0.35 + noise(0.12))
+        cols["target"] = targets
+        return ds.Dataset.from_dict(cols)
+
+    if kind in {"binary_classification", "multiclass_classification", "tabular_classification", "high_dimensional"}:
+        fc = 16 if kind == "high_dimensional" else (max(8, feats) if kind == "tabular_classification" else max(4, feats))
+        cls = 2 if kind == "binary_classification" else n_classes
+        cols = {f"feature_{j+1}": [] for j in range(fc)}
+        labels = []
+        for i in range(n):
+            label = i % cls
+            center = (label - (cls - 1) / 2.0) * 1.4
+            xs = [center + (j % 3) * 0.15 + noise(0.7) for j in range(fc)]
+            for j, value in enumerate(xs):
+                cols[f"feature_{j+1}"].append(value)
+            labels.append(label)
+        cols["label"] = labels
+        return ds.Dataset.from_dict(cols)
+
+    if kind == "clustering":
+        xs, ys = [], []
+        centers = [(-2.0, -1.5), (2.0, -1.0), (0.0, 2.2)]
+        for i in range(n):
+            cx, cy = centers[i % len(centers)]
+            xs.append(cx + noise(0.55)); ys.append(cy + noise(0.55))
+        return ds.Dataset.from_dict({"x": xs, "y": ys})
+
+    if kind == "sequence_classification":
+        sequences, labels = [], []
+        for i in range(n):
+            label = i % 2
+            freq = 1.0 if label == 0 else 3.0
+            sequences.append(wave(seq, freq=freq, phase=rng.random() * math.pi, noise_scale=0.08))
+            labels.append(label)
+        return ds.Dataset.from_dict({"sequence": sequences, "label": labels})
+
+    if kind in {"image_classification", "image_reconstruction", "image_jepa"}:
+        images, labels = [], []
+        for i in range(n):
+            label = i % n_classes
+            images.append(image(label))
+            labels.append(label)
+        payload = {"image": images}
+        if kind == "image_classification": payload["label"] = labels
+        if kind == "image_reconstruction": payload["target_image"] = [list(map(list, im)) for im in images]
+        return ds.Dataset.from_dict(payload)
+
+    if kind == "object_detection":
+        images, boxes, class_ids = [], [], []
+        size=16
+        for i in range(n):
+            canvas=[[max(0.0,noise(0.02)) for _ in range(size)] for _ in range(size)]
+            sample_boxes=[];sample_classes=[]
+            object_count=1+(i%3)
+            specs=[
+                (1+(i%3),1+((i//3)%3),4,4),
+                (9-((i//2)%2),2+(i%4),5,3),
+                (4+(i%3),10-((i//4)%2),3,4),
+            ]
+            for j in range(object_count):
+                x0,y0,bw,bh=specs[j]
+                cls=(i+j)%n_classes
+                x0=max(0,min(size-bw,x0));y0=max(0,min(size-bh,y0))
+                intensity=0.45+0.25*(cls%3)
+                for yy in range(y0,y0+bh):
+                    for xx in range(x0,x0+bw):
+                        canvas[yy][xx]=min(1.0,intensity+noise(0.03))
+                sample_boxes.append([float(x0),float(y0),float(bw),float(bh)])
+                sample_classes.append(cls)
+            images.append(canvas);boxes.append(sample_boxes);class_ids.append(sample_classes)
+        return ds.Dataset.from_dict({"image": images, "boxes": boxes, "class_ids": class_ids})
+
+    if kind in {"text_corpus", "text_jepa"}:
+        subjects = ["robot", "student", "researcher", "model", "sensor", "camera"]
+        verbs = ["learns", "predicts", "observes", "compares", "builds", "measures"]
+        objects = ["patterns", "future states", "signals", "images", "language", "representations"]
+        texts = []
+        for i in range(n):
+            texts.append(f"The {subjects[i%len(subjects)]} {verbs[(i//2)%len(verbs)]} {objects[(i//3)%len(objects)]} in MLBricks Studio.")
+        return ds.Dataset.from_dict({"text": texts})
+
+    if kind == "video_jepa":
+        videos = []
+        frames = min(8, max(3, seq // 4))
+        for i in range(n):
+            clip = []
+            label = i % n_classes
+            for t in range(frames):
+                # Move the base visual pattern slightly through time.
+                frame = image((label + t) % n_classes, size=12)
+                clip.append(frame)
+            videos.append(clip)
+        return ds.Dataset.from_dict({"video": videos})
+
+    if kind in {"audio_jepa", "speech_transcript", "multispeaker_speech", "music_caption", "sound_caption"}:
+        length = max(64, seq * 8)
+        audios, texts, speakers = [], [], []
+        for i in range(n):
+            freq = 1.0 + (i % 5)
+            audios.append(wave(length, freq=freq, phase=0.2 * i, noise_scale=0.02))
+            texts.append(f"Synthetic demo sample {i % 12} for audio model training")
+            speakers.append(i % 4)
+        if kind == "speech_transcript": return ds.Dataset.from_dict({"audio": audios, "text": texts})
+        if kind == "multispeaker_speech":
+            references = [wave(length, freq=1.0 + (spk % 4) * 0.65, phase=0.7 + 0.1 * i, noise_scale=0.015) for i, spk in enumerate(speakers)]
+            return ds.Dataset.from_dict({"audio": audios, "text": texts, "speaker_id": speakers, "reference_audio": references})
+        if kind == "music_caption": return ds.Dataset.from_dict({"audio": audios, "caption": [f"demo instrumental pattern {i%6}" for i in range(n)]})
+        if kind == "sound_caption": return ds.Dataset.from_dict({"audio": audios, "caption": [f"synthetic sound effect {i%6}" for i in range(n)]})
+        return ds.Dataset.from_dict({"audio": audios})
+
+    if kind in {"signal_jepa", "signal_classification", "anomaly_detection", "spectral_signal"}:
+        length = max(64, seq * 2)
+        signals, labels, spectra = [], [], []
+        for i in range(n):
+            label = i % 3
+            sig = wave(length, freq=1.0 + label, phase=0.1 * i, noise_scale=0.04)
+            if kind == "anomaly_detection" and i % 5 == 0:
+                sig[length // 2] += 3.0
+                label = 1
+            elif kind == "anomaly_detection":
+                label = 0
+            signals.append(sig)
+            labels.append(label)
+            if kind == "spectral_signal":
+                # Small pedagogical DFT magnitude prefix; enough for the Data
+                # Inspector without pulling in numpy/scipy.
+                mags = []
+                bins = min(16, length // 2)
+                for k in range(bins):
+                    re = sum(v * math.cos(2*math.pi*k*j/length) for j, v in enumerate(sig))
+                    im = -sum(v * math.sin(2*math.pi*k*j/length) for j, v in enumerate(sig))
+                    mags.append((re*re + im*im) ** 0.5 / length)
+                spectra.append(mags)
+        payload = {"signal": signals}
+        if kind in {"signal_classification", "anomaly_detection"}: payload["label"] = labels
+        if kind == "spectral_signal":
+            payload["spectrum"] = spectra
+            payload["target"] = spectra
+        return ds.Dataset.from_dict(payload)
+
+    if kind == "long_signal":
+        contexts, targets = [], []
+        length = max(128, seq * 8)
+        horizon = max(4, min(16, seq // 2))
+        for i in range(n):
+            full = wave(length + horizon, freq=0.5 + (i % 5) * 0.25, phase=0.05 * i, noise_scale=0.02)
+            contexts.append(full[:length])
+            targets.append(full[length:])
+        return ds.Dataset.from_dict({"signal": contexts, "target": targets})
+
+    if kind == "timeseries_forecast":
+        contexts, targets = [], []
+        horizon = max(4, seq // 4)
+        for i in range(n):
+            full = wave(seq + horizon, freq=1.0 + (i % 4) * 0.25, phase=0.07 * i, noise_scale=0.03)
+            contexts.append(full[:seq]); targets.append(full[seq:])
+        return ds.Dataset.from_dict({"context": contexts, "target": targets})
+
+    if kind == "signal_denoise":
+        noisy, clean = [], []
+        length = max(64, seq * 2)
+        for i in range(n):
+            base = wave(length, freq=1.0 + (i % 3), phase=0.1 * i, noise_scale=0.0)
+            clean.append(base)
+            noisy.append([v + noise(0.2) for v in base])
+        return ds.Dataset.from_dict({"noisy_signal": noisy, "clean_signal": clean})
+
+    if kind == "sensor_fusion":
+        a, b, c, labels = [], [], [], []
+        length = max(16, seq)
+        for i in range(n):
+            label = i % 3
+            a.append(wave(length, 1.0 + label, 0.0, 0.03))
+            b.append(wave(length, 1.0 + label, 0.7, 0.03))
+            c.append(wave(length, 0.5 + label, 1.2, 0.03))
+            labels.append(label)
+        return ds.Dataset.from_dict({"sensor_a": a, "sensor_b": b, "sensor_c": c, "label": labels})
+
+    if kind == "rf_iq":
+        i_vals, q_vals, labels = [], [], []
+        length = max(32, seq * 2)
+        for idx in range(n):
+            label = idx % n_classes
+            freq = 1.0 + label
+            phase = 0.25 * idx
+            i_sig = [math.cos(2*math.pi*freq*j/length + phase) + noise(0.03) for j in range(length)]
+            q_sig = [math.sin(2*math.pi*freq*j/length + phase) + noise(0.03) for j in range(length)]
+            i_vals.append(i_sig); q_vals.append(q_sig); labels.append(label)
+        return ds.Dataset.from_dict({"i": i_vals, "q": q_vals, "label": labels})
+
+    if kind == "multimodal_image_text":
+        images, texts = [], []
+        for i in range(n):
+            label = i % n_classes
+            images.append(image(label))
+            texts.append(["vertical pattern", "horizontal pattern", "diagonal pattern"][label % 3])
+        return ds.Dataset.from_dict({"image": images, "text": texts})
+
+    if kind == "sensor_vision":
+        images, sensors, labels = [], [], []
+        length = max(16, seq)
+        for i in range(n):
+            label = i % n_classes
+            images.append(image(label))
+            sensors.append(wave(length, 1.0 + label, 0.1 * i, 0.03))
+            labels.append(label)
+        return ds.Dataset.from_dict({"image": images, "sensor": sensors, "label": labels})
+
+    raise ValueError(f"Unknown Studio demo dataset type: {demo_type!r}")
+
 def load_manual_text_dataset(
     text: str,
     *,
@@ -771,6 +1044,138 @@ def train_validation_test_split(
     return ds.DatasetDict(result)
 
 
+def _coerce_pil_image(value, *, mode="RGB"):
+    """Convert PIL/numpy/list image values to a PIL image without extra deps."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ImportError("Image processing needs Pillow: pip install pillow") from exc
+    import numpy as np
+
+    if hasattr(value, "convert") and hasattr(value, "size"):
+        return value.convert(mode)
+    arr = np.asarray(value)
+    if arr.ndim == 3 and arr.shape[0] in {1, 3, 4} and arr.shape[-1] not in {1, 3, 4}:
+        arr = np.moveaxis(arr, 0, -1)
+    if arr.ndim not in {2, 3}:
+        raise ValueError(f"Image values must be HxW, HxWxC, or CxHxW; received shape {arr.shape}.")
+    if arr.dtype != np.uint8:
+        arr = arr.astype(np.float32)
+        finite = arr[np.isfinite(arr)]
+        peak = float(finite.max()) if finite.size else 0.0
+        floor = float(finite.min()) if finite.size else 0.0
+        if floor >= 0.0 and peak <= 1.0:
+            arr = arr * 255.0
+        arr = np.clip(arr, 0.0, 255.0).astype(np.uint8)
+    if arr.ndim == 3 and arr.shape[-1] == 1:
+        arr = arr[..., 0]
+    return Image.fromarray(arr).convert(mode)
+
+
+def _tensor_ready_image(image, *, normalize=True):
+    """Return numeric image data in Studio's tensor-friendly CHW/HW layout."""
+    import numpy as np
+    arr = np.asarray(image, dtype=np.float32)
+    if normalize:
+        arr = arr / 255.0
+    if arr.ndim == 3:
+        arr = np.moveaxis(arr, -1, 0)
+    return arr.tolist()
+
+
+
+def prepare_jepa_dataset(
+    dataset,
+    *,
+    modality: str = "image",
+    input_column: str | None = None,
+    output_column: str = "jepa_input",
+    sequence_length: int = 64,
+    image_size: int = 16,
+    normalize: bool = True,
+):
+    """Prepare a Dataset/DatasetDict for the universal educational JEPA trainer.
+
+    The transformation is intentionally transparent and deterministic:
+    - text is encoded with a tiny byte vocabulary (0 = pad/mask, 1..256 = byte+1)
+    - image is converted to CHW numeric data
+    - video becomes TCHW numeric data
+    - audio/signal are padded or truncated 1-D float windows
+
+    Random context/target masking remains a visible *model* component (JEPA Mask),
+    so the Data Graph prepares samples without hiding the learning objective.
+    """
+    import numpy as np
+
+    mode = str(modality or "image").strip().lower()
+    if mode not in {"image", "video", "text", "audio", "signal"}:
+        raise ValueError("JEPA Preparation modality must be image, video, text, audio, or signal.")
+    default_columns = {"image":"image", "video":"video", "text":"text", "audio":"audio", "signal":"signal"}
+    input_column = str(input_column or default_columns[mode])
+    output_column = str(output_column or "jepa_input")
+    seq = max(4, int(sequence_length or 64))
+    size = max(4, int(image_size or 16))
+
+    def _pad_1d(values):
+        arr = np.asarray(values, dtype=np.float32).reshape(-1)
+        if arr.size >= seq:
+            arr = arr[:seq]
+        else:
+            arr = np.pad(arr, (0, seq-arr.size), mode="constant")
+        if normalize and arr.size:
+            peak = float(np.max(np.abs(arr)))
+            if peak > 1e-8:
+                arr = arr / peak
+        return arr.tolist()
+
+    def transform(example):
+        value = example[input_column]
+        if mode == "text":
+            raw = str(value).encode("utf-8", errors="replace")[:seq]
+            ids = [int(b) + 1 for b in raw]
+            ids += [0] * (seq - len(ids))
+            example[output_column] = ids
+            return example
+
+        if mode == "image":
+            image = _coerce_pil_image(value, mode="L")
+            from PIL import Image
+            image = image.resize((size, size), Image.Resampling.BILINEAR)
+            arr = np.asarray(image, dtype=np.float32)
+            if normalize and arr.max(initial=0.0) > 1.0:
+                arr = arr / 255.0
+            example[output_column] = arr[None, ...].tolist()
+            return example
+
+        if mode == "video":
+            frames = list(value or [])[:seq]
+            prepared = []
+            from PIL import Image
+            for frame in frames:
+                image = _coerce_pil_image(frame, mode="L").resize((size, size), Image.Resampling.BILINEAR)
+                arr = np.asarray(image, dtype=np.float32)
+                if normalize and arr.max(initial=0.0) > 1.0:
+                    arr = arr / 255.0
+                prepared.append(arr[None, ...].tolist())
+            if not prepared:
+                prepared = [[[ [0.0 for _ in range(size)] for _ in range(size) ]]]
+            while len(prepared) < seq:
+                prepared.append(prepared[-1])
+            example[output_column] = prepared[:seq]
+            return example
+
+        # Hugging Face Audio values may be decoded dictionaries; Studio demo
+        # audio and signal values are ordinary numeric lists.
+        if isinstance(value, dict) and "array" in value:
+            value = value["array"]
+        example[output_column] = _pad_1d(value)
+        return example
+
+    if hasattr(dataset, "items") and not hasattr(dataset, "column_names"):
+        return dataset.__class__({name: split.map(transform) for name, split in dataset.items()})
+    return dataset.map(transform)
+
+
 def process_image_dataset(
     dataset,
     *,
@@ -779,8 +1184,16 @@ def process_image_dataset(
     height: int = 224,
     mode: str = "RGB",
     center_crop: bool = False,
+    tensor_ready: bool = False,
+    normalize: bool = True,
 ):
-    """Resize/crop PIL-compatible images in a Dataset or DatasetDict."""
+    """Resize/crop images in a Dataset or DatasetDict.
+
+    ``tensor_ready=True`` converts the result to nested numeric values in HW
+    (grayscale) or CHW (color) layout. This lets the generic Studio trainer
+    consume both Hub/PIL images and generated list-based demo images through
+    the same public data component.
+    """
     try:
         from PIL import Image
     except ImportError as exc:
@@ -791,9 +1204,7 @@ def process_image_dataset(
         raise ValueError("width and height must be positive.")
 
     def transform(example):
-        image = example[image_column]
-        if hasattr(image, "convert"):
-            image = image.convert(mode)
+        image = _coerce_pil_image(example[image_column], mode=mode)
         if center_crop:
             w, h = image.size
             target_ratio = width / height
@@ -806,12 +1217,147 @@ def process_image_dataset(
                 new_h = max(1, int(w / target_ratio))
                 top = max(0, (h - new_h) // 2)
                 image = image.crop((0, top, w, top + new_h))
-        example[image_column] = image.resize((width, height), Image.Resampling.BILINEAR)
+        image = image.resize((width, height), Image.Resampling.BILINEAR)
+        example[image_column] = _tensor_ready_image(image, normalize=normalize) if tensor_ready else image
         return example
 
     if hasattr(dataset, "items") and not hasattr(dataset, "column_names"):
         return dataset.__class__({name: split.map(transform) for name, split in dataset.items()})
     return dataset.map(transform)
+
+
+def process_detection_dataset(
+    dataset,
+    *,
+    image_column: str = "image",
+    boxes_column: str = "boxes",
+    classes_column: str = "class_ids",
+    width: int = 16,
+    height: int = 16,
+    mode: str = "L",
+    box_format: str = "xywh",
+    normalize_images: bool = True,
+):
+    """Prepare image + bounding-box datasets for the educational detector.
+
+    Boxes stay in pixel coordinates after resizing so the model trainer can
+    normalize them against the actual tensor shape. The current public
+    educational detection contract uses ``xywh`` boxes and supports one or more
+    boxes per sample; the first object is used by the single-head demo trainer.
+    """
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ImportError("Detection processing needs Pillow: pip install pillow") from exc
+
+    width, height = int(width), int(height)
+    if width <= 0 or height <= 0:
+        raise ValueError("width and height must be positive.")
+    fmt = str(box_format or "xywh").strip().lower()
+    if fmt != "xywh":
+        raise ValueError("Studio detection processing currently supports box_format='xywh'.")
+
+    def transform(example):
+        image = _coerce_pil_image(example[image_column], mode=mode)
+        old_w, old_h = image.size
+        sx = width / max(float(old_w), 1.0)
+        sy = height / max(float(old_h), 1.0)
+        resized = image.resize((width, height), Image.Resampling.BILINEAR)
+        boxes = example.get(boxes_column) or []
+        scaled = []
+        for raw in boxes:
+            if raw is None or len(raw) < 4:
+                continue
+            x, y, w, h = [float(v) for v in raw[:4]]
+            scaled.append([x * sx, y * sy, w * sx, h * sy])
+        example[image_column] = _tensor_ready_image(resized, normalize=normalize_images)
+        example[boxes_column] = scaled
+        # Keep class ids explicit and numeric even when a source uses tuples.
+        example[classes_column] = [int(v) for v in (example.get(classes_column) or [])]
+        return example
+
+    if hasattr(dataset, "items") and not hasattr(dataset, "column_names"):
+        return dataset.__class__({name: split.map(transform) for name, split in dataset.items()})
+    return dataset.map(transform)
+
+
+def process_signal_dataset(
+    dataset,
+    *,
+    signal_columns: str | list[str] = "signal",
+    output_column: str = "signal",
+    target_column: str | None = None,
+    target_output_column: str = "target",
+    normalize: bool = False,
+    pad_length: int = 0,
+):
+    """Map arbitrary numeric signal columns into Studio's canonical signal field.
+
+    One source column produces ``[T]`` per sample. Multiple source columns are
+    stacked as ``[C,T]`` so Conv1D-based custom models can consume sensor fusion
+    and RF/IQ data without hidden model-side preprocessing. An optional target
+    column can be copied to a canonical target field for forecasting, denoising,
+    spectral reconstruction, and other regression tasks.
+    """
+    import numpy as np
+
+    if isinstance(signal_columns, str):
+        columns = [part.strip() for part in signal_columns.split(",") if part.strip()]
+    else:
+        columns = [str(part).strip() for part in (signal_columns or []) if str(part).strip()]
+    if not columns:
+        raise ValueError("Signal Schema Mapper needs at least one signal column.")
+    output_column = str(output_column or "signal").strip() or "signal"
+    target_column = str(target_column or "").strip() or None
+    target_output_column = str(target_output_column or "target").strip() or "target"
+    pad_length = max(0, int(pad_length or 0))
+
+    def prepare_vector(value):
+        if isinstance(value, dict) and "array" in value:
+            value = value["array"]
+        arr = np.asarray(value, dtype=np.float32).reshape(-1)
+        if pad_length:
+            if arr.size >= pad_length:
+                arr = arr[:pad_length]
+            else:
+                arr = np.pad(arr, (0, pad_length - arr.size), mode="constant")
+        if normalize and arr.size:
+            peak = float(np.max(np.abs(arr)))
+            if peak > 1e-8:
+                arr = arr / peak
+        return arr.tolist()
+
+    def transform(example):
+        missing = [name for name in columns if name not in example]
+        if missing:
+            raise KeyError(f"Signal column(s) not found: {', '.join(missing)}")
+        prepared = [prepare_vector(example[name]) for name in columns]
+        example[output_column] = prepared[0] if len(prepared) == 1 else prepared
+        if target_column is not None:
+            if target_column not in example:
+                raise KeyError(f"Signal target column {target_column!r} not found.")
+            value = example[target_column]
+            if isinstance(value, (list, tuple)) or hasattr(value, "shape"):
+                try:
+                    value = np.asarray(value, dtype=np.float32).tolist()
+                except Exception:
+                    pass
+            example[target_output_column] = value
+        return example
+
+    def map_one(split):
+        available = set(getattr(split, "column_names", []) or [])
+        if available:
+            missing = [name for name in columns if name not in available]
+            if missing:
+                raise KeyError(f"Signal column(s) not found: {', '.join(missing)}")
+            if target_column is not None and target_column not in available:
+                raise KeyError(f"Signal target column {target_column!r} not found.")
+        return split.map(transform)
+
+    if hasattr(dataset, "items") and not hasattr(dataset, "column_names"):
+        return dataset.__class__({name: map_one(split) for name, split in dataset.items()})
+    return map_one(dataset)
 
 
 def process_audio_dataset(
@@ -912,6 +1458,8 @@ __all__ = [
     "make_torch_dataloader",
     "process_audio_dataset",
     "process_image_dataset",
+    "process_signal_dataset",
+    "process_detection_dataset",
     "train_validation_test_split",
     "load_manual_text_dataset",
     "prepare_text_input",

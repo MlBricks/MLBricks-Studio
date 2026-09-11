@@ -22,6 +22,8 @@ def primitive_catalog():
             "api": [
                 {"key": "input_mode", "label": "Input Source", "type": "select", "value": "prompt",
                  "options": ["prompt", "prepared_dataset"]},
+                {"key": "input_key", "label": "Runtime Input Key", "type": "text", "value": "",
+                 "help": "Optional named runtime input for multi-input custom/audio models."},
                 {"key": "prompt", "label": "Prompt / Text", "type": "textarea", "value": "Once upon a time",
                  "show_when": {"input_mode": "prompt"}},
                 {"key": "dataset_id", "label": "Available Dataset", "type": "dataset_select", "value": "",
@@ -43,6 +45,8 @@ def primitive_catalog():
                  "options": ["single", "sequence", "live"]},
                 {"key": "source_type", "label": "Source Type", "type": "select", "value": "path_or_url",
                  "options": ["path_or_url", "directory", "camera", "cctv"]},
+                {"key": "input_key", "label": "Runtime Input Key", "type": "text", "value": "",
+                 "help": "Optional named runtime input for multimodal graphs, for example image."},
                 {"key": "channels", "label": "Channels", "type": "number", "value": 3},
                 {"key": "image_size", "label": "Image Size", "type": "number", "value": 224},
                 {"key": "fps", "label": "Live FPS", "type": "number", "value": 5},
@@ -59,6 +63,8 @@ def primitive_catalog():
             "api": [
                 {"key": "input_mode", "label": "Input Mode", "type": "select", "value": "file",
                  "options": ["file", "live", "continuous"]},
+                {"key": "input_key", "label": "Runtime Input Key", "type": "text", "value": "",
+                 "help": "Optional named runtime input, for example reference_audio."},
                 {"key": "source_type", "label": "Source Type", "type": "select", "value": "path_or_url",
                  "options": ["path_or_url", "microphone", "sensor"]},
                 {"key": "sample_rate", "label": "Sample Rate", "type": "number", "value": 16000},
@@ -78,6 +84,8 @@ def primitive_catalog():
                  "options": ["file", "live", "cctv"]},
                 {"key": "source_type", "label": "Source Type", "type": "select", "value": "path_or_url",
                  "options": ["path_or_url", "camera", "cctv"]},
+                {"key": "input_key", "label": "Runtime Input Key", "type": "text", "value": "",
+                 "help": "Optional named runtime input for multimodal graphs, for example video."},
                 {"key": "image_size", "label": "Frame Size", "type": "number", "value": 224},
                 {"key": "fps", "label": "Process FPS", "type": "number", "value": 5},
             ],
@@ -95,12 +103,40 @@ def primitive_catalog():
                  "options": ["static", "continuous"]},
                 {"key": "source_type", "label": "Source Type", "type": "select", "value": "inline",
                  "options": ["inline", "file", "file_tail", "serial", "tcp", "sensor", "antenna"]},
+                {"key": "input_key", "label": "Runtime Input Key", "type": "text", "value": "",
+                 "help": "Optional named runtime input for multimodal graphs, for example sensor."},
                 {"key": "sample_rate", "label": "Sample Rate", "type": "number", "value": 16000},
                 {"key": "buffer_size", "label": "Buffer Size", "type": "number", "value": 256},
                 {"key": "channel", "label": "Channel / Port", "type": "text", "value": ""},
             ],
         },
 
+        {
+            "type": "demo_dataset",
+            "builder_utility": True,
+            "builder_python_api": True,
+            "name": "Studio Demo Dataset",
+            "icon": "DEMO",
+            "category": "Data Source",
+            "description": "Deterministic offline demo data for ML, DL, JEPA, vision, audio, signal, and multimodal examples.",
+            "accent": "green",
+            "api": [
+                {"key": "demo_type", "label": "Demo Type", "type": "select", "value": "tabular_regression",
+                 "options": [
+                    "tabular_regression", "binary_classification", "multiclass_classification", "clustering", "high_dimensional",
+                    "neuron_regression", "tabular_classification", "image_classification", "sequence_classification", "image_reconstruction",
+                    "text_corpus", "image_jepa", "video_jepa", "text_jepa", "audio_jepa", "signal_jepa", "object_detection",
+                    "speech_transcript", "multispeaker_speech", "music_caption", "sound_caption", "timeseries_forecast",
+                    "signal_classification", "anomaly_detection", "signal_denoise", "sensor_fusion", "spectral_signal", "rf_iq",
+                    "long_signal", "multimodal_image_text", "sensor_vision"
+                 ]},
+                {"key": "samples", "label": "Samples", "type": "number", "value": 512},
+                {"key": "seed", "label": "Random Seed", "type": "number", "value": 42},
+                {"key": "sequence_length", "label": "Sequence Length", "type": "number", "value": 32},
+                {"key": "feature_count", "label": "Feature Count", "type": "number", "value": 8},
+                {"key": "classes", "label": "Classes", "type": "number", "value": 3}
+            ],
+        },
         {
             "type": "hf_dataset",
             "builder_utility": True,
@@ -258,7 +294,29 @@ def primitive_catalog():
                 {"key": "width", "label": "Width", "type": "number", "value": 224},
                 {"key": "height", "label": "Height", "type": "number", "value": 224},
                 {"key": "mode", "label": "Color Mode", "type": "select", "value": "RGB", "options": ["RGB", "L"]},
-                {"key": "center_crop", "label": "Center Crop", "type": "select", "value": "false", "options": ["false", "true"]}
+                {"key": "center_crop", "label": "Center Crop", "type": "select", "value": "false", "options": ["false", "true"]},
+                {"key": "tensor_ready", "label": "Tensor Ready", "type": "select", "value": "false", "options": ["false", "true"]},
+                {"key": "normalize", "label": "Normalize 0–1", "type": "select", "value": "true", "options": ["true", "false"]}
+            ],
+        },
+        {
+            "type": "detection_process",
+            "builder_utility": True,
+            "builder_python_api": True,
+            "name": "Detection Processing",
+            "icon": "BOX",
+            "category": "Vision",
+            "description": "Resize images and bounding boxes together for object-detection training.",
+            "accent": "orange",
+            "api": [
+                {"key": "image_column", "label": "Image Column", "type": "text", "value": "image"},
+                {"key": "boxes_column", "label": "Boxes Column", "type": "text", "value": "boxes"},
+                {"key": "classes_column", "label": "Classes Column", "type": "text", "value": "class_ids"},
+                {"key": "width", "label": "Width", "type": "number", "value": 16},
+                {"key": "height", "label": "Height", "type": "number", "value": 16},
+                {"key": "mode", "label": "Color Mode", "type": "select", "value": "L", "options": ["RGB", "L"]},
+                {"key": "box_format", "label": "Box Format", "type": "select", "value": "xywh", "options": ["xywh"]},
+                {"key": "normalize_images", "label": "Normalize Images", "type": "select", "value": "true", "options": ["true", "false"]}
             ],
         },
         {
@@ -276,6 +334,44 @@ def primitive_catalog():
                 {"key": "normalize", "label": "Normalize", "type": "select", "value": "true", "options": ["true", "false"]},
                 {"key": "trim_silence", "label": "Trim Silence", "type": "select", "value": "false", "options": ["false", "true"]},
                 {"key": "silence_threshold", "label": "Silence Threshold", "type": "number", "value": 0.01}
+            ],
+        },
+        {
+            "type": "signal_process",
+            "builder_utility": True,
+            "builder_python_api": True,
+            "name": "Signal Schema Mapper",
+            "icon": "SIG+",
+            "category": "Signal",
+            "description": "Map one or more signal columns into Studio's canonical signal tensor and optionally expose a training target.",
+            "accent": "cyan",
+            "api": [
+                {"key": "signal_columns", "label": "Signal Columns", "type": "text", "value": "signal",
+                 "help": "Comma-separated columns. Multiple columns are stacked as channels."},
+                {"key": "output_column", "label": "Output Signal Column", "type": "text", "value": "signal"},
+                {"key": "target_column", "label": "Target Column (Optional)", "type": "text", "value": ""},
+                {"key": "target_output_column", "label": "Output Target Column", "type": "text", "value": "target"},
+                {"key": "normalize", "label": "Normalize Signal", "type": "select", "value": "false", "options": ["true", "false"]},
+                {"key": "pad_length", "label": "Pad / Trim Length (0 = Keep)", "type": "number", "value": 0}
+            ],
+        },
+        {
+            "type": "jepa_prepare",
+            "builder_utility": True,
+            "builder_python_api": True,
+            "name": "JEPA Preparation",
+            "icon": "JDP",
+            "category": "Data Processing",
+            "description": "Prepare image, video, text, audio, or signal samples into a common numeric JEPA input tensor field.",
+            "accent": "purple",
+            "api": [
+                {"key": "modality", "label": "Modality", "type": "select", "value": "image",
+                 "options": ["image", "video", "text", "audio", "signal"]},
+                {"key": "input_column", "label": "Input Column", "type": "text", "value": "image"},
+                {"key": "output_column", "label": "Output Column", "type": "text", "value": "jepa_input"},
+                {"key": "sequence_length", "label": "Sequence Length", "type": "number", "value": 64},
+                {"key": "image_size", "label": "Image Size", "type": "number", "value": 16},
+                {"key": "normalize", "label": "Normalize", "type": "select", "value": "true", "options": ["true", "false"]}
             ],
         },
         {
@@ -310,11 +406,349 @@ def primitive_catalog():
                 {"key": "path", "label": "Save Path", "type": "text", "value": "mlbricks_workspace/data/prepared_dataset"}
             ],
         },
+        # ------------------------------------------------------------------
+        # Educational foundations: classical ML, deep-learning primitives,
+        # and low-level tensor/math operations. These are intentionally
+        # Builder-native PyTorch utilities so students can compose models from
+        # first principles without depending on opaque prebuilt architecture
+        # nodes. Higher-level Gallery templates should be made from these same
+        # public components.
+        # ------------------------------------------------------------------
+        {
+            "type": "feature_input",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Feature Input",
+            "icon": "X",
+            "category": "ML Core",
+            "description": "Numeric feature tensor input for regression, classification, and tabular ML experiments.",
+            "accent": "green",
+            "api": [
+                {"key": "feature_dim", "label": "Feature Count", "type": "number", "value": 4,
+                 "help": "Documentation/validation hint for the expected final feature dimension."},
+                {"key": "input_key", "label": "Runtime Input Key", "type": "text", "value": "",
+                 "help": "Optional named runtime input, for example speaker_id."},
+            ],
+        },
+        {
+            "type": "linear_regression",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Linear Regression",
+            "icon": "LR",
+            "category": "ML Core",
+            "description": "Trainable y = XW + b regression layer for learning and small supervised models.",
+            "accent": "blue",
+            "api": [
+                {"key": "in_features", "label": "Input Features", "type": "number", "value": 4},
+                {"key": "out_features", "label": "Outputs", "type": "number", "value": 1},
+                {"key": "bias", "label": "Use Bias", "type": "select", "value": "true", "options": ["true", "false"]},
+            ],
+        },
+        {
+            "type": "logistic_regression",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Logistic Regression",
+            "icon": "LOGR",
+            "category": "ML Core",
+            "description": "Linear classifier with an optional sigmoid probability output.",
+            "accent": "purple",
+            "api": [
+                {"key": "in_features", "label": "Input Features", "type": "number", "value": 4},
+                {"key": "out_features", "label": "Outputs", "type": "number", "value": 1},
+                {"key": "bias", "label": "Use Bias", "type": "select", "value": "true", "options": ["true", "false"]},
+                {"key": "output", "label": "Output", "type": "select", "value": "probability", "options": ["probability", "logits"],
+                 "help": "Probability applies sigmoid. Logits is preferred when a BCE-with-logits loss is used."},
+            ],
+        },
+        {
+            "type": "polynomial_features",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Polynomial Features",
+            "icon": "POLY",
+            "category": "ML Core",
+            "description": "Expand numeric features with polynomial and interaction terms for classical regression experiments.",
+            "accent": "cyan",
+            "api": [
+                {"key": "degree", "label": "Degree", "type": "number", "value": 2},
+                {"key": "include_bias", "label": "Include Constant 1", "type": "select", "value": "false", "options": ["false", "true"]},
+                {"key": "interaction_only", "label": "Interaction Only", "type": "select", "value": "false", "options": ["false", "true"]},
+            ],
+        },
+        {
+            "type": "knn_classifier",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "KNN Classifier",
+            "icon": "KNN",
+            "category": "ML Core",
+            "description": "Fit-based K-nearest-neighbours classifier. Stores the fitted reference samples inside the Studio model artifact.",
+            "accent": "purple",
+            "api": [
+                {"key": "neighbors", "label": "Neighbors (K)", "type": "number", "value": 5},
+                {"key": "weights", "label": "Voting", "type": "select", "value": "uniform", "options": ["uniform", "distance"]},
+                {"key": "p", "label": "Distance P", "type": "number", "value": 2},
+            ],
+        },
+        {
+            "type": "decision_tree_classifier",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Decision Tree",
+            "icon": "TREE",
+            "category": "ML Core",
+            "description": "Educational CART-style fit-based decision tree classifier with inspectable depth and split settings.",
+            "accent": "green",
+            "api": [
+                {"key": "max_depth", "label": "Max Depth", "type": "number", "value": 5},
+                {"key": "min_samples_split", "label": "Min Samples Split", "type": "number", "value": 2},
+                {"key": "min_samples_leaf", "label": "Min Samples Leaf", "type": "number", "value": 1},
+                {"key": "criterion", "label": "Criterion", "type": "select", "value": "gini", "options": ["gini", "entropy"]},
+            ],
+        },
+        {
+            "type": "kmeans",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "K-Means",
+            "icon": "KM",
+            "category": "ML Core",
+            "description": "Fit-based centroid clustering with K-Means++ initialization and persisted fitted centroids.",
+            "accent": "blue",
+            "api": [
+                {"key": "clusters", "label": "Clusters (K)", "type": "number", "value": 3},
+                {"key": "max_iter", "label": "Max Iterations", "type": "number", "value": 100},
+                {"key": "tolerance", "label": "Tolerance", "type": "number", "value": 0.0001},
+                {"key": "seed", "label": "Seed", "type": "number", "value": 42},
+            ],
+        },
+        {
+            "type": "pca",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "PCA",
+            "icon": "PCA",
+            "category": "ML Core",
+            "description": "Fit-based principal component analysis using SVD, with optional whitening and persisted components.",
+            "accent": "cyan",
+            "api": [
+                {"key": "components", "label": "Components", "type": "number", "value": 2},
+                {"key": "center", "label": "Center Data", "type": "select", "value": "true", "options": ["true", "false"]},
+                {"key": "whiten", "label": "Whiten", "type": "select", "value": "false", "options": ["false", "true"]},
+            ],
+        },
+
+        # Deep Learning Core -------------------------------------------------
+        {"type":"relu","builder_utility":True,"builder_python_api":False,"name":"ReLU","icon":"RELU","category":"Deep Learning Core","description":"Rectified Linear Unit activation: max(0, x).","accent":"orange","api":[]},
+        {"type":"leaky_relu","builder_utility":True,"builder_python_api":False,"name":"Leaky ReLU","icon":"LRELU","category":"Deep Learning Core","description":"ReLU variant that keeps a small negative slope.","accent":"orange","api":[{"key":"negative_slope","label":"Negative Slope","type":"number","value":0.01}]},
+        {"type":"gelu","builder_utility":True,"builder_python_api":False,"name":"GELU","icon":"GELU","category":"Deep Learning Core","description":"Gaussian Error Linear Unit activation commonly used in modern neural networks.","accent":"orange","api":[{"key":"approximate","label":"Approximation","type":"select","value":"none","options":["none","tanh"]}]},
+        {"type":"silu","builder_utility":True,"builder_python_api":False,"name":"SiLU","icon":"SILU","category":"Deep Learning Core","description":"Sigmoid Linear Unit (Swish) activation.","accent":"orange","api":[]},
+        {"type":"sigmoid","builder_utility":True,"builder_python_api":False,"name":"Sigmoid","icon":"SIGM","category":"Deep Learning Core","description":"Maps values to the 0–1 interval; useful for binary probabilities and gates.","accent":"orange","api":[]},
+        {"type":"tanh","builder_utility":True,"builder_python_api":False,"name":"Tanh","icon":"TANH","category":"Deep Learning Core","description":"Hyperbolic tangent activation with output in the -1 to 1 range.","accent":"orange","api":[]},
+        {"type":"softmax","builder_utility":True,"builder_python_api":False,"name":"Softmax","icon":"SMAX","category":"Deep Learning Core","description":"Normalize scores into a probability distribution along one dimension.","accent":"orange","api":[{"key":"dim","label":"Dimension","type":"number","value":-1}]},
+        {
+            "type":"batchnorm1d","builder_utility":True,"builder_python_api":False,"name":"BatchNorm 1D","icon":"BN1","category":"Deep Learning Core",
+            "description":"Batch normalization for feature vectors, sequences, or 1D channel data.","accent":"orange",
+            "api":[
+                {"key":"num_features","label":"Features / Channels","type":"number","value":128},
+                {"key":"eps","label":"Epsilon","type":"number","value":0.00001},
+                {"key":"momentum","label":"Momentum","type":"number","value":0.1},
+                {"key":"layout","label":"Layout","type":"select","value":"features_last","options":["features_last","channels_first"]},
+            ],
+        },
+        {
+            "type":"batchnorm2d","builder_utility":True,"builder_python_api":False,"name":"BatchNorm 2D","icon":"BN2","category":"Deep Learning Core",
+            "description":"Batch normalization for image tensors in [B,C,H,W] layout.","accent":"orange",
+            "api":[
+                {"key":"num_features","label":"Channels","type":"number","value":32},
+                {"key":"eps","label":"Epsilon","type":"number","value":0.00001},
+                {"key":"momentum","label":"Momentum","type":"number","value":0.1},
+            ],
+        },
+        {
+            "type":"conv1d","builder_utility":True,"builder_python_api":False,"name":"Conv1D","icon":"C1D","category":"Deep Learning Core",
+            "description":"One-dimensional convolution for sequences, audio features, and signals.","accent":"blue",
+            "api":[
+                {"key":"in_channels","label":"Input Channels","type":"number","value":1},
+                {"key":"out_channels","label":"Output Channels","type":"number","value":16},
+                {"key":"kernel_size","label":"Kernel Size","type":"number","value":3},
+                {"key":"stride","label":"Stride","type":"number","value":1},
+                {"key":"padding","label":"Padding","type":"number","value":1},
+                {"key":"dilation","label":"Dilation","type":"number","value":1},
+                {"key":"groups","label":"Groups","type":"number","value":1},
+                {"key":"bias","label":"Use Bias","type":"select","value":"true","options":["true","false"]},
+            ],
+        },
+        {
+            "type":"conv2d","builder_utility":True,"builder_python_api":False,"name":"Conv2D","icon":"C2D","category":"Deep Learning Core",
+            "description":"Two-dimensional convolution for CNNs and image feature extraction.","accent":"blue",
+            "api":[
+                {"key":"in_channels","label":"Input Channels","type":"number","value":3},
+                {"key":"out_channels","label":"Output Channels","type":"number","value":32},
+                {"key":"kernel_size","label":"Kernel Size","type":"number","value":3},
+                {"key":"stride","label":"Stride","type":"number","value":1},
+                {"key":"padding","label":"Padding","type":"number","value":1},
+                {"key":"dilation","label":"Dilation","type":"number","value":1},
+                {"key":"groups","label":"Groups","type":"number","value":1},
+                {"key":"bias","label":"Use Bias","type":"select","value":"true","options":["true","false"]},
+            ],
+        },
+        {
+            "type":"conv3d","builder_utility":True,"builder_python_api":False,"name":"Conv3D","icon":"C3D","category":"Deep Learning Core",
+            "description":"Three-dimensional convolution for volumetric and spatiotemporal data.","accent":"blue",
+            "api":[
+                {"key":"in_channels","label":"Input Channels","type":"number","value":3},
+                {"key":"out_channels","label":"Output Channels","type":"number","value":16},
+                {"key":"kernel_size","label":"Kernel Size","type":"number","value":3},
+                {"key":"stride","label":"Stride","type":"number","value":1},
+                {"key":"padding","label":"Padding","type":"number","value":1},
+                {"key":"bias","label":"Use Bias","type":"select","value":"true","options":["true","false"]},
+            ],
+        },
+        {"type":"maxpool1d","builder_utility":True,"builder_python_api":False,"name":"MaxPool 1D","icon":"MP1","category":"Deep Learning Core","description":"Max pooling over one-dimensional features.","accent":"cyan","api":[{"key":"kernel_size","label":"Kernel Size","type":"number","value":2},{"key":"stride","label":"Stride (0 = Kernel)","type":"number","value":0},{"key":"padding","label":"Padding","type":"number","value":0}]},
+        {"type":"maxpool2d","builder_utility":True,"builder_python_api":False,"name":"MaxPool 2D","icon":"MP2","category":"Deep Learning Core","description":"Max pooling for CNN image feature maps.","accent":"cyan","api":[{"key":"kernel_size","label":"Kernel Size","type":"number","value":2},{"key":"stride","label":"Stride (0 = Kernel)","type":"number","value":0},{"key":"padding","label":"Padding","type":"number","value":0}]},
+        {"type":"avgpool1d","builder_utility":True,"builder_python_api":False,"name":"AvgPool 1D","icon":"AP1","category":"Deep Learning Core","description":"Average pooling over one-dimensional features.","accent":"cyan","api":[{"key":"kernel_size","label":"Kernel Size","type":"number","value":2},{"key":"stride","label":"Stride (0 = Kernel)","type":"number","value":0},{"key":"padding","label":"Padding","type":"number","value":0}]},
+        {"type":"avgpool2d","builder_utility":True,"builder_python_api":False,"name":"AvgPool 2D","icon":"AP2","category":"Deep Learning Core","description":"Average pooling for CNN image feature maps.","accent":"cyan","api":[{"key":"kernel_size","label":"Kernel Size","type":"number","value":2},{"key":"stride","label":"Stride (0 = Kernel)","type":"number","value":0},{"key":"padding","label":"Padding","type":"number","value":0}]},
+        {"type":"adaptive_avgpool1d","builder_utility":True,"builder_python_api":False,"name":"Adaptive AvgPool 1D","icon":"AA1","category":"Deep Learning Core","description":"Adaptive 1D average pooling to a fixed output length.","accent":"cyan","api":[{"key":"output_size","label":"Output Size","type":"number","value":1}]},
+        {"type":"adaptive_avgpool2d","builder_utility":True,"builder_python_api":False,"name":"Adaptive AvgPool 2D","icon":"AA2","category":"Deep Learning Core","description":"Adaptive 2D average pooling to a fixed square output size.","accent":"cyan","api":[{"key":"output_size","label":"Output H/W","type":"number","value":1}]},
+        {
+            "type":"rnn","builder_utility":True,"builder_python_api":False,"name":"RNN","icon":"RNN","category":"Deep Learning Core",
+            "description":"Vanilla recurrent neural network with batch-first sequence input [B,T,D].","accent":"purple",
+            "api":[
+                {"key":"input_size","label":"Input Size","type":"number","value":128},
+                {"key":"hidden_size","label":"Hidden Size","type":"number","value":128},
+                {"key":"num_layers","label":"Layers","type":"number","value":1},
+                {"key":"nonlinearity","label":"Activation","type":"select","value":"tanh","options":["tanh","relu"]},
+                {"key":"dropout","label":"Dropout","type":"number","value":0.0},
+                {"key":"bidirectional","label":"Bidirectional","type":"select","value":"false","options":["false","true"]},
+                {"key":"output","label":"Output","type":"select","value":"sequence","options":["sequence","last"]},
+            ],
+        },
+        {
+            "type":"lstm","builder_utility":True,"builder_python_api":False,"name":"LSTM","icon":"LSTM","category":"Deep Learning Core",
+            "description":"Long Short-Term Memory recurrent layer with batch-first sequence input [B,T,D].","accent":"purple",
+            "api":[
+                {"key":"input_size","label":"Input Size","type":"number","value":128},
+                {"key":"hidden_size","label":"Hidden Size","type":"number","value":128},
+                {"key":"num_layers","label":"Layers","type":"number","value":1},
+                {"key":"dropout","label":"Dropout","type":"number","value":0.0},
+                {"key":"bidirectional","label":"Bidirectional","type":"select","value":"false","options":["false","true"]},
+                {"key":"output","label":"Output","type":"select","value":"sequence","options":["sequence","last"]},
+            ],
+        },
+        {
+            "type":"gru","builder_utility":True,"builder_python_api":False,"name":"GRU","icon":"GRU","category":"Deep Learning Core",
+            "description":"Gated Recurrent Unit layer with batch-first sequence input [B,T,D].","accent":"purple",
+            "api":[
+                {"key":"input_size","label":"Input Size","type":"number","value":128},
+                {"key":"hidden_size","label":"Hidden Size","type":"number","value":128},
+                {"key":"num_layers","label":"Layers","type":"number","value":1},
+                {"key":"dropout","label":"Dropout","type":"number","value":0.0},
+                {"key":"bidirectional","label":"Bidirectional","type":"select","value":"false","options":["false","true"]},
+                {"key":"output","label":"Output","type":"select","value":"sequence","options":["sequence","last"]},
+            ],
+        },
+        {
+            "type":"self_attention","builder_utility":True,"builder_python_api":False,"name":"Self Attention","icon":"ATTN","category":"Deep Learning Core",
+            "description":"Multi-head self-attention for [B,T,D] tensors.","accent":"purple",
+            "api":[
+                {"key":"dim","label":"Embedding Dim","type":"number","value":128},
+                {"key":"heads","label":"Heads","type":"number","value":4},
+                {"key":"dropout","label":"Dropout","type":"number","value":0.0},
+                {"key":"causal","label":"Causal Mask","type":"select","value":"false","options":["false","true"]},
+                {"key":"bias","label":"Use Bias","type":"select","value":"true","options":["true","false"]},
+            ],
+        },
+
+        # Math & Tensor Ops --------------------------------------------------
+        {
+            "type":"learnable_parameter","builder_utility":True,"builder_python_api":False,"name":"Learnable Parameter","icon":"PAR","category":"Math & Tensor Ops",
+            "description":"Create a trainable tensor parameter; combine with MatMul/Add to build layers from scratch.","accent":"pink",
+            "runtime_ports":{"inputs":[],"outputs":[{"id":"main","name":"Parameter","socket":"front"}]},
+            "api":[
+                {"key":"shape","label":"Shape","type":"text","value":"4,1","help":"Comma-separated tensor shape, for example 4,1."},
+                {"key":"init","label":"Initialization","type":"select","value":"normal","options":["zeros","ones","normal","uniform"]},
+                {"key":"scale","label":"Init Scale","type":"number","value":0.02},
+            ],
+        },
+        {
+            "type":"constant","builder_utility":True,"builder_python_api":False,"name":"Constant","icon":"CONST","category":"Math & Tensor Ops",
+            "description":"Create a fixed tensor constant for arithmetic and educational graphs.","accent":"cyan",
+            "runtime_ports":{"inputs":[],"outputs":[{"id":"main","name":"Constant","socket":"front"}]},
+            "api":[
+                {"key":"shape","label":"Shape","type":"text","value":"1"},
+                {"key":"value","label":"Value","type":"number","value":0.0},
+            ],
+        },
+        {
+            "type":"matmul","builder_utility":True,"builder_python_api":False,"name":"MatMul","icon":"MM","category":"Math & Tensor Ops",
+            "description":"Matrix/tensor multiplication. Use A × B to construct linear layers from first principles.","accent":"blue",
+            "runtime_ports":{"inputs":[{"id":"a","name":"A","socket":"back"},{"id":"b","name":"B","socket":"bottom"}],"outputs":[{"id":"main","name":"A × B","socket":"front"}]},
+            "api":[],
+        },
+        {
+            "type":"tensor_add","builder_utility":True,"builder_python_api":False,"name":"Add","icon":"ADD","category":"Math & Tensor Ops",
+            "description":"Elementwise tensor addition with broadcasting.","accent":"cyan",
+            "runtime_ports":{"inputs":[{"id":"a","name":"A","socket":"back"},{"id":"b","name":"B","socket":"bottom"}],"outputs":[{"id":"main","name":"A + B","socket":"front"}]},"api":[],
+        },
+        {
+            "type":"tensor_subtract","builder_utility":True,"builder_python_api":False,"name":"Subtract","icon":"SUB","category":"Math & Tensor Ops",
+            "description":"Elementwise tensor subtraction A - B with broadcasting.","accent":"cyan",
+            "runtime_ports":{"inputs":[{"id":"a","name":"A","socket":"back"},{"id":"b","name":"B","socket":"bottom"}],"outputs":[{"id":"main","name":"A - B","socket":"front"}]},"api":[],
+        },
+        {
+            "type":"tensor_multiply","builder_utility":True,"builder_python_api":False,"name":"Multiply","icon":"MUL","category":"Math & Tensor Ops",
+            "description":"Elementwise tensor multiplication with broadcasting.","accent":"cyan",
+            "runtime_ports":{"inputs":[{"id":"a","name":"A","socket":"back"},{"id":"b","name":"B","socket":"bottom"}],"outputs":[{"id":"main","name":"A × B","socket":"front"}]},"api":[],
+        },
+        {
+            "type":"tensor_divide","builder_utility":True,"builder_python_api":False,"name":"Divide","icon":"DIV","category":"Math & Tensor Ops",
+            "description":"Elementwise tensor division A / B with optional numerical epsilon.","accent":"cyan",
+            "runtime_ports":{"inputs":[{"id":"a","name":"A","socket":"back"},{"id":"b","name":"B","socket":"bottom"}],"outputs":[{"id":"main","name":"A / B","socket":"front"}]},
+            "api":[{"key":"epsilon","label":"Epsilon","type":"number","value":0.0}],
+        },
+        {
+            "type":"concat","builder_utility":True,"builder_python_api":False,"name":"Concatenate","icon":"CAT","category":"Math & Tensor Ops",
+            "description":"Concatenate two tensors along a selected dimension.","accent":"purple",
+            "runtime_ports":{"inputs":[{"id":"a","name":"A","socket":"back"},{"id":"b","name":"B","socket":"bottom"}],"outputs":[{"id":"main","name":"Concatenated","socket":"front"}]},
+            "api":[{"key":"dim","label":"Dimension","type":"number","value":-1}],
+        },
+        {"type":"reduce_mean","builder_utility":True,"builder_python_api":False,"name":"Mean","icon":"MEAN","category":"Math & Tensor Ops","description":"Reduce a tensor by its mean along a dimension.","accent":"green","api":[{"key":"dim","label":"Dimension","type":"number","value":-1},{"key":"keepdim","label":"Keep Dimension","type":"select","value":"false","options":["false","true"]}]},
+        {"type":"reduce_sum","builder_utility":True,"builder_python_api":False,"name":"Sum","icon":"SUM","category":"Math & Tensor Ops","description":"Reduce a tensor by summing along a dimension.","accent":"green","api":[{"key":"dim","label":"Dimension","type":"number","value":-1},{"key":"keepdim","label":"Keep Dimension","type":"select","value":"false","options":["false","true"]}]},
+        {"type":"reduce_max","builder_utility":True,"builder_python_api":False,"name":"Max","icon":"MAX","category":"Math & Tensor Ops","description":"Reduce a tensor by its maximum along a dimension.","accent":"green","api":[{"key":"dim","label":"Dimension","type":"number","value":-1},{"key":"keepdim","label":"Keep Dimension","type":"select","value":"false","options":["false","true"]}]},
+        {"type":"reduce_min","builder_utility":True,"builder_python_api":False,"name":"Min","icon":"MIN","category":"Math & Tensor Ops","description":"Reduce a tensor by its minimum along a dimension.","accent":"green","api":[{"key":"dim","label":"Dimension","type":"number","value":-1},{"key":"keepdim","label":"Keep Dimension","type":"select","value":"false","options":["false","true"]}]},
+        {"type":"tensor_exp","builder_utility":True,"builder_python_api":False,"name":"Exp","icon":"EXP","category":"Math & Tensor Ops","description":"Elementwise exponential e^x.","accent":"green","api":[]},
+        {"type":"tensor_log","builder_utility":True,"builder_python_api":False,"name":"Log","icon":"LOG","category":"Math & Tensor Ops","description":"Elementwise natural logarithm with optional minimum clamp.","accent":"green","api":[{"key":"epsilon","label":"Minimum Clamp","type":"number","value":1e-12}]},
+        {"type":"tensor_sqrt","builder_utility":True,"builder_python_api":False,"name":"Sqrt","icon":"SQRT","category":"Math & Tensor Ops","description":"Elementwise square root with optional minimum clamp.","accent":"green","api":[{"key":"epsilon","label":"Minimum Clamp","type":"number","value":0.0}]},
+        {"type":"transpose","builder_utility":True,"builder_python_api":False,"name":"Transpose","icon":"TR","category":"Math & Tensor Ops","description":"Swap two tensor dimensions.","accent":"purple","api":[{"key":"dim0","label":"Dimension A","type":"number","value":-2},{"key":"dim1","label":"Dimension B","type":"number","value":-1}]},
+        {"type":"reshape","builder_utility":True,"builder_python_api":False,"name":"Reshape","icon":"RSH","category":"Math & Tensor Ops","description":"Reshape a tensor. Use 0 to copy the corresponding input dimension and -1 to infer one dimension.","accent":"purple","api":[{"key":"shape","label":"New Shape","type":"text","value":"0,-1"}]},
+        {"type":"flatten","builder_utility":True,"builder_python_api":False,"name":"Flatten","icon":"FLAT","category":"Math & Tensor Ops","description":"Flatten a range of tensor dimensions.","accent":"purple","api":[{"key":"start_dim","label":"Start Dimension","type":"number","value":1},{"key":"end_dim","label":"End Dimension","type":"number","value":-1}]},
+        {"type":"unsqueeze","builder_utility":True,"builder_python_api":False,"name":"Unsqueeze","icon":"UNSQ","category":"Math & Tensor Ops","description":"Insert a size-one tensor dimension.","accent":"purple","api":[{"key":"dim","label":"Dimension","type":"number","value":1}]},
+        {"type":"squeeze","builder_utility":True,"builder_python_api":False,"name":"Squeeze","icon":"SQZ","category":"Math & Tensor Ops","description":"Remove a size-one tensor dimension, or all size-one dimensions when Dimension is blank.","accent":"purple","api":[{"key":"dim","label":"Dimension (blank = all)","type":"text","value":""}]},
+
+        {
+            "type": "signal_fft",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "FFT Magnitude",
+            "icon": "FFT",
+            "category": "Signal",
+            "description": "Real FFT magnitude features for waveform/sensor tensors. Accepts [B,T] or [B,C,T].",
+            "accent": "cyan",
+            "api": [
+                {"key": "bins", "label": "Output Bins (0 = All)", "type": "number", "value": 16},
+                {"key": "log_scale", "label": "Log Magnitude", "type": "select", "value": "false", "options": ["false", "true"]},
+                {"key": "remove_dc", "label": "Remove DC Bin", "type": "select", "value": "false", "options": ["false", "true"]},
+                {"key": "flatten_channels", "label": "Flatten Channels", "type": "select", "value": "true", "options": ["true", "false"]}
+            ],
+        },
         {
             "type": "embedding",
             "name": "Embedding",
             "icon": "EMB",
-            "category": "Core Components",
+            "category": "Deep Learning Core",
             "description": "Token embedding layer that maps token IDs into dense vector representations.",
             "accent": "blue",
             "api": [
@@ -378,6 +812,188 @@ def primitive_catalog():
             ],
         },
         {
+            "type": "jepa_mask",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "JEPA Mask",
+            "icon": "MSK",
+            "category": "JEPA & Predictive",
+            "description": "Create a masked context view and an unmasked target view for joint-embedding predictive learning.",
+            "accent": "purple",
+            "runtime_ports": {
+                "inputs": [{"id": "main", "name": "Input", "socket": "back"}],
+                "outputs": [
+                    {"id": "context", "name": "Context", "socket": "front"},
+                    {"id": "target", "name": "Target", "socket": "bottom"}
+                ]
+            },
+            "api": [
+                {"key": "mask_ratio", "label": "Mask Ratio", "type": "number", "value": 0.35},
+                {"key": "mask_value", "label": "Mask Value", "type": "number", "value": 0.0},
+                {"key": "mode", "label": "Mask Mode", "type": "select", "value": "auto",
+                 "options": ["auto", "random", "contiguous", "spatiotemporal"]}
+            ],
+        },
+        {
+            "type": "jepa_encoder",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "JEPA Encoder",
+            "icon": "JEN",
+            "category": "JEPA & Predictive",
+            "description": "Modality-aware context or target encoder that maps prepared inputs into a compact latent representation.",
+            "accent": "cyan",
+            "api": [
+                {"key": "modality", "label": "Modality", "type": "select", "value": "image",
+                 "options": ["image", "video", "text", "audio", "signal"]},
+                {"key": "role", "label": "Encoder Role", "type": "select", "value": "context",
+                 "options": ["context", "target"]},
+                {"key": "latent_dim", "label": "Latent Dim", "type": "number", "value": 64},
+                {"key": "hidden_dim", "label": "Hidden Dim", "type": "number", "value": 64},
+                {"key": "vocab_size", "label": "Text Vocab Size", "type": "number", "value": 257},
+                {"key": "in_channels", "label": "Image Channels", "type": "number", "value": 1}
+            ],
+        },
+        {
+            "type": "jepa_predictor",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "JEPA Predictor",
+            "icon": "JEP",
+            "category": "JEPA & Predictive",
+            "description": "Predict the target latent representation from the context latent representation.",
+            "accent": "orange",
+            "api": [
+                {"key": "latent_dim", "label": "Latent Dim", "type": "number", "value": 64},
+                {"key": "hidden_dim", "label": "Predictor Hidden Dim", "type": "number", "value": 128},
+                {"key": "dropout", "label": "Dropout", "type": "number", "value": 0.0}
+            ],
+        },
+        {
+            "type": "jepa_latent_loss",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "JEPA Latent Loss",
+            "icon": "JLS",
+            "category": "Losses",
+            "description": "Compare predicted and stop-gradient target embeddings using MSE, Smooth-L1, or cosine distance.",
+            "accent": "pink",
+            "runtime_ports": {
+                "inputs": [
+                    {"id": "prediction", "name": "Prediction", "socket": "back"},
+                    {"id": "target", "name": "Target", "socket": "bottom"}
+                ],
+                "outputs": [{"id": "main", "name": "Loss", "socket": "front"}]
+            },
+            "api": [
+                {"key": "loss", "label": "Loss", "type": "select", "value": "mse",
+                 "options": ["mse", "smooth_l1", "cosine"]},
+                {"key": "normalize", "label": "Normalize Embeddings", "type": "select", "value": "true",
+                 "options": ["true", "false"]}
+            ],
+        },
+        {
+            "type": "fpn_fusion",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "FPN Fusion",
+            "icon": "FPN",
+            "category": "Vision",
+            "description": "Top-down feature-pyramid fusion: upsample a high-level feature and merge it with a lateral feature.",
+            "accent": "cyan",
+            "runtime_ports": {
+                "inputs": [
+                    {"id": "high", "name": "High-Level Feature", "socket": "back"},
+                    {"id": "lateral", "name": "Lateral Feature", "socket": "bottom"}
+                ],
+                "outputs": [{"id": "main", "name": "Fused Feature", "socket": "front"}]
+            },
+            "api": [
+                {"key": "high_channels", "label": "High Channels", "type": "number", "value": 64},
+                {"key": "lateral_channels", "label": "Lateral Channels", "type": "number", "value": 32},
+                {"key": "out_channels", "label": "Output Channels", "type": "number", "value": 32},
+                {"key": "fusion", "label": "Fusion", "type": "select", "value": "add", "options": ["add", "concat"]}
+            ],
+        },
+        {
+            "type": "pan_fusion",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "PAN Fusion",
+            "icon": "PAN",
+            "category": "Vision",
+            "description": "Bottom-up path-aggregation fusion: downsample a fine feature and merge it with a coarser feature.",
+            "accent": "cyan",
+            "runtime_ports": {
+                "inputs": [
+                    {"id": "fine", "name": "Fine Feature", "socket": "back"},
+                    {"id": "coarse", "name": "Coarse Feature", "socket": "bottom"}
+                ],
+                "outputs": [{"id": "main", "name": "Aggregated Feature", "socket": "front"}]
+            },
+            "api": [
+                {"key": "fine_channels", "label": "Fine Channels", "type": "number", "value": 32},
+                {"key": "coarse_channels", "label": "Coarse Channels", "type": "number", "value": 64},
+                {"key": "out_channels", "label": "Output Channels", "type": "number", "value": 64},
+                {"key": "fusion", "label": "Fusion", "type": "select", "value": "concat", "options": ["add", "concat"]}
+            ],
+        },
+        {
+            "type": "detection_head",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Detection Head",
+            "icon": "DET",
+            "category": "Vision",
+            "description": "Anchor-free detection head producing box, objectness, and class logits with configurable prediction slots per cell.",
+            "accent": "lime",
+            "api": [
+                {"key": "in_channels", "label": "Input Channels", "type": "number", "value": 64},
+                {"key": "classes", "label": "Classes", "type": "number", "value": 3},
+                {"key": "anchors", "label": "Prediction Slots / Cell", "type": "number", "value": 1}
+            ],
+        },
+        {
+            "type": "detection_pyramid_head",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Detection Pyramid Head",
+            "icon": "PYR",
+            "category": "Vision",
+            "description": "Three-scale P3/P4/P5 anchor-free head with multiple prediction slots per cell for dense multi-object detection.",
+            "accent": "lime",
+            "runtime_ports": {
+                "inputs": [
+                    {"id": "p3", "name": "P3 Fine", "socket": "back"},
+                    {"id": "p4", "name": "P4 Medium", "socket": "bottom"},
+                    {"id": "p5", "name": "P5 Coarse", "socket": "top"}
+                ],
+                "outputs": [{"id": "main", "name": "Raw Pyramid Predictions", "socket": "front"}]
+            },
+            "api": [
+                {"key": "p3_channels", "label": "P3 Channels", "type": "number", "value": 32},
+                {"key": "p4_channels", "label": "P4 Channels", "type": "number", "value": 64},
+                {"key": "p5_channels", "label": "P5 Channels", "type": "number", "value": 96},
+                {"key": "classes", "label": "Classes", "type": "number", "value": 3},
+                {"key": "slots", "label": "Prediction Slots / Cell", "type": "number", "value": 3}
+            ],
+        },
+        {
+            "type": "detection_nms",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Detection NMS",
+            "icon": "NMS",
+            "category": "Heads & Decoders",
+            "description": "Class-aware non-maximum suppression for raw single-scale or multi-scale detection predictions.",
+            "accent": "orange",
+            "api": [
+                {"key": "score_threshold", "label": "Score Threshold", "type": "number", "value": 0.25},
+                {"key": "iou_threshold", "label": "NMS IoU Threshold", "type": "number", "value": 0.5},
+                {"key": "max_detections", "label": "Max Detections", "type": "number", "value": 100}
+            ],
+        },
+        {
             "type": "vesa",
             "name": "VESA",
             "icon": "VES",
@@ -385,8 +1001,15 @@ def primitive_catalog():
             "description": "Vision Entangled State Attention for image and vision processing.",
             "accent": "lime",
             "api": [
+                {"key": "image_size", "label": "Image Size", "type": "number", "value": 32},
+                {"key": "patch_size", "label": "Patch Size", "type": "number", "value": 4},
+                {"key": "in_channels", "label": "Input Channels", "type": "number", "value": 3},
+                {"key": "num_classes", "label": "Output / Classes", "type": "number", "value": 10},
                 {"key": "dim", "label": "Hidden Dim", "type": "number", "value": 384},
+                {"key": "depth", "label": "Depth", "type": "number", "value": 6},
                 {"key": "heads", "label": "Heads", "type": "number", "value": 6},
+                {"key": "engine", "label": "Vision Engine", "type": "select", "value": "Serpentine",
+                 "options": ["Serpentine", "ViT", "VisionTransformer", "CNN"]},
                 {"key": "kernel", "label": "Kernel", "type": "select", "value": "auto",
                  "options": ["auto", "native", "pytorch"]},
             ],
@@ -395,7 +1018,7 @@ def primitive_catalog():
             "type": "rmsnorm",
             "name": "RMSNorm",
             "icon": "RMS",
-            "category": "Core Components",
+            "category": "Deep Learning Core",
             "description": "Root Mean Square Normalization layer for stabilizing activations.",
             "accent": "orange",
             "api": [
@@ -407,7 +1030,7 @@ def primitive_catalog():
             "type": "ffn",
             "name": "FFN",
             "icon": "FFN",
-            "category": "Core Components",
+            "category": "Deep Learning Core",
             "description": "Feed-Forward Network for transforming features within each layer.",
             "accent": "pink",
             "api": [
@@ -535,7 +1158,7 @@ def primitive_catalog():
             "type": "residual",
             "name": "Residual Add",
             "icon": "ADD",
-            "category": "Core Components",
+            "category": "Deep Learning Core",
             "description": "Residual connection block that adds the skip path to the main path.",
             "accent": "cyan",
             "inputs": ["main", "skip"],
@@ -552,7 +1175,7 @@ def primitive_catalog():
             "builder_utility": True,
             "name": "Dropout",
             "icon": "DRP",
-            "category": "Core Components",
+            "category": "Deep Learning Core",
             "description": "Regularization layer that randomly drops activations during training.",
             "accent": "purple",
             "api": [
@@ -599,8 +1222,8 @@ def primitive_catalog():
                 {"key": "width", "label": "Output Width (0 = Auto)", "type": "number", "value": 0},
             ],
         },
-        {"type":"linear","name":"Linear","icon":"LIN","category":"Core Blocks","description":"Linear projection layer for mapping features between dimensions.","accent":"blue","api":[]},
-        {"type":"layernorm","name":"LayerNorm","icon":"LN","category":"Core Blocks","description":"Layer Normalization for stabilizing activations across features.","accent":"orange","api":[]},
+        {"type":"linear","name":"Linear / Dense","icon":"LIN","category":"Deep Learning Core","description":"Linear projection layer for mapping features between dimensions.","accent":"blue","api":[]},
+        {"type":"layernorm","name":"LayerNorm","icon":"LN","category":"Deep Learning Core","description":"Layer Normalization for stabilizing activations across features.","accent":"orange","api":[]},
         {"type":"rescontroller","name":"ResController","icon":"RSC","category":"Core Blocks","description":"Residual Controller for regulating residual update strength.","accent":"cyan","api":[]},
         {"type":"micro_ffn","name":"MicroVirtualFFN","icon":"MVF","category":"Core Blocks","description":"Micro Feed-Forward Network for lightweight virtual refinement.","accent":"pink","api":[]},
         {
@@ -658,6 +1281,78 @@ def primitive_catalog():
                 {"key": "classes", "label": "Classes", "type": "number", "value": 10},
             ],
         },
+        # Audio generation / representation primitives -----------------------
+        {
+            "type": "speaker_embedding",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Speaker Embedding",
+            "icon": "SPK",
+            "category": "Audio",
+            "description": "Learn a speaker-conditioning vector from integer speaker IDs.",
+            "accent": "purple",
+            "api": [
+                {"key": "num_speakers", "label": "Speakers", "type": "number", "value": 4},
+                {"key": "embedding_dim", "label": "Embedding Dim", "type": "number", "value": 16}
+            ],
+        },
+        {
+            "type": "audio_codec_encoder",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Audio Codec Encoder",
+            "icon": "ACE",
+            "category": "Audio",
+            "description": "Educational neural audio encoder that compresses a fixed waveform window into a latent vector.",
+            "accent": "cyan",
+            "api": [
+                {"key": "latent_dim", "label": "Latent Dim", "type": "number", "value": 32},
+                {"key": "hidden_channels", "label": "Hidden Channels", "type": "number", "value": 16}
+            ],
+        },
+        {
+            "type": "audio_token_predictor",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Audio Token Predictor",
+            "icon": "ATP",
+            "category": "Audio",
+            "description": "Predict an audio latent/token state from text, style, speaker, or multimodal conditioning.",
+            "accent": "blue",
+            "api": [
+                {"key": "in_features", "label": "Input Features", "type": "number", "value": 32},
+                {"key": "latent_dim", "label": "Audio Latent Dim", "type": "number", "value": 64},
+                {"key": "hidden_dim", "label": "Hidden Dim", "type": "number", "value": 64}
+            ],
+        },
+        {
+            "type": "audio_codec_decoder",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Audio Codec Decoder",
+            "icon": "ACD",
+            "category": "Audio",
+            "description": "Educational neural decoder that converts an audio latent state into a fixed waveform window.",
+            "accent": "orange",
+            "api": [
+                {"key": "latent_dim", "label": "Latent Dim", "type": "number", "value": 64},
+                {"key": "output_samples", "label": "Output Samples", "type": "number", "value": 256},
+                {"key": "hidden_dim", "label": "Hidden Dim", "type": "number", "value": 128}
+            ],
+        },
+        {
+            "type": "audio_output",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Audio Output",
+            "icon": "WAV",
+            "category": "Outputs",
+            "description": "Waveform output for TTS, voice, music, and sound-generation graphs.",
+            "accent": "green",
+            "api": [
+                {"key": "sample_rate", "label": "Sample Rate", "type": "number", "value": 16000}
+            ],
+        },
         {
             "type": "text_output",
             "builder_utility": True,
@@ -671,6 +1366,17 @@ def primitive_catalog():
                 {"key": "temperature", "label": "Temperature", "type": "number", "value": 0.8},
                 {"key": "top_p", "label": "Top P", "type": "number", "value": 0.95},
             ],
+        },
+        {
+            "type": "tensor_output",
+            "builder_utility": True,
+            "builder_python_api": False,
+            "name": "Tensor Output",
+            "icon": "TEN",
+            "category": "Outputs",
+            "description": "Generic numeric tensor output for ML, DL, math, vision, and signal graphs.",
+            "accent": "green",
+            "api": [],
         },
         {
             "type": "logits_output",

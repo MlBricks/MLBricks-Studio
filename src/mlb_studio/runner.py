@@ -9,6 +9,7 @@ from . import data as data_api
 
 
 SOURCE_TYPES = {
+    "demo_dataset",
     "manual_dataset",
     "hf_dataset",
     "kaggle_dataset",
@@ -21,7 +22,10 @@ EXECUTABLE_TYPES = SOURCE_TYPES | {
     "train_test_split",
     "tokenize_text",
     "image_process",
+    "detection_process",
     "audio_process",
+    "signal_process",
+    "jepa_prepare",
     "batch_data",
     "prepared_dataset",
 }
@@ -293,7 +297,17 @@ def execute_data_pipeline(
         try:
             typ = node["type"]
 
-            if typ == "manual_dataset":
+            if typ == "demo_dataset":
+                result = data_api.generate_demo_dataset(
+                    p.get("demo_type", "tabular_regression"),
+                    samples=int(p.get("samples", 512)),
+                    seed=int(p.get("seed", 42)),
+                    sequence_length=int(p.get("sequence_length", 32)),
+                    feature_count=int(p.get("feature_count", 8)),
+                    classes=int(p.get("classes", 3)),
+                )
+
+            elif typ == "manual_dataset":
                 result = data_api.load_manual_text_dataset(
                     p.get("text", "Once upon a time"),
                     text_column=p.get("text_column", "text"),
@@ -397,6 +411,21 @@ def execute_data_pipeline(
                     height=int(p.get("height", 224)),
                     mode=p.get("mode", "RGB"),
                     center_crop=_bool(p.get("center_crop", False)),
+                    tensor_ready=_bool(p.get("tensor_ready", False)),
+                    normalize=_bool(p.get("normalize", True)),
+                )
+
+            elif typ == "detection_process":
+                result = data_api.process_detection_dataset(
+                    result,
+                    image_column=p.get("image_column", "image"),
+                    boxes_column=p.get("boxes_column", "boxes"),
+                    classes_column=p.get("classes_column", "class_ids"),
+                    width=int(p.get("width", 16)),
+                    height=int(p.get("height", 16)),
+                    mode=p.get("mode", "L"),
+                    box_format=p.get("box_format", "xywh"),
+                    normalize_images=_bool(p.get("normalize_images", True)),
                 )
 
             elif typ == "audio_process":
@@ -407,6 +436,28 @@ def execute_data_pipeline(
                     normalize=_bool(p.get("normalize", True)),
                     trim_silence=_bool(p.get("trim_silence", False)),
                     silence_threshold=float(p.get("silence_threshold", 0.01)),
+                )
+
+            elif typ == "signal_process":
+                result = data_api.process_signal_dataset(
+                    result,
+                    signal_columns=p.get("signal_columns", "signal"),
+                    output_column=p.get("output_column", "signal"),
+                    target_column=(p.get("target_column") or None),
+                    target_output_column=p.get("target_output_column", "target"),
+                    normalize=_bool(p.get("normalize", False)),
+                    pad_length=int(p.get("pad_length", 0) or 0),
+                )
+
+            elif typ == "jepa_prepare":
+                result = data_api.prepare_jepa_dataset(
+                    result,
+                    modality=p.get("modality", "image"),
+                    input_column=p.get("input_column") or None,
+                    output_column=p.get("output_column", "jepa_input"),
+                    sequence_length=int(p.get("sequence_length", 64)),
+                    image_size=int(p.get("image_size", 16)),
+                    normalize=_bool(p.get("normalize", True)),
                 )
 
             elif typ == "batch_data":

@@ -123,6 +123,10 @@ function __MLB_STUDIO_FACTORY__(){
     const catalog=payload.catalog||[];
     const mlapi=payload.mlbricks_api||{};
     let selected=null,pendingPort=null,filter="All",search="",inspectorTab="settings",zoom=1,status="Ready";
+    // Component category selection is independent from the Build Workspace.
+    // Remember one selection per workspace so switching Model/Data never forces
+    // users back through a very long combined component list.
+    const libraryCategoryByWorkspace={model:"All Components",data:"All Components"};
     let searchFocusRestore=null;
     const inspectorScrollPositions={};
     let lastInspectorRenderKey=null;
@@ -159,7 +163,13 @@ function __MLB_STUDIO_FACTORY__(){
     const localPaths=cp(localEnvironment.paths||{});
     let runtimePanel=null;
     let galleryWorkspace={open:false,tab:"models"};
+    let galleryDataCategory="All Data";
+    let galleryModelCategory="All Models";
     let galleryPreviousBottomExpanded=true;
+    // Step 9 — Studio modes, diagnostics and reproducible experiment snapshots.
+    if(!state.studio_mode)state.studio_mode="build";
+    if(!Array.isArray(state.experiments))state.experiments=[];
+    let studioMode=["learn","build","research"].includes(String(state.studio_mode))?String(state.studio_mode):"build";
     let componentInsertPicker={open:false,afterNodeId:null};
     let cloudWorkspace={open:false};
     let cloudPreviousBottomExpanded=true;
@@ -697,70 +707,244 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     const dataNodeTypes=new Set([
-      "manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset",
-      "text_process","train_test_split","tokenize_text","image_process","audio_process",
+      "demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset",
+      "text_process","train_test_split","tokenize_text","image_process","detection_process","audio_process","signal_process","jepa_prepare",
       "batch_data","prepared_dataset"
     ]);
     function itemWorkspace(item){
       return dataNodeTypes.has(item.type) ? "data" : "model";
     }
+    const mlbricksDataCategories=["All Data","Machine Learning","Deep Learning","Language","JEPA","Vision","Audio","Signal","Multimodal"];
     const mlbricksDataPresets=[
-      {
-        id:"tinystories",name:"TinyStories",dataset_id:"roneneldan/TinyStories",config:"",split:"train",text_column:"text",
-        mirror_dataset_id:"MlBricks/tinystories",license:"CDLA-Sharing-1.0",focus:"Stories · Small-model pretraining",edition:"Official upstream quickstart"
-      },
-      {
-        id:"wikipedia_en_1b",name:"Wikipedia EN 1B",dataset_id:"wikimedia/wikipedia",config:"20231101.en",split:"train",text_column:"text",
-        mirror_dataset_id:"MlBricks/wikipedia-en-1b",license:"CC BY-SA 3.0 + GFDL",focus:"General knowledge · Encyclopedic text",edition:"Official Wikimedia upstream quickstart"
-      },
-      {
-        id:"cosmopedia",name:"Cosmopedia Education",dataset_id:"HuggingFaceTB/cosmopedia",config:"openstax",split:"train",text_column:"text",
-        mirror_dataset_id:"MlBricks/cosmopedia",license:"Apache-2.0",focus:"Science & education · Synthetic textbooks",edition:"Official OpenStax subset quickstart"
-      },
-      {
-        id:"fineweb_edu_1b",name:"FineWeb-Edu 1B",dataset_id:"HuggingFaceFW/fineweb-edu",config:"sample-10BT",split:"train",text_column:"text",
-        mirror_dataset_id:"MlBricks/fineweb-edu-1b",license:"ODC-By 1.0",focus:"Educational web · General pretraining",edition:"Official sample-10BT quickstart"
-      },
-      {
-        id:"openwebmath_1b",name:"OpenWebMath 1B",dataset_id:"open-web-math/open-web-math",config:"",split:"train",text_column:"text",
-        mirror_dataset_id:"MlBricks/openwebmath-1b",license:"ODC-By 1.0",focus:"Mathematics · Reasoning pretraining",edition:"Official upstream quickstart"
-      },
-      {
-        id:"ultrachat_200k",name:"UltraChat 200K",dataset_id:"HuggingFaceH4/ultrachat_200k",config:"",split:"train_sft",text_column:"prompt",
-        mirror_dataset_id:"MlBricks/ultrachat-200k",license:"MIT",focus:"Chat · Instruction/SFT",edition:"Official upstream quickstart"
-      }
+      // Machine Learning
+      {id:"ml_regression",name:"Tabular Regression Demo",category:"Machine Learning",modality:"Tabular",task:"Regression",source_kind:"demo",demo_type:"tabular_regression",samples:512,license:"Generated",focus:"Numeric features → continuous target",edition:"Offline Studio demo",compatible_models:["Linear Regression"]},
+      {id:"ml_binary",name:"Binary Classification Demo",category:"Machine Learning",modality:"Tabular",task:"Binary classification",source_kind:"demo",demo_type:"binary_classification",samples:512,license:"Generated",focus:"Numeric features → class 0/1",edition:"Offline Studio demo",compatible_models:["Logistic Regression"]},
+      {id:"ml_multiclass",name:"Multiclass Classification Demo",category:"Machine Learning",modality:"Tabular",task:"Multiclass classification",source_kind:"demo",demo_type:"multiclass_classification",samples:600,license:"Generated",focus:"Numeric features → 3 classes",edition:"Offline Studio demo",compatible_models:["KNN","Decision Tree"]},
+      {id:"ml_cluster",name:"Unlabeled Clustering Demo",category:"Machine Learning",modality:"Tabular",task:"Clustering",source_kind:"demo",demo_type:"clustering",samples:600,license:"Generated",focus:"Unlabeled numeric clusters",edition:"Offline Studio demo",compatible_models:["K-Means"]},
+      {id:"ml_pca",name:"High-Dimensional Feature Demo",category:"Machine Learning",modality:"Tabular",task:"Dimensionality reduction",source_kind:"demo",demo_type:"high_dimensional",samples:512,license:"Generated",focus:"16-dimensional feature vectors",edition:"Offline Studio demo",compatible_models:["PCA"]},
+
+      // Deep Learning
+      {id:"dl_neuron",name:"Neuron Regression Demo",category:"Deep Learning",modality:"Tabular",task:"Regression",source_kind:"demo",demo_type:"neuron_regression",samples:384,license:"Generated",focus:"Single feature → continuous target",edition:"Offline Studio demo",compatible_models:["Single Neuron"]},
+      {id:"dl_ann",name:"Tabular Classification Demo",category:"Deep Learning",modality:"Tabular",task:"Classification",source_kind:"demo",demo_type:"tabular_classification",samples:768,license:"Generated",focus:"8 features → 3 classes",edition:"Offline Studio demo",compatible_models:["ANN"]},
+      {id:"dl_image",name:"Image Classification Demo",category:"Deep Learning",modality:"Image",task:"Classification",source_kind:"demo",demo_type:"image_classification",samples:256,license:"Generated",focus:"16×16 grayscale images → class",edition:"Offline Studio demo",compatible_models:["CNN"]},
+      {id:"dl_sequence",name:"Sequence Classification Demo",category:"Deep Learning",modality:"Sequence",task:"Sequence classification",source_kind:"demo",demo_type:"sequence_classification",samples:512,license:"Generated",focus:"Numeric sequences → binary class",edition:"Offline Studio demo",compatible_models:["RNN","LSTM","GRU"]},
+      {id:"dl_autoencoder",name:"Image Reconstruction Demo",category:"Deep Learning",modality:"Image",task:"Reconstruction",source_kind:"demo",demo_type:"image_reconstruction",samples:256,license:"Generated",focus:"Image → reconstructed image",edition:"Offline Studio demo",compatible_models:["Autoencoder"]},
+
+      // Language
+      {id:"language_demo",name:"Tiny Text Corpus",category:"Language",modality:"Text",task:"Language modeling",source_kind:"demo",demo_type:"text_corpus",samples:512,license:"Generated",focus:"Small offline text corpus",edition:"Offline Studio demo",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP","Text JEPA"]},
+      {id:"tinystories",name:"TinyStories",category:"Language",modality:"Text",task:"Language modeling",source_kind:"hf",dataset_id:"roneneldan/TinyStories",config:"",split:"train",text_column:"text",mirror_dataset_id:"MlBricks/tinystories",license:"CDLA-Sharing-1.0",focus:"Stories · Small-model pretraining",edition:"Official upstream quickstart",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP"]},
+      {id:"wikipedia_en_1b",name:"Wikipedia EN 1B",category:"Language",modality:"Text",task:"Language modeling",source_kind:"hf",dataset_id:"wikimedia/wikipedia",config:"20231101.en",split:"train",text_column:"text",mirror_dataset_id:"MlBricks/wikipedia-en-1b",license:"CC BY-SA 3.0 + GFDL",focus:"General knowledge · Encyclopedic text",edition:"Official Wikimedia upstream quickstart",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP","Text JEPA"]},
+      {id:"cosmopedia",name:"Cosmopedia Education",category:"Language",modality:"Text",task:"Language modeling",source_kind:"hf",dataset_id:"HuggingFaceTB/cosmopedia",config:"openstax",split:"train",text_column:"text",mirror_dataset_id:"MlBricks/cosmopedia",license:"Apache-2.0",focus:"Science & education · Synthetic textbooks",edition:"Official OpenStax subset quickstart",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP"]},
+      {id:"fineweb_edu_1b",name:"FineWeb-Edu 1B",category:"Language",modality:"Text",task:"Language modeling",source_kind:"hf",dataset_id:"HuggingFaceFW/fineweb-edu",config:"sample-10BT",split:"train",text_column:"text",mirror_dataset_id:"MlBricks/fineweb-edu-1b",license:"ODC-By 1.0",focus:"Educational web · General pretraining",edition:"Official sample-10BT quickstart",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP"]},
+      {id:"openwebmath_1b",name:"OpenWebMath 1B",category:"Language",modality:"Text",task:"Mathematics pretraining",source_kind:"hf",dataset_id:"open-web-math/open-web-math",config:"",split:"train",text_column:"text",mirror_dataset_id:"MlBricks/openwebmath-1b",license:"ODC-By 1.0",focus:"Mathematics · Reasoning pretraining",edition:"Official upstream quickstart",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP"]},
+      {id:"ultrachat_200k",name:"UltraChat 200K",category:"Language",modality:"Text",task:"Instruction tuning",source_kind:"hf",dataset_id:"HuggingFaceH4/ultrachat_200k",config:"",split:"train_sft",text_column:"prompt",mirror_dataset_id:"MlBricks/ultrachat-200k",license:"MIT",focus:"Chat · Instruction/SFT",edition:"Official upstream quickstart",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP"]},
+
+      // JEPA
+      {id:"jepa_image",name:"Image JEPA Demo",category:"JEPA",modality:"Image",task:"Masked latent prediction",source_kind:"demo",demo_type:"image_jepa",samples:256,license:"Generated",focus:"Image patches for context/target masking",edition:"Offline Studio demo",compatible_models:["Image JEPA"]},
+      {id:"jepa_video",name:"Video JEPA Demo",category:"JEPA",modality:"Video",task:"Future/masked latent prediction",source_kind:"demo",demo_type:"video_jepa",samples:128,license:"Generated",focus:"Short frame clips for spatiotemporal masking",edition:"Offline Studio demo",compatible_models:["Video JEPA"]},
+      {id:"jepa_text",name:"Text JEPA Demo",category:"JEPA",modality:"Text",task:"Semantic span prediction",source_kind:"demo",demo_type:"text_jepa",samples:512,license:"Generated",focus:"Text spans for context/target prediction",edition:"Offline Studio demo",compatible_models:["Text JEPA"]},
+      {id:"jepa_audio",name:"Audio JEPA Demo",category:"JEPA",modality:"Audio",task:"Masked acoustic prediction",source_kind:"demo",demo_type:"audio_jepa",samples:256,license:"Generated",focus:"Waveform windows for acoustic masking",edition:"Offline Studio demo",compatible_models:["Audio JEPA"]},
+      {id:"jepa_signal",name:"Signal JEPA Demo",category:"JEPA",modality:"Signal",task:"Masked/future signal prediction",source_kind:"demo",demo_type:"signal_jepa",samples:384,license:"Generated",focus:"Signal windows for context/target prediction",edition:"Offline Studio demo",compatible_models:["Signal JEPA"]},
+
+      // Vision
+      {id:"vision_classification",name:"Vision Classification Demo",category:"Vision",modality:"Image",task:"Image classification",source_kind:"demo",demo_type:"image_classification",samples:256,classes:3,width:16,height:16,image_mode:"L",license:"Generated",focus:"16×16 images with labels",edition:"Offline Studio demo",compatible_models:["Image Classifier"]},
+      {id:"vision_detection",name:"Object Detection Demo",category:"Vision",modality:"Image",task:"Object detection",source_kind:"demo",demo_type:"object_detection",samples:192,classes:3,width:16,height:16,image_mode:"L",license:"Generated",focus:"16×16 images · 1–3 xywh objects + class ids",edition:"Offline Studio demo",compatible_models:["YOLO-style Detector","VESA-YOLO experimental"]},
+
+      // Audio
+      {id:"audio_tts",name:"Speech + Transcript Demo",category:"Audio",modality:"Audio + Text",task:"Text to speech",source_kind:"demo",demo_type:"speech_transcript",samples:256,license:"Generated",focus:"Waveform + transcript pairs",edition:"Offline Studio demo",compatible_models:["Neural TTS"]},
+      {id:"audio_multispeaker",name:"Multi-Speaker Speech Demo",category:"Audio",modality:"Audio + Text",task:"Speaker-conditioned TTS",source_kind:"demo",demo_type:"multispeaker_speech",samples:320,license:"Generated",focus:"Waveform + transcript + speaker ID",edition:"Offline Studio demo",compatible_models:["Voice-conditioned TTS","Voice Clone educational template"]},
+      {id:"audio_music",name:"Music + Caption Demo",category:"Audio",modality:"Audio + Text",task:"Music generation",source_kind:"demo",demo_type:"music_caption",samples:192,license:"Generated",focus:"Synthetic audio tokens/waveforms + descriptions",edition:"Offline Studio demo",compatible_models:["Music Generator"]},
+      {id:"audio_sound",name:"Sound + Caption Demo",category:"Audio",modality:"Audio + Text",task:"Sound generation",source_kind:"demo",demo_type:"sound_caption",samples:192,license:"Generated",focus:"Synthetic sound waveforms + descriptions",edition:"Offline Studio demo",compatible_models:["Sound Generator"]},
+      {id:"audio_unlabeled",name:"Unlabeled Audio Demo",category:"Audio",modality:"Audio",task:"Self-supervised audio",source_kind:"demo",demo_type:"audio_jepa",samples:256,license:"Generated",focus:"Unlabeled waveform windows",edition:"Offline Studio demo",compatible_models:["Audio JEPA"]},
+
+      // Signal
+      {id:"signal_forecast",name:"Time-Series Forecast Demo",category:"Signal",modality:"Signal",task:"Forecasting",source_kind:"demo",demo_type:"timeseries_forecast",samples:512,license:"Generated",focus:"Past window → future window",edition:"Offline Studio demo",compatible_models:["Time-Series Predictor"]},
+      {id:"signal_class",name:"Signal Classification Demo",category:"Signal",modality:"Signal",task:"Classification",source_kind:"demo",demo_type:"signal_classification",samples:512,license:"Generated",focus:"Waveform window → class",edition:"Offline Studio demo",compatible_models:["Signal Classifier"]},
+      {id:"signal_anomaly",name:"Anomaly Detection Demo",category:"Signal",modality:"Signal",task:"Anomaly detection",source_kind:"demo",demo_type:"anomaly_detection",samples:512,license:"Generated",focus:"Normal/anomalous signal windows",edition:"Offline Studio demo",compatible_models:["Anomaly Detector"]},
+      {id:"signal_denoise",name:"Clean + Noisy Signal Demo",category:"Signal",modality:"Signal",task:"Denoising",source_kind:"demo",demo_type:"signal_denoise",samples:384,license:"Generated",focus:"Noisy waveform → clean waveform",edition:"Offline Studio demo",compatible_models:["Signal Denoiser"]},
+      {id:"signal_fusion",name:"Multi-Sensor Demo",category:"Signal",modality:"Multi-Signal",task:"Sensor fusion",source_kind:"demo",demo_type:"sensor_fusion",samples:384,license:"Generated",focus:"Three aligned sensor channels + target",edition:"Offline Studio demo",compatible_models:["Sensor Fusion"]},
+      {id:"signal_spectral",name:"Spectral Signal Demo",category:"Signal",modality:"Signal",task:"Spectral modeling",source_kind:"demo",demo_type:"spectral_signal",samples:384,license:"Generated",focus:"Waveform + frequency-domain representation",edition:"Offline Studio demo",compatible_models:["Spectral Model"]},
+      {id:"signal_rf",name:"RF / IQ Demo",category:"Signal",modality:"I/Q Signal",task:"RF classification",source_kind:"demo",demo_type:"rf_iq",samples:384,license:"Generated",focus:"I and Q sample streams + modulation class",edition:"Offline Studio demo",compatible_models:["RF/IQ Model"]},
+      {id:"signal_unlabeled",name:"Unlabeled Signal Demo",category:"Signal",modality:"Signal",task:"Self-supervised signal",source_kind:"demo",demo_type:"signal_jepa",samples:384,license:"Generated",focus:"Unlabeled windows for Signal JEPA",edition:"Offline Studio demo",compatible_models:["Signal JEPA"]},
+      {id:"signal_long",name:"Long Sequential Signal Demo",category:"Signal",modality:"Signal",task:"Long-sequence modeling",source_kind:"demo",demo_type:"long_signal",samples:256,license:"Generated",focus:"Long waveform windows",edition:"Offline Studio demo",compatible_models:["SOUP Signal"]},
+
+      // Multimodal
+      {id:"multi_image_text",name:"Aligned Image + Text Demo",category:"Multimodal",modality:"Image + Text",task:"Cross-modal representation learning",source_kind:"demo",demo_type:"multimodal_image_text",samples:256,license:"Generated",focus:"Aligned image tensors + text captions",edition:"Offline Studio demo",compatible_models:["Multimodal JEPA"]},
+      {id:"multi_sensor_vision",name:"Sensor + Vision Demo",category:"Multimodal",modality:"Image + Signal",task:"Multimodal sensor fusion",source_kind:"demo",demo_type:"sensor_vision",samples:256,license:"Generated",focus:"Aligned visual frames + sensor windows",edition:"Offline Studio demo",compatible_models:["Sensor + Vision Fusion"]}
     ];
 
+
+
+    // Step 2 — categorized educational Model Gallery. Gallery models are
+    // graph templates composed from the same public primitives a user can drag
+    // into a custom model. No special runtime-only architecture is hidden in
+    // these cards.
+    const mlbricksModelCategories=["All Models","Machine Learning","Deep Learning","Language","JEPA","Vision","Audio","Signal","Multimodal"];
+    const mlbricksModelPresets=[
+      // Machine Learning — both gradient-based educational graphs and
+      // classical fit-based models use visible public Studio components.
+      {id:"model_linear_regression",name:"Linear Regression",category:"Machine Learning",task:"Regression",tag:"ML",data_id:"ml_regression",parameters:"5",description:"First-principles y = XW + b built from Feature Input, Learnable Parameter, MatMul and Add.",template:"linear_regression"},
+      {id:"model_logistic_regression",name:"Logistic Regression",category:"Machine Learning",task:"Binary classification",tag:"ML",data_id:"ml_binary",parameters:"5",description:"First-principles linear score + Sigmoid binary classifier built entirely from public math primitives.",template:"logistic_regression"},
+      {id:"model_knn",name:"KNN",category:"Machine Learning",task:"Classification",tag:"ML FIT",data_id:"ml_multiclass",description:"Fit-based K-nearest-neighbours classifier with editable K, voting and distance settings.",template:"knn"},
+      {id:"model_decision_tree",name:"Decision Tree",category:"Machine Learning",task:"Classification",tag:"ML FIT",data_id:"ml_multiclass",description:"Educational CART-style decision tree with editable depth, split size and impurity criterion.",template:"decision_tree"},
+      {id:"model_kmeans",name:"K-Means",category:"Machine Learning",task:"Clustering",tag:"ML FIT",data_id:"ml_cluster",description:"Fit-based K-Means clustering with K-Means++ initialization and persisted centroids.",template:"kmeans"},
+      {id:"model_pca",name:"PCA",category:"Machine Learning",task:"Dimensionality reduction",tag:"ML FIT",data_id:"ml_pca",description:"SVD-based PCA with editable component count, centering and whitening.",template:"pca"},
+
+      // Deep Learning
+      {id:"model_single_neuron",name:"Single Neuron",category:"Deep Learning",task:"Regression",tag:"DL",data_id:"dl_neuron",parameters:"2",description:"One trainable Dense neuron for learning weights, bias and forward propagation.",template:"single_neuron"},
+      {id:"model_ann",name:"ANN",category:"Deep Learning",task:"Tabular classification",tag:"DL",data_id:"dl_ann",parameters:"867",description:"Editable multilayer perceptron: Dense → ReLU → Dense → ReLU → Classifier.",template:"ann"},
+      {id:"model_cnn",name:"CNN",category:"Deep Learning",task:"Image classification",tag:"DL",data_id:"dl_image",parameters:"2,019",description:"Small editable Conv2D network for the 16×16 Studio image demo.",template:"cnn"},
+      {id:"model_rnn",name:"RNN",category:"Deep Learning",task:"Sequence classification",tag:"DL",data_id:"dl_sequence",parameters:"338",description:"Vanilla recurrent sequence classifier with visible sequence shaping and output head.",template:"rnn"},
+      {id:"model_lstm",name:"LSTM",category:"Deep Learning",task:"Sequence classification",tag:"DL",data_id:"dl_sequence",parameters:"1,250",description:"LSTM sequence classifier using the public LSTM component and classifier head.",template:"lstm"},
+      {id:"model_gru",name:"GRU",category:"Deep Learning",task:"Sequence classification",tag:"DL",data_id:"dl_sequence",parameters:"946",description:"GRU sequence classifier using the public GRU component and classifier head.",template:"gru"},
+      {id:"model_autoencoder",name:"Autoencoder",category:"Deep Learning",task:"Image reconstruction",tag:"DL",data_id:"dl_autoencoder",parameters:"35,216",description:"Flatten → encoder → latent bottleneck → decoder → reshape, all editable.",template:"autoencoder"},
+
+      // Existing language models are now organized under their own family.
+      {id:"model_slm_50",name:"50M SLM",category:"Language",task:"Language modeling",tag:"LM",data_id:"tinystories",parameters:"~50M",description:"10-layer ESA language model · Context 512 · Batch 16.",loader:"tiny"},
+      {id:"model_slm_50_soup",name:"50M SLM · SOUP",category:"Language",task:"Language modeling",tag:"LM",data_id:"tinystories",parameters:"~50M",description:"Two-layer SOUP small language model · Context 512 · Batch 16.",loader:"soup50"},
+      {id:"model_slm_200",name:"200M SLM",category:"Language",task:"Language modeling",tag:"LM",data_id:"wikipedia_en_1b",parameters:"~200M",description:"12-layer ESA language model · Context 256 · Batch 16.",loader:"esa200"},
+      {id:"model_slm_200_soup",name:"200M SLM · SOUP",category:"Language",task:"Language modeling",tag:"LM",data_id:"wikipedia_en_1b",parameters:"199,916,160",description:"Three-layer SOUP language model · Context 256 · Batch 16.",loader:"soup200"},
+
+      // JEPA — Step 5. One universal glass-box predictive objective across
+      // image, video, text, audio, and signal modalities.
+      {id:"model_jepa_image",name:"Image JEPA",category:"JEPA",task:"Masked latent prediction",tag:"JEPA",data_id:"jepa_image",parameters:"~40K",description:"Image context/target masking with twin encoders, predictor, EMA target updates, and latent loss.",template:"jepa_image"},
+      {id:"model_jepa_video",name:"Video JEPA",category:"JEPA",task:"Future/masked latent prediction",tag:"JEPA",data_id:"jepa_video",parameters:"~40K",description:"Spatiotemporal masking with frame encoder pooling, predictor, EMA target encoder, and latent loss.",template:"jepa_video"},
+      {id:"model_jepa_text",name:"Text JEPA",category:"JEPA",task:"Semantic span prediction",tag:"JEPA",data_id:"jepa_text",parameters:"~50K",description:"Byte-token text JEPA that predicts an unmasked semantic target representation from masked context.",template:"jepa_text"},
+      {id:"model_jepa_audio",name:"Audio JEPA",category:"JEPA",task:"Masked acoustic prediction",tag:"JEPA",data_id:"jepa_audio",parameters:"~35K",description:"Self-supervised acoustic JEPA over waveform windows with an EMA target branch.",template:"jepa_audio"},
+      {id:"model_jepa_signal",name:"Signal JEPA",category:"JEPA",also_categories:["Signal"],task:"Masked/future signal prediction",tag:"JEPA",data_id:"jepa_signal",parameters:"~35K",description:"Self-supervised JEPA for sensor/time-series windows using visible context masking and latent prediction.",template:"jepa_signal"},
+
+      // Vision — Step 4. These are editable graphs built from public Studio
+      // vision/deep-learning components and train on Data Gallery presets.
+      {id:"model_image_classifier",name:"Image Classifier",category:"Vision",task:"Image classification",tag:"VISION",data_id:"vision_classification",parameters:"~5K",description:"Educational CNN classifier with Conv2D, BatchNorm, SiLU, pooling and a visible classifier head.",template:"image_classifier"},
+      {id:"model_yolo_detector",name:"YOLO-style Detector",category:"Vision",task:"Object detection",tag:"VISION",data_id:"vision_detection",parameters:"~405K",description:"Three-scale anchor-free detector with FPN/PAN, multi-object assignment, CIoU training, class-aware NMS and mAP@.50 evaluation.",template:"yolo_detector"},
+      {id:"model_vesa_yolo",name:"VESA-YOLO experimental",category:"Vision",task:"Object detection",tag:"EXPERIMENT",data_id:"vision_detection",parameters:"Experimental",description:"Experimental VESA + CNN detector with three-scale pyramid prediction, CIoU loss, NMS and mAP@.50 evaluation.",template:"vesa_yolo"},
+
+      // Audio — Step 7 educational glass-box generators. These compact
+      // fixed-window models are for learning/research and are not production
+      // reproductions of ElevenLabs or Suno. Every graph is user-rebuildable.
+      {id:"model_neural_tts",name:"Neural TTS",category:"Audio",task:"Text to speech",tag:"TTS",data_id:"audio_tts",parameters:"~55K",description:"Byte-token text encoder → pooled text state → audio latent predictor → neural audio decoder.",template:"audio_tts"},
+      {id:"model_voice_tts",name:"Voice-conditioned TTS",category:"Audio",task:"Speaker-conditioned TTS",tag:"VOICE",data_id:"audio_multispeaker",parameters:"~58K",description:"Text conditioning plus a learned speaker embedding produces a speaker-conditioned waveform.",template:"audio_voice_tts"},
+      {id:"model_voice_clone",name:"Voice Clone educational template",category:"Audio",task:"Reference-voice conditioned speech synthesis",tag:"VOICE REF",data_id:"audio_multispeaker",parameters:"~62K",description:"Text conditioning is fused with an encoded reference waveform before audio decoding. Educational consent-first template.",template:"audio_voice_clone"},
+      {id:"model_sound_generator",name:"Sound Generator",category:"Audio",task:"Sound generation",tag:"AUDIO",data_id:"audio_sound",parameters:"~55K",description:"Caption-conditioned latent audio generator for short synthetic sound-effect windows.",template:"audio_sound"},
+      {id:"model_music_generator",name:"Music Generator",category:"Audio",task:"Music generation",tag:"MUSIC",data_id:"audio_music",parameters:"~55K",description:"Caption-conditioned latent audio generator for short educational music-pattern windows.",template:"audio_music"},
+
+      // Signal — Step 6. All models consume the canonical signal field created
+      // by the visible Signal Schema Mapper in the Data Gallery.
+      {id:"model_signal_forecast",name:"Time-Series Predictor",category:"Signal",task:"Forecasting",tag:"SIGNAL",data_id:"signal_forecast",parameters:"~3K",description:"Conv1D encoder that predicts a future horizon from a past signal window.",template:"signal_forecast"},
+      {id:"model_signal_classifier",name:"Signal Classifier",category:"Signal",task:"Signal classification",tag:"SIGNAL",data_id:"signal_class",parameters:"~4K",description:"Conv1D waveform classifier for labeled sensor or time-series windows.",template:"signal_classifier"},
+      {id:"model_signal_anomaly",name:"Anomaly Detector",category:"Signal",task:"Anomaly classification",tag:"SIGNAL",data_id:"signal_anomaly",parameters:"~4K",description:"Binary Conv1D anomaly classifier for normal versus abnormal signal windows.",template:"signal_anomaly"},
+      {id:"model_signal_denoiser",name:"Signal Denoiser",category:"Signal",task:"Denoising",tag:"SIGNAL",data_id:"signal_denoise",parameters:"~2K",description:"Fully convolutional denoiser trained from noisy waveform to clean waveform.",template:"signal_denoiser"},
+      {id:"model_sensor_fusion",name:"Sensor Fusion",category:"Signal",task:"Sensor fusion classification",tag:"SIGNAL",data_id:"signal_fusion",parameters:"~6K",description:"Multi-channel Conv1D model that fuses aligned sensor streams before classification.",template:"signal_fusion_model"},
+      {id:"model_spectral",name:"Spectral Model",category:"Signal",task:"Spectral modeling",tag:"SIGNAL",data_id:"signal_spectral",parameters:"~1K",description:"Visible FFT Magnitude front-end followed by a small learnable spectral projection network.",template:"signal_spectral_model"},
+      {id:"model_rf_iq",name:"RF/IQ Model",category:"Signal",task:"RF classification",tag:"RF",data_id:"signal_rf",parameters:"~6K",description:"Two-channel I/Q Conv1D classifier for modulation-style RF experiments.",template:"signal_rf_model"},
+      {id:"model_soup_signal",name:"SOUP Signal",category:"Signal",task:"Long-sequence forecasting",tag:"SOUP",data_id:"signal_long",parameters:"Research",description:"Long signal sequence projected into SOUP state processing and decoded into a future signal horizon.",template:"signal_soup"},
+
+      // Multimodal — Step 8. Both models are ordinary editable graphs built
+      // from public Studio inputs/encoders/math/JEPA components.
+      {id:"model_multimodal_jepa",name:"Multimodal JEPA",category:"Multimodal",task:"Cross-modal latent prediction",tag:"MULTI JEPA",data_id:"multi_image_text",parameters:"~120K",description:"Symmetric image↔text joint-embedding prediction in a shared 64-D latent space using visible JEPA encoders, predictors and latent losses.",template:"multimodal_jepa"},
+      {id:"model_sensor_vision_fusion",name:"Sensor + Vision Fusion",category:"Multimodal",task:"Multimodal classification",tag:"FUSION",data_id:"multi_sensor_vision",parameters:"~20K",description:"Parallel CNN and temporal-sensor encoders fused with an explicit Concatenate node before a shared classifier.",template:"sensor_vision_fusion"}
+    ];
+
+    function modelPresetData(preset){
+      return mlbricksDataPresets.find(item=>item.id===preset?.data_id)||null;
+    }
+
     function defaultDataNodes(preset=mlbricksDataPresets[0]){
-      const nodes=[
-        makeNode(cat(catalog,"hf_dataset")),
-        makeNode(cat(catalog,"text_process")),
-        makeNode(cat(catalog,"train_test_split")),
-        makeNode(cat(catalog,"tokenize_text")),
-        makeNode(cat(catalog,"prepared_dataset"))
-      ];
-      const source=nodes[0];
-      source.name=preset.name+" Source";
-      source.params.dataset_id=preset.dataset_id;
-      source.params.config=preset.config||"";
-      source.params.split=preset.split||"train";
-      source.params.text_column=preset.text_column||"text";
-      // Workshop presets stream only the requested quickstart prefix, then
-      // materialize it into a normal Dataset for splitting/tokenization. This
-      // avoids downloading entire multi-GB Hub repositories for 10k rows.
-      source.params.streaming="true";
-      // Workshop quickstarts fetch the verified public upstream directly.
-      // Keep the MLBricks mirror as metadata until that mirror contains data.
-      // For the 10k quickstart, prefer the Dataset Viewer Parquet API so the
-      // kernel can stream rows without resolving the full repository first.
-      source.params.prefer_parquet_api="true";
-      source.params.mirror_dataset_id=preset.mirror_dataset_id||"";
-      // Workshop presets are intentionally safe quickstarts. Users can set 0
-      // explicitly when they want to process the entire maintained edition.
-      source.params.max_rows=10000;
-      nodes[2].params.train_size=90;
-      nodes[2].params.validation_size=5;
-      nodes[2].params.test_size=5;
+      const nodes=[];
+      const sourceKind=String(preset.source_kind||"hf").toLowerCase();
+      let source;
+      if(sourceKind==="demo"){
+        source=makeNode(cat(catalog,"demo_dataset"));
+        source.name=preset.name+" Source";
+        source.params.demo_type=preset.demo_type||"tabular_regression";
+        source.params.samples=preset.samples||512;
+        source.params.seed=preset.seed||42;
+        source.params.sequence_length=preset.sequence_length||32;
+        source.params.feature_count=preset.feature_count||8;
+        source.params.classes=preset.classes||3;
+      }else{
+        source=makeNode(cat(catalog,"hf_dataset"));
+        source.name=preset.name+" Source";
+        source.params.dataset_id=preset.dataset_id;
+        source.params.config=preset.config||"";
+        source.params.split=preset.split||"train";
+        source.params.text_column=preset.text_column||"text";
+        source.params.streaming="true";
+        source.params.prefer_parquet_api="true";
+        source.params.mirror_dataset_id=preset.mirror_dataset_id||"";
+        source.params.max_rows=10000;
+      }
+      nodes.push(source);
+
+      // Vision Gallery data is deliberately expressed as an editable graph.
+      // Classification uses the generic Image Processing component; detection
+      // uses the box-aware Detection Processing component so image resize and
+      // annotations always stay aligned.
+      if(preset.category==="Vision" && preset.demo_type==="object_detection"){
+        const det=makeNode(cat(catalog,"detection_process"));
+        det.params.image_column="image";det.params.boxes_column="boxes";det.params.classes_column="class_ids";
+        det.params.width=preset.width||16;det.params.height=preset.height||16;det.params.mode=preset.image_mode||"L";
+        det.params.box_format="xywh";det.params.normalize_images="true";nodes.push(det);
+      }else if(preset.category==="Vision" && String(preset.modality||"").toLowerCase().includes("image")){
+        const img=makeNode(cat(catalog,"image_process"));
+        img.params.image_column="image";img.params.width=preset.width||16;img.params.height=preset.height||16;
+        img.params.mode=preset.image_mode||"L";img.params.center_crop="false";img.params.tensor_ready="true";img.params.normalize="true";nodes.push(img);
+      }
+
+      const isText=String(preset.modality||"").toLowerCase().includes("text") && ["Language"].includes(preset.category);
+      if(isText){
+        const clean=makeNode(cat(catalog,"text_process"));clean.params.text_column=preset.text_column||"text";nodes.push(clean);
+      }
+
+      if(preset.category==="Signal"){
+        const sig=makeNode(cat(catalog,"signal_process"));
+        sig.name="Signal Schema Mapper · "+preset.name;
+        const signalMap={
+          timeseries_forecast:{columns:"context",target:"target"},
+          signal_classification:{columns:"signal",target:""},
+          anomaly_detection:{columns:"signal",target:""},
+          signal_denoise:{columns:"noisy_signal",target:"clean_signal"},
+          sensor_fusion:{columns:"sensor_a,sensor_b,sensor_c",target:""},
+          spectral_signal:{columns:"signal",target:"spectrum"},
+          rf_iq:{columns:"i,q",target:""},
+          signal_jepa:{columns:"signal",target:""},
+          long_signal:{columns:"signal",target:"target"}
+        };
+        const mapping=signalMap[preset.demo_type]||{columns:"signal",target:""};
+        sig.params.signal_columns=mapping.columns;
+        sig.params.output_column="signal";
+        sig.params.target_column=mapping.target;
+        sig.params.target_output_column="target";
+        sig.params.normalize="false";
+        sig.params.pad_length=0;
+        nodes.push(sig);
+      }
+
+      if(preset.category==="JEPA"){
+        const modality=String(preset.modality||"image").toLowerCase();
+        const prep=makeNode(cat(catalog,"jepa_prepare"));
+        prep.name="JEPA Preparation · "+preset.modality;
+        prep.params.modality=modality;
+        prep.params.input_column=({image:"image",video:"video",text:"text",audio:"audio",signal:"signal"})[modality]||"signal";
+        prep.params.output_column="jepa_input";
+        prep.params.sequence_length=modality==="video"?8:64;
+        prep.params.image_size=16;
+        prep.params.normalize="true";
+        nodes.push(prep);
+      }
+
+      const split=makeNode(cat(catalog,"train_test_split"));
+      split.params.train_size=90;split.params.validation_size=5;split.params.test_size=5;nodes.push(split);
+
+      if(preset.tokenize){
+        const tok=makeNode(cat(catalog,"tokenize_text"));tok.params.text_column=preset.text_column||"text";nodes.push(tok);
+      }
+
+      const out=makeNode(cat(catalog,"prepared_dataset"));
+      out.name="Prepared "+preset.name;
+      out.params.dataset_name=preset.name;
+      nodes.push(out);
+
       const edges=[];
       for(let i=0;i<nodes.length-1;i++){
         const e=edge(nodes[i].id,nodes[i+1].id,"main");
@@ -1266,14 +1450,15 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function trainingActionButton(entry,valid){
+      const isFit=entry?.requirements?.training_mode==="classical_fit";
       if(trainingIsRunning()){
-        const stop=btn("Stop Training","mlb-runtime-stop");
+        const stop=btn(isFit?"Stop Fit":"Stop Training","mlb-runtime-stop");
         stop.addEventListener("click",requestStop);
         return stop;
       }
-      const start=btn("Start Training","mlb-runtime-start");
+      const start=btn(isFit?"Start Fit":"Start Training","mlb-runtime-start");
       start.disabled=valid ? !valid.ok : false;
-      start.title=(valid && !valid.ok)?"Fix training compatibility/settings before starting":"Start training";
+      start.title=(valid && !valid.ok)?"Fix data compatibility/settings before starting":(isFit?"Fit the classical model":"Start training");
       start.addEventListener("click",()=>startTrainingFromRuntime(entry));
       return start;
     }
@@ -1775,7 +1960,7 @@ function __MLB_STUDIO_FACTORY__(){
       const comp=current(state);
       const nodes=comp.nodes||[];
       const edges=(comp.edges||[]).filter(e=>(e.kind||"main")==="main");
-      const sources=new Set(["manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
+      const sources=new Set(["demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
       const sourceNodes=nodes.filter(n=>sources.has(n.type));
       const outputs=nodes.filter(n=>n.type==="prepared_dataset");
       const outgoing={};nodes.forEach(n=>outgoing[n.id]=[]);
@@ -3829,20 +4014,62 @@ function studioChoice(title,message,actions,options={}){
       const nodes=model?.nodes||[];
       const types=new Set(nodes.map(n=>n.type));
       let modality="unknown";
-      if(types.has("text_input"))modality="text";
+      const rootInputTypes=["text_input","image_input","audio_input","video_input","signal_input","feature_input"].filter(type=>types.has(type));
+      if(rootInputTypes.length>1)modality="multimodal";
+      else if(types.has("text_input"))modality="text";
       else if(types.has("image_input"))modality="image";
       else if(types.has("audio_input"))modality="audio";
       else if(types.has("video_input"))modality="video";
-      else if(types.has("signal_input"))modality="signal";
+      else if(types.has("signal_input")||types.has("feature_input"))modality="signal";
 
       const terminal=[...nodes].reverse().find(n=>
-        ["text_output","logits_output","classifier","lm_head"].includes(n.type)
+        ["text_output","audio_output","tensor_output","logits_output","classifier","detection_head","detection_pyramid_head","detection_nms","lm_head"].includes(n.type)
       );
 
+      const classicalTypes=["knn_classifier","decision_tree_classifier","kmeans","pca"];
+      const fitAlgorithm=classicalTypes.find(type=>types.has(type))||null;
+      const hasJEPA=types.has("jepa_latent_loss")&&types.has("jepa_predictor")&&types.has("jepa_encoder");
+      const isJEPA=hasJEPA&&modality!=="multimodal";
+      if(isJEPA){
+        const ctx=nodes.find(n=>n.type==="jepa_encoder"&&String(n.params?.role||"context")==="context");
+        const m=String(ctx?.params?.modality||modality||"unknown").toLowerCase();
+        if(["image","video","text","audio","signal"].includes(m))modality=m;
+      }
+      const projectTask=String(state.project?.task||"").toLowerCase();
+      // Preserve the generic Step 3 routing as the baseline, then let JEPA
+      // explicitly opt into its own latent-prediction training lifecycle.
+      const isAudioGeneration=terminal?.type==="audio_output";
+      const baselineRequirements={
+        training_mode:fitAlgorithm?"classical_fit":(isAudioGeneration?"audio_generation":(modality==="text"?"gradient":"supervised"))
+      };
+      const isMultimodal=modality==="multimodal";
+      const isMultimodalJEPA=isMultimodal&&hasJEPA;
+      let trainingTask=null;
+      if(isMultimodalJEPA)trainingTask="multimodal_jepa";
+      else if(isMultimodal)trainingTask="sensor_vision_fusion";
+      else if(isJEPA)trainingTask="jepa";
+      else if(isAudioGeneration){
+        if(projectTask.includes("clone"))trainingTask="voice_clone";
+        else if(projectTask.includes("speaker")||projectTask.includes("voice-conditioned"))trainingTask="voice_tts";
+        else if(projectTask.includes("music"))trainingTask="music_generation";
+        else if(projectTask.includes("sound"))trainingTask="sound_generation";
+        else trainingTask="tts";
+      }
+      else if(fitAlgorithm)trainingTask="classical_fit";
+      else if(modality==="text")trainingTask="causal_language_modeling";
+      else if(["detection_head","detection_pyramid_head","detection_nms"].includes(terminal?.type)||projectTask.includes("object detection")||projectTask.includes("object_detection"))trainingTask="object_detection";
+      else if(projectTask.includes("reconstruction")||String(state.project?.name||"").toLowerCase().includes("autoencoder"))trainingTask="reconstruction";
+      else if(terminal?.type!=="classifier"&&(projectTask.includes("binary")||types.has("sigmoid")))trainingTask="binary_classification";
+      else if(terminal?.type==="classifier"||projectTask.includes("classification"))trainingTask="classification";
+      else trainingTask="regression";
       return {
         modality,
         output_type:terminal?.type||"unknown",
-        requires_tokenizer:modality==="text" && (types.has("embedding")||types.has("lm_head")),
+        requires_tokenizer:!isJEPA&&modality==="text" && (types.has("embedding")||types.has("lm_head")),
+        training_mode:isJEPA?"jepa":(isMultimodal?"multimodal":baselineRequirements.training_mode),
+        training_task:trainingTask,
+        loss:["jepa","multimodal_jepa"].includes(trainingTask)?"latent_prediction":trainingTask==="sensor_vision_fusion"?"cross_entropy":trainingTask==="classification"?"cross_entropy":trainingTask==="binary_classification"?"binary_cross_entropy":trainingTask==="object_detection"?"yolo_educational":trainingTask==="causal_language_modeling"?"causal_cross_entropy":isAudioGeneration?"waveform_mse_plus_spectral":"mse",
+        fit_algorithm:fitAlgorithm,
         context_length:Number(state.project?.context_length||0)||null,
         batch_size:Number(state.project?.batch_size||0)||null,
       };
@@ -3868,8 +4095,8 @@ function studioChoice(title,message,actions,options={}){
       // ports and Skip/Extra lanes must count as connectivity just like Main.
       // Restrict only to edges whose endpoints still exist in this model.
       const executionEdges=(model.edges||[]).filter(e=>byId.has(e.source)&&byId.has(e.target));
-      const inputTypes=new Set(["text_input","image_input","audio_input","video_input","signal_input"]);
-      const outputTypes=new Set(["text_output","logits_output","classifier","lm_head"]);
+      const inputTypes=new Set(["text_input","image_input","audio_input","video_input","signal_input","feature_input"]);
+      const outputTypes=new Set(["text_output","audio_output","tensor_output","logits_output","classifier","detection_head","detection_pyramid_head","detection_nms","lm_head"]);
 
       const inputs=nodes.filter(n=>inputTypes.has(n.type));
       const outputs=nodes.filter(n=>outputTypes.has(n.type));
@@ -4033,6 +4260,18 @@ function studioChoice(title,message,actions,options={}){
       const p=meta?.pipeline||{};
       if(p.image_processing)return "image";
       if(p.audio_processing)return "audio";
+      if(p.signal_processing)return "signal";
+      const demo=String(p?.source?.demo_type||"").toLowerCase();
+      if(["image_classification","image_reconstruction","image_jepa","object_detection"].includes(demo))return "image";
+      if(["audio_jepa","speech_transcript","multispeaker_speech","music_caption","sound_caption"].includes(demo))return "audio";
+      if(["video_jepa"].includes(demo))return "video";
+      if([
+        "tabular_regression","neuron_regression","binary_classification","multiclass_classification",
+        "tabular_classification","high_dimensional","clustering","sequence_classification",
+        "signal_jepa","signal_classification","anomaly_detection","long_signal","spectral_signal",
+        "timeseries_forecast","signal_denoise","sensor_fusion","rf_iq"
+      ].includes(demo))return "signal";
+      if(["multimodal_image_text","sensor_vision"].includes(demo))return "multimodal";
       return "text";
     }
 
@@ -4076,6 +4315,10 @@ function studioChoice(title,message,actions,options={}){
       add("Train split",Number(trainRows)>0,"Train rows: "+(trainRows??0));
 
       const caps=datasetTrainingCapabilities(datasetMeta);
+      if(req.training_task==="object_detection"){
+        add("Bounding boxes",caps.columns.includes("boxes"),caps.columns.includes("boxes")?"boxes available":"boxes field missing");
+        add("Class ids",caps.columns.includes("class_ids"),caps.columns.includes("class_ids")?"class_ids available":"class_ids field missing");
+      }
       if(req.modality==="text" && req.requires_tokenizer){
         add("Tokenizer",!!caps.tokenizer,caps.tokenizer?.tokenizer_name||"Tokenizer missing");
 
@@ -4123,27 +4366,33 @@ function studioChoice(title,message,actions,options={}){
 
     function defaultTrainingConfig(entry,dataset){
       const validationSplit=dataset?.splits?.validation ? "validation" : (dataset?.splits?.test ? "test" : "train");
+      const classical=String(entry?.requirements?.training_mode||"")==="classical_fit";
+      const supervised=["supervised","audio_generation","multimodal"].includes(String(entry?.requirements?.training_mode||""));
+      const jepa=String(entry?.requirements?.training_mode||"")==="jepa";
+      const tensorTraining=supervised||jepa;
       return {
         budget_type:"steps",
-        max_steps:1000,
+        max_steps:classical?1:(tensorTraining?200:1000),
         max_tokens:1000000,
+        max_samples:100000,
         epochs:1,
         batch_size:Number(entry?.batch_size||state.project?.batch_size||16),
         gradient_accumulation:1,
         optimizer:"adamw",
-        learning_rate:0.0005,
-        weight_decay:0.1,
+        learning_rate:tensorTraining?0.001:0.0005,
+        weight_decay:jepa?0.01:(supervised?0.0:0.1),
         beta1:0.9,
         beta2:0.95,
         warmup_steps:0,
         validation_split:validationSplit,
-        validate_every:100,
-        validation_steps:20,
-        generate_on_validation:true,
+        validate_every:classical?0:(tensorTraining?20:100),
+        validation_steps:classical?1:(tensorTraining?5:20),
+        generate_on_validation:!classical&&!tensorTraining,
         validation_prompt:"Once upon a time",
         validation_generate_tokens:64,
-        checkpoint_every:500,
+        checkpoint_every:classical?0:(tensorTraining?100:500),
         seed:42,
+        jepa_target_momentum:0.996,
         device:"auto",
         backend:"auto",
         execution_mode:"eager",
@@ -4429,15 +4678,19 @@ function studioChoice(title,message,actions,options={}){
       const errors=[];
       if(!compat.ok)errors.push("Training data is not compatible.");
       const positive=(value)=>value!==null&&value!==undefined&&value!==""&&Number.isFinite(Number(value))&&Number(value)>0;
-      if(config.budget_type==="steps"&&!positive(config.max_steps))errors.push("Training steps must be a number greater than 0.");
-      if(config.budget_type==="tokens"&&!positive(config.max_tokens))errors.push("Token budget must be a number greater than 0.");
-      if(config.budget_type==="epochs"&&!positive(config.epochs))errors.push("Epochs must be a number greater than 0.");
-      if(!positive(config.batch_size))errors.push("Batch size must be a number greater than 0.");
-      if(!positive(config.learning_rate))errors.push("Learning rate must be a number greater than 0.");
-      const betaValid=(value)=>value!==null&&value!==undefined&&Number.isFinite(Number(value))&&Number(value)>=0&&Number(value)<1;
-      if(["adamw","adam"].includes(String(config.optimizer||"").toLowerCase())){
-        if(!betaValid(config.beta1))errors.push("Adam Beta 1 must be between 0 and 1.");
-        if(!betaValid(config.beta2))errors.push("Adam Beta 2 must be between 0 and 1.");
+      const classical=String(entry?.requirements?.training_mode||"")==="classical_fit";
+      if(!classical){
+        if(config.budget_type==="steps"&&!positive(config.max_steps))errors.push("Training steps must be a number greater than 0.");
+        if(config.budget_type==="tokens"&&!positive(config.max_tokens))errors.push("Token budget must be a number greater than 0.");
+        if(config.budget_type==="samples"&&!positive(config.max_samples||config.max_tokens))errors.push("Sample budget must be a number greater than 0.");
+        if(config.budget_type==="epochs"&&!positive(config.epochs))errors.push("Epochs must be a number greater than 0.");
+        if(!positive(config.batch_size))errors.push("Batch size must be a number greater than 0.");
+        if(!positive(config.learning_rate))errors.push("Learning rate must be a number greater than 0.");
+        const betaValid=(value)=>value!==null&&value!==undefined&&Number.isFinite(Number(value))&&Number(value)>=0&&Number(value)<1;
+        if(["adamw","adam"].includes(String(config.optimizer||"").toLowerCase())){
+          if(!betaValid(config.beta1))errors.push("Adam Beta 1 must be between 0 and 1.");
+          if(!betaValid(config.beta2))errors.push("Adam Beta 2 must be between 0 and 1.");
+        }
       }
       return {ok:errors.length===0,errors,compat};
     }
@@ -4457,15 +4710,19 @@ function studioChoice(title,message,actions,options={}){
       const key=[next.ts||"",next.phase||"",next.step??"",next.generated_tokens??"",next.message||"",next.checkpoint_path||""].join("|");
       const event={
         key,ts:next.ts||Date.now()/1000,status:next.status||"running",phase:next.phase||"runtime",
-        step:next.step??null,max_steps:next.max_steps??null,tokens_seen:next.tokens_seen??null,
+        step:next.step??null,max_steps:next.max_steps??null,tokens_seen:next.tokens_seen??null,samples_seen:next.samples_seen??null,
         generated_tokens:next.generated_tokens??null,loss:next.loss??null,ppl:next.ppl??null,val_loss:next.val_loss??null,val_ppl:next.val_ppl??null,
+        accuracy:next.accuracy??null,val_accuracy:next.val_accuracy??null,mae:next.mae??null,val_mae:next.val_mae??null,
+        samples_per_sec:next.samples_per_sec??null,avg_samples_per_sec:next.avg_samples_per_sec??null,
+        training_mode:next.training_mode||null,training_task:next.training_task||null,
         best_val_loss:next.best_val_loss??null,tokens_per_sec:next.tokens_per_sec??null,avg_tokens_per_sec:next.avg_tokens_per_sec??null,
         end_to_end_tokens_per_sec:next.end_to_end_tokens_per_sec??null,avg_end_to_end_tokens_per_sec:next.avg_end_to_end_tokens_per_sec??null,
         memory_allocated_gb:next.memory_allocated_gb??null,memory_reserved_gb:next.memory_reserved_gb??null,memory_peak_gb:next.memory_peak_gb??null,memory_total_gb:next.memory_total_gb??null,
         lr:next.lr??null,elapsed_seconds:next.elapsed_seconds??null,compile_seconds:next.compile_seconds??null,
         message:next.message||"",checkpoint_path:next.checkpoint_path||null,
         generation_mode:next.generation_mode||null,generation_algorithms:next.generation_algorithms||null,
-        fallback_reason:next.fallback_reason||null,runtime_source:next.runtime_source||null
+        fallback_reason:next.fallback_reason||null,runtime_source:next.runtime_source||null,
+        fit_metrics:next.fit_metrics?cp(next.fit_metrics):null,fit_algorithm:next.fit_algorithm||null
       };
       if(!history.length||history[history.length-1].key!==key)history.push(event);
       if(history.length>250)history.splice(0,history.length-250);
@@ -4473,9 +4730,14 @@ function studioChoice(title,message,actions,options={}){
       if(next.runtime_kind==="train"){
         entry.training_live={
           status:event.status,phase:event.phase,overall:Number(next.overall||0),step:event.step,max_steps:event.max_steps,
-          tokens_seen:event.tokens_seen??entry.training_live?.tokens_seen,
+          tokens_seen:event.tokens_seen??entry.training_live?.tokens_seen,samples_seen:event.samples_seen??entry.training_live?.samples_seen,
           loss:event.loss??entry.training_live?.loss,ppl:event.ppl??entry.training_live?.ppl,
           val_loss:event.val_loss??entry.training_live?.val_loss,val_ppl:event.val_ppl??entry.training_live?.val_ppl,
+          accuracy:event.accuracy??entry.training_live?.accuracy,val_accuracy:event.val_accuracy??entry.training_live?.val_accuracy,
+          mae:event.mae??entry.training_live?.mae,val_mae:event.val_mae??entry.training_live?.val_mae,
+          samples_per_sec:event.samples_per_sec??entry.training_live?.samples_per_sec,avg_samples_per_sec:event.avg_samples_per_sec??entry.training_live?.avg_samples_per_sec,
+          training_mode:event.training_mode||entry.training_live?.training_mode||entry.training_mode||null,
+          training_task:event.training_task||entry.training_live?.training_task||entry.training_task||entry.requirements?.training_task||null,
           best_val_loss:event.best_val_loss??entry.training_live?.best_val_loss,
           tokens_per_sec:event.tokens_per_sec??entry.training_live?.tokens_per_sec,avg_tokens_per_sec:event.avg_tokens_per_sec??entry.training_live?.avg_tokens_per_sec,
           end_to_end_tokens_per_sec:event.end_to_end_tokens_per_sec??entry.training_live?.end_to_end_tokens_per_sec,avg_end_to_end_tokens_per_sec:event.avg_end_to_end_tokens_per_sec??entry.training_live?.avg_end_to_end_tokens_per_sec,
@@ -4483,6 +4745,8 @@ function studioChoice(title,message,actions,options={}){
           memory_peak_gb:event.memory_peak_gb??entry.training_live?.memory_peak_gb,memory_total_gb:event.memory_total_gb??entry.training_live?.memory_total_gb,
           lr:event.lr??entry.training_live?.lr,elapsed_seconds:event.elapsed_seconds??entry.training_live?.elapsed_seconds,
           compile_seconds:event.compile_seconds??entry.training_live?.compile_seconds,message:event.message,
+          fit_metrics:event.fit_metrics||entry.training_live?.fit_metrics||entry.fit_metrics||null,
+          fit_algorithm:event.fit_algorithm||entry.training_live?.fit_algorithm||entry.fit_algorithm||null,
           checkpoint_path:event.checkpoint_path||entry.training_live?.checkpoint_path||entry.checkpoint_path||null
         };
         if(next.sample_text){entry.latest_validation_sample=next.sample_text;entry.latest_validation_sample_step=event.step;}
@@ -4740,8 +5004,12 @@ function studioChoice(title,message,actions,options={}){
       const live=entry.training_live||{};
       if(execution.runtime_kind==="train"&&runtimePanel?.modelId===entry.id){
         return {...live,status:execution.status||live.status,phase:execution.phase||live.phase,overall:Number(execution.overall??live.overall??0),
-          step:execution.step??live.step,max_steps:execution.max_steps??live.max_steps,tokens_seen:execution.tokens_seen??live.tokens_seen,
+          step:execution.step??live.step,max_steps:execution.max_steps??live.max_steps,tokens_seen:execution.tokens_seen??live.tokens_seen,samples_seen:execution.samples_seen??live.samples_seen,
           loss:execution.loss??live.loss,ppl:execution.ppl??live.ppl,val_loss:execution.val_loss??live.val_loss,val_ppl:execution.val_ppl??live.val_ppl,
+          accuracy:execution.accuracy??live.accuracy,val_accuracy:execution.val_accuracy??live.val_accuracy,mae:execution.mae??live.mae,val_mae:execution.val_mae??live.val_mae,
+          samples_per_sec:execution.samples_per_sec??live.samples_per_sec,avg_samples_per_sec:execution.avg_samples_per_sec??live.avg_samples_per_sec,
+          training_mode:execution.training_mode||live.training_mode||entry.training_mode||entry.requirements?.training_mode,
+          training_task:execution.training_task||live.training_task||entry.training_task||entry.requirements?.training_task,
           best_val_loss:execution.best_val_loss??live.best_val_loss,tokens_per_sec:execution.tokens_per_sec??live.tokens_per_sec,avg_tokens_per_sec:execution.avg_tokens_per_sec??live.avg_tokens_per_sec,
           end_to_end_tokens_per_sec:execution.end_to_end_tokens_per_sec??live.end_to_end_tokens_per_sec,avg_end_to_end_tokens_per_sec:execution.avg_end_to_end_tokens_per_sec??live.avg_end_to_end_tokens_per_sec,
           memory_allocated_gb:execution.memory_allocated_gb??live.memory_allocated_gb,memory_reserved_gb:execution.memory_reserved_gb??live.memory_reserved_gb,
@@ -4777,11 +5045,16 @@ function studioChoice(title,message,actions,options={}){
         const extra=[];
         if(ev.tokens_per_sec!==null)extra.push(Math.round(Number(ev.tokens_per_sec)).toLocaleString()+" tok/s");
         if(ev.end_to_end_tokens_per_sec!==null)extra.push("E2E "+Math.round(Number(ev.end_to_end_tokens_per_sec)).toLocaleString()+" tok/s");
+        if(ev.samples_per_sec!==null&&ev.samples_per_sec!==undefined)extra.push(Math.round(Number(ev.samples_per_sec)).toLocaleString()+" samples/s");
         if(ev.memory_allocated_gb!==null)extra.push("mem "+Number(ev.memory_allocated_gb).toFixed(2)+" GB");
         if(ev.loss!==null)extra.push("loss "+Number(ev.loss).toFixed(4));
         if(ev.ppl!==null)extra.push("ppl "+Number(ev.ppl).toFixed(2));
+        if(ev.accuracy!==null&&ev.accuracy!==undefined)extra.push("accuracy "+(Number(ev.accuracy)*100).toFixed(1)+"%");
+        if(ev.mae!==null&&ev.mae!==undefined)extra.push("MAE "+Number(ev.mae).toFixed(4));
         if(ev.val_loss!==null)extra.push("val "+Number(ev.val_loss).toFixed(4));
         if(ev.val_ppl!==null)extra.push("val ppl "+Number(ev.val_ppl).toFixed(2));
+        if(ev.val_accuracy!==null&&ev.val_accuracy!==undefined)extra.push("val accuracy "+(Number(ev.val_accuracy)*100).toFixed(1)+"%");
+        if(ev.val_mae!==null&&ev.val_mae!==undefined)extra.push("val MAE "+Number(ev.val_mae).toFixed(4));
         row.innerHTML="<span>"+escapeRuntimeText(meta.join(" · "))+"</span><strong>"+escapeRuntimeText(ev.message||"Runtime event")+(extra.length?" · "+extra.join(" · "):"")+"</strong>";
         log.appendChild(row);
       });
@@ -4817,14 +5090,17 @@ function studioChoice(title,message,actions,options={}){
 
     function renderTrainingStatus(main,side,entry){
       const config=entry.training_config||{},live=trainingLive(entry),history=runtimeHistory(entry,"train");
+      const isFit=entry?.requirements?.training_mode==="classical_fit";
+      const isSupervised=["supervised","jepa","audio_generation","multimodal"].includes(entry?.requirements?.training_mode);
+      const fitMetrics=live.fit_metrics||entry.fit_metrics||{};
       const dataset=preparedDatasetById(entry.selected_dataset_id)||null;
       const executionUsed=String(live.fallback_execution_mode||live.execution_mode_used||entry.execution_mode_used||config.execution_mode||"eager");
       const compileModeUsed=String(live.retry_compile_mode||entry.compile_mode_used||config.compile_mode||"default");
       const hero=runtimeSection("Training Status");hero.classList.add("mlb-training-status-hero");
       const top=document.createElement("div");top.className="mlb-training-status-top";
       const stateBox=document.createElement("div");stateBox.className="mlb-training-state "+(live.status||entry.training_status||"idle");
-      const stateLabel=live.status==="running"?"TRAINING":live.status==="done"?"COMPLETE":live.status==="error"?"ERROR":live.status==="stopped"?"STOPPED":entry.weights_ready?"TRAINED":"NOT STARTED";
-      stateBox.innerHTML="<strong>"+stateLabel+"</strong><span>"+escapeRuntimeText(live.message||"Configure training, then press Start Training.")+"</span>";
+      const stateLabel=live.status==="running"?(isFit?"FITTING":"TRAINING"):live.status==="done"?"COMPLETE":live.status==="error"?"ERROR":live.status==="stopped"?"STOPPED":entry.weights_ready?(isFit?"FITTED":"TRAINED"):"NOT STARTED";
+      stateBox.innerHTML="<strong>"+stateLabel+"</strong><span>"+escapeRuntimeText(live.message||(isFit?"Choose compatible data, then press Start Fit.":"Configure training, then press Start Training."))+"</span>";
       const pct=document.createElement("div");pct.className="mlb-training-percent";pct.innerHTML="<strong>"+Math.round(Number(live.overall||0))+"%</strong><span>"+(live.phase||"idle")+"</span>";
       top.append(stateBox,pct);hero.appendChild(top);
       const bar=document.createElement("div");bar.className="mlb-status-progress";bar.innerHTML="<i style='width:"+Math.max(0,Math.min(100,Number(live.overall||0)))+"%'></i>";hero.appendChild(bar);
@@ -4845,17 +5121,55 @@ function studioChoice(title,message,actions,options={}){
       const valLossNow=pick(live.val_loss,valLossStored);
       const valPplNow=pick(live.val_ppl,entry.last_val_ppl);
       const tokensNow=pick(live.tokens_seen,entry.tokens_seen);
-      metrics.append(statusMetric("Step",(stepNow??0)+(live.max_steps?" / "+live.max_steps:"")),
-        statusMetric("Tok/s",tokNow==null?"—":Math.round(Number(tokNow)).toLocaleString()),
-        statusMetric("E2E Tok/s",e2eTokNow==null?"—":Math.round(Number(e2eTokNow)).toLocaleString()),
-        statusMetric("Loss",lossNow==null?"—":Number(lossNow).toFixed(4)),
-        statusMetric("PPL",pplNow==null?"—":Number(pplNow).toFixed(2)),
-        statusMetric("Val Loss",valLossNow==null?"—":Number(valLossNow).toFixed(4)),
-        statusMetric("Val PPL",valPplNow==null?"—":Number(valPplNow).toFixed(2)),
-        statusMetric("GPU Memory",memoryNow==null?"—":Number(memoryNow).toFixed(2)+" GB",live.memory_total_gb==null?null:"of "+Number(live.memory_total_gb).toFixed(1)+" GB"),
-        statusMetric("Peak Memory",peakMemory==null?"—":Number(peakMemory).toFixed(2)+" GB"),
-        statusMetric("Compile",executionUsed==="compiled"?(live.compile_seconds==null?(currentAttempt?"Pending":(entry.compile_seconds==null?"Pending":Number(entry.compile_seconds).toFixed(1)+"s")):Number(live.compile_seconds).toFixed(1)+"s"):"Not used"),
-        statusMetric("Tokens",Number(tokensNow??0).toLocaleString()),statusMetric("Elapsed",formatDuration(live.elapsed_seconds)));
+      if(isFit){
+        const pctText=v=>v==null?"—":(Number(v)*100).toFixed(1)+"%";
+        const ev=fitMetrics.explained_variance_total;
+        metrics.append(
+          statusMetric("Algorithm",entry.fit_algorithm||entry.requirements?.fit_algorithm||"Classical Fit"),
+          statusMetric("Samples",fitMetrics.samples==null?"—":Number(fitMetrics.samples).toLocaleString()),
+          statusMetric("Features",fitMetrics.features==null?"—":Number(fitMetrics.features).toLocaleString()),
+          statusMetric("Train Accuracy",pctText(fitMetrics.train_accuracy)),
+          statusMetric("Validation Accuracy",pctText(fitMetrics.validation_accuracy)),
+          statusMetric("Inertia",fitMetrics.inertia==null?"—":Number(fitMetrics.inertia).toFixed(4)),
+          statusMetric("Explained Variance",ev==null?"—":(Number(ev)*100).toFixed(1)+"%"),
+          statusMetric("Iterations",fitMetrics.iterations==null?"—":String(fitMetrics.iterations)),
+          statusMetric("Fit Time",fitMetrics.fit_seconds==null?formatDuration(live.elapsed_seconds):formatDuration(fitMetrics.fit_seconds))
+        );
+      }else if(isSupervised){
+        const task=live.training_task||entry.training_task||entry.requirements?.training_task||"supervised";
+        const classification=String(task).includes("classification");
+        const stored=entry.supervised_metrics||{};
+        const sps=pick(live.samples_per_sec,entry.avg_samples_per_sec);
+        const samples=pick(live.samples_seen,entry.samples_seen);
+        const accuracy=pick(live.accuracy,stored.accuracy);
+        const valAccuracy=pick(live.val_accuracy,stored.validation_accuracy);
+        const mae=pick(live.mae,stored.mae);
+        const valMae=pick(live.val_mae,stored.validation_mae);
+        metrics.append(statusMetric("Task",String(task).replace(/_/g," ")),
+          statusMetric("Step",(stepNow??0)+(live.max_steps?" / "+live.max_steps:"")),
+          statusMetric("Samples/s",sps==null?"—":Math.round(Number(sps)).toLocaleString()),
+          statusMetric("Samples",samples==null?"—":Number(samples).toLocaleString()),
+          statusMetric("Loss",lossNow==null?"—":Number(lossNow).toFixed(4)),
+          statusMetric(classification?"Accuracy":"MAE",classification?(accuracy==null?"—":(Number(accuracy)*100).toFixed(1)+"%"):(mae==null?"—":Number(mae).toFixed(4))),
+          statusMetric("Val Loss",valLossNow==null?"—":Number(valLossNow).toFixed(4)),
+          statusMetric(classification?"Val Accuracy":"Val MAE",classification?(valAccuracy==null?"—":(Number(valAccuracy)*100).toFixed(1)+"%"):(valMae==null?"—":Number(valMae).toFixed(4))),
+          statusMetric("GPU Memory",memoryNow==null?"—":Number(memoryNow).toFixed(2)+" GB",live.memory_total_gb==null?null:"of "+Number(live.memory_total_gb).toFixed(1)+" GB"),
+          statusMetric("Peak Memory",peakMemory==null?"—":Number(peakMemory).toFixed(2)+" GB"),
+          statusMetric("Elapsed",formatDuration(live.elapsed_seconds))
+        );
+      }else{
+        metrics.append(statusMetric("Step",(stepNow??0)+(live.max_steps?" / "+live.max_steps:"")),
+          statusMetric("Tok/s",tokNow==null?"—":Math.round(Number(tokNow)).toLocaleString()),
+          statusMetric("E2E Tok/s",e2eTokNow==null?"—":Math.round(Number(e2eTokNow)).toLocaleString()),
+          statusMetric("Loss",lossNow==null?"—":Number(lossNow).toFixed(4)),
+          statusMetric("PPL",pplNow==null?"—":Number(pplNow).toFixed(2)),
+          statusMetric("Val Loss",valLossNow==null?"—":Number(valLossNow).toFixed(4)),
+          statusMetric("Val PPL",valPplNow==null?"—":Number(valPplNow).toFixed(2)),
+          statusMetric("GPU Memory",memoryNow==null?"—":Number(memoryNow).toFixed(2)+" GB",live.memory_total_gb==null?null:"of "+Number(live.memory_total_gb).toFixed(1)+" GB"),
+          statusMetric("Peak Memory",peakMemory==null?"—":Number(peakMemory).toFixed(2)+" GB"),
+          statusMetric("Compile",executionUsed==="compiled"?(live.compile_seconds==null?(currentAttempt?"Pending":(entry.compile_seconds==null?"Pending":Number(entry.compile_seconds).toFixed(1)+"s")):Number(live.compile_seconds).toFixed(1)+"s"):"Not used"),
+          statusMetric("Tokens",Number(tokensNow??0).toLocaleString()),statusMetric("Elapsed",formatDuration(live.elapsed_seconds)));
+      }
       hero.appendChild(metrics);main.appendChild(hero);
 
       const validation=runtimeSection("Validation + Generated Sample");
@@ -4867,16 +5181,18 @@ function studioChoice(title,message,actions,options={}){
       validation.appendChild(vg);
       const sample=document.createElement("div");sample.className="mlb-status-sample";
       sample.innerHTML="<div><strong>VALIDATION GENERATION</strong><span>"+(config.generate_on_validation?("Prompt: "+escapeRuntimeText(config.validation_prompt||"")):"Disabled in Training Setup")+"</span></div><pre>"+escapeRuntimeText(entry.latest_validation_sample||"No validation sample generated yet.")+"</pre>";
-      validation.appendChild(sample);main.appendChild(validation);
+      validation.appendChild(sample);if(!isFit)main.appendChild(validation);
 
-      const logs=runtimeSection("Training Log");renderTrainingEventLog(logs,history,"Training has not started yet.");main.appendChild(logs);
+      const logs=runtimeSection(isFit?"Fit Log":"Training Log");
+      if(isFit)renderEventLog(logs,history,"Fit has not started yet.");else renderTrainingEventLog(logs,history,"Training has not started yet.");
+      main.appendChild(logs);
       const cp=runtimeSection("Checkpoints + Output");const cg=document.createElement("div");cg.className="mlb-validation-status-grid";
       cg.append(statusMetric("Checkpoint Every",(config.checkpoint_every||0)+" steps"),
         statusMetric("Latest Checkpoint",entry.latest_checkpoint_path||entry.checkpoint_path||live.checkpoint_path||"—"),statusMetric("Weights",entry.weights_ready?"Available":"Not yet"),
         statusMetric("Training Status",entry.training_status||"untrained"),statusMetric("Trained At",entry.trained_at||"—"));cp.appendChild(cg);main.appendChild(cp);
 
       const summary=document.createElement("div");summary.className="mlb-runtime-summary";const dev=selectedRuntimeDevice(config);
-      summary.innerHTML="<h3>Training Control</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Backend</span><strong>"+config.backend+"</strong></div><div><span>Execution</span><strong>"+executionUsed+(executionUsed!==String(config.execution_mode||"eager")?" (fallback)":"")+"</strong></div><div><span>Compile Mode</span><strong>"+(executionUsed==="compiled"?compileModeUsed:"Not used")+"</strong></div><div><span>Precision</span><strong>"+config.precision+"</strong></div>";side.appendChild(summary);
+      summary.innerHTML="<h3>"+(isFit?"Fit Control":"Training Control")+"</h3><div><span>Status</span><strong>"+stateLabel+"</strong></div><div><span>Device</span><strong>"+dev.label+"</strong></div><div><span>Backend</span><strong>"+config.backend+"</strong></div><div><span>Execution</span><strong>"+executionUsed+(executionUsed!==String(config.execution_mode||"eager")?" (fallback)":"")+"</strong></div><div><span>Compile Mode</span><strong>"+(executionUsed==="compiled"?compileModeUsed:"Not used")+"</strong></div><div><span>Precision</span><strong>"+config.precision+"</strong></div>";side.appendChild(summary);
       const statusValid=trainingConfigValid(entry,config);
       side.appendChild(trainingActionButton(entry,statusValid));
       const cleanVram=btn("Clean GPU VRAM","mlb-vram-clean-btn");
@@ -5179,12 +5495,18 @@ function studioChoice(title,message,actions,options={}){
 
       if(mode==="train"){
         const dataset=preparedDatasetById(entry.selected_dataset_id)||null;
-        const budget=runtimeSection("Training Budget");
+        const trainingMode=String(entry?.requirements?.training_mode||"");
+        const supervised=trainingMode==="supervised";
+        const jepa=trainingMode==="jepa";
+        const tensorTraining=supervised||jepa;
+        const budget=runtimeSection(jepa?"JEPA Training Budget":(supervised?"Supervised Training Budget":"Training Budget"));
         const budgetGrid=document.createElement("div");budgetGrid.className="mlb-runtime-grid";
+        const budgetOptions=supervised?["steps","samples","epochs"]:["steps","tokens","epochs"];
+        const effectiveBudgetOptions=jepa?["steps","samples","epochs"]:budgetOptions;
         budgetGrid.append(
-          runtimeField("Budget By","select",config.budget_type,v=>update("budget_type",v),["steps","tokens","epochs"]),
+          runtimeField("Budget By","select",config.budget_type,v=>update("budget_type",v),effectiveBudgetOptions),
           runtimeField("Training Steps","number",config.max_steps,v=>update("max_steps",v)),
-          runtimeField("Token Budget","number",config.max_tokens,v=>update("max_tokens",v)),
+          tensorTraining?runtimeField("Sample Budget","number",config.max_samples||config.max_tokens,v=>update("max_samples",v)):runtimeField("Token Budget","number",config.max_tokens,v=>update("max_tokens",v)),
           runtimeField("Epochs","number",config.epochs,v=>update("epochs",v)),
           runtimeField("Batch Size","number",config.batch_size,v=>update("batch_size",v)),
           runtimeField("Gradient Accumulation","number",config.gradient_accumulation,v=>update("gradient_accumulation",v))
@@ -5198,20 +5520,23 @@ function studioChoice(title,message,actions,options={}){
           runtimeField("Adam Beta 1","number",config.beta1,v=>update("beta1",v)),
           runtimeField("Adam Beta 2","number",config.beta2,v=>update("beta2",v)),
           runtimeField("Warmup Steps","number",config.warmup_steps,v=>update("warmup_steps",v)),
-          runtimeField("Seed","number",config.seed,v=>update("seed",v))
+          runtimeField("Seed","number",config.seed,v=>update("seed",v)),
+          ...(jepa?[runtimeField("Target EMA Momentum","number",config.jepa_target_momentum??0.996,v=>update("jepa_target_momentum",v))]:[])
         );opt.appendChild(optGrid);main.appendChild(opt);
 
-        const val=runtimeSection("Validation + Sample Generation");const valGrid=document.createElement("div");valGrid.className="mlb-runtime-grid";
+        const val=runtimeSection(tensorTraining?"Validation":"Validation + Sample Generation");const valGrid=document.createElement("div");valGrid.className="mlb-runtime-grid";
         const splitOpts=dataset?Object.keys(dataset.splits||{}).map(x=>({value:x,label:datasetSplitLabel(x,dataset)})):[{value:"validation",label:"Validation"}];
         valGrid.append(
           runtimeField("Validation Split","select",config.validation_split,v=>update("validation_split",v),splitOpts),
           runtimeField("Validate Every N Steps","number",config.validate_every,v=>update("validate_every",v)),
           runtimeField("Validation Steps","number",config.validation_steps,v=>update("validation_steps",v)),
-          runtimeField("Generate Sample at Validation","checkbox",config.generate_on_validation,v=>update("generate_on_validation",v)),
-          runtimeField("Validation Sample Tokens","number",config.validation_generate_tokens,v=>update("validation_generate_tokens",v)),
+          ...(tensorTraining?[]:[
+            runtimeField("Generate Sample at Validation","checkbox",config.generate_on_validation,v=>update("generate_on_validation",v)),
+            runtimeField("Validation Sample Tokens","number",config.validation_generate_tokens,v=>update("validation_generate_tokens",v))
+          ]),
           runtimeField("Checkpoint Every N Steps","number",config.checkpoint_every,v=>update("checkpoint_every",v))
         );val.appendChild(valGrid);
-        if(config.generate_on_validation)val.appendChild(runtimeField("Validation Prompt","textarea",config.validation_prompt,v=>update("validation_prompt",v)));
+        if(!supervised&&config.generate_on_validation)val.appendChild(runtimeField("Validation Prompt","textarea",config.validation_prompt,v=>update("validation_prompt",v)));
         main.appendChild(val);
       }else{
         normalizeInputConfigInPlace(config,entry);
@@ -5763,6 +6088,121 @@ function studioChoice(title,message,actions,options={}){
       setStatus("Model config downloaded.");
     }
 
+
+    // ------------------------------------------------------------------
+    // Step 9 — diagnostics, Learn/Build/Research modes and reproducibility
+    // ------------------------------------------------------------------
+    const step9ModelInputTypes=new Set(["text_input","image_input","video_input","audio_input","signal_input","feature_input","abstract_input"]);
+    const step9ModelOutputTypes=new Set(["text_output","audio_output","tensor_output","abstract_output","lm_head","classifier","detection_head","detection_pyramid_head","detection_nms","regression_head"]);
+    const step9DataSourceTypes=new Set(["demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
+    function step9Num(v,fallback=0){const n=Number(v);return Number.isFinite(n)?n:fallback;}
+    function step9ShapeProduct(value){const vals=String(value||"").replace(/x/gi,",").split(",").map(x=>Number(String(x).trim())).filter(Number.isFinite);return vals.length?vals.reduce((a,b)=>a*b,1):0;}
+    function estimateNodeParameters(node){
+      const t=String(node?.type||""),p=node?.params||{};const bias=!([false,"false",0,"0","no"].includes(p.bias));
+      const n=(...keys)=>{for(const key of keys){const v=Number(p[key]);if(Number.isFinite(v)&&v!==0)return v;}return 0;};
+      if(t==="learnable_parameter")return step9ShapeProduct(p.shape);
+      if(t==="linear"||t==="dense"){const i=n("in_features","input_dim","dim"),o=n("out_features","output_dim","hidden_size");return i*o+(bias?o:0);}
+      if(t==="embedding")return n("vocab_size")*n("embedding_dim","hidden_size","dim");
+      if(["conv1d","conv2d","conv3d"].includes(t)){const pow=t==="conv1d"?1:t==="conv2d"?2:3;return n("out_channels")*n("in_channels")*Math.pow(n("kernel_size")||1,pow)+(bias?n("out_channels"):0);}
+      if(["batchnorm1d","batchnorm2d","batchnorm3d"].includes(t))return 2*n("num_features");
+      if(t==="layernorm"||t==="rmsnorm")return (t==="layernorm"?2:1)*n("normalized_shape","hidden_size","dim");
+      if(t==="classifier"){const d=n("dim","input_dim"),h=n("hidden_size"),c=n("classes","num_classes");return h&&c?(d*h+h+h*c+c):(d*c+c);}
+      if(["rnn","gru","lstm"].includes(t)){const i=n("input_size","dim"),h=n("hidden_size","dim"),g=t==="rnn"?1:t==="gru"?3:4;return g*(i*h+h*h+2*h);}
+      if(t==="jepa_predictor"){const d=n("latent_dim","dim"),h=n("hidden_dim","hidden_size");return d&&h?(d*h+h+h*d+d):0;}
+      if(t==="speaker_embedding")return n("speakers","num_embeddings")*n("dim","embedding_dim");
+      return 0;
+    }
+    function profileComponentGraph(comp=current(state)){
+      const nodes=comp?.nodes||[],edges=comp?.edges||[];let estimated=0,trainable=0;
+      const rows=nodes.map(node=>{const parameters=estimateNodeParameters(node);estimated+=parameters;if(parameters>0)trainable++;return {name:nodeDisplayName(node),type:node.type,parameters};});
+      return {nodes:nodes.length,edges:edges.length,estimated_parameters:estimated,trainable_nodes:trainable,rows};
+    }
+    function graphContractReport(comp=current(state),workspace=state.active_workspace){
+      const nodes=comp?.nodes||[],edges=comp?.edges||[],ids=new Set(nodes.map(n=>String(n.id||"")));const checks=[];
+      const add=(label,ok,detail,severity="error")=>checks.push({label,ok:!!ok,detail,severity});
+      add("Graph has nodes",nodes.length>0,nodes.length+" node(s)");
+      const broken=edges.filter(e=>!ids.has(String(e.source||""))||!ids.has(String(e.target||"")));
+      add("Connections reference existing nodes",broken.length===0,broken.length?broken.length+" broken connection(s)":"All connections valid");
+      const incoming={},outgoing={};nodes.forEach(n=>{incoming[n.id]=0;outgoing[n.id]=0;});edges.forEach(e=>{if(e.source in outgoing)outgoing[e.source]++;if(e.target in incoming)incoming[e.target]++;});
+      if(workspace==="data"){
+        const sources=nodes.filter(n=>step9DataSourceTypes.has(n.type)),outs=nodes.filter(n=>n.type==="prepared_dataset");
+        add("Data source",sources.length>0,sources.length?sources.length+" source(s)":"Add a dataset source");
+        add("Prepared dataset output",outs.length>0,outs.length?outs.length+" prepared output(s)":"Add Prepared Dataset");
+      }else{
+        const inputs=nodes.filter(n=>step9ModelInputTypes.has(n.type)),outs=nodes.filter(n=>step9ModelOutputTypes.has(n.type));
+        add("Model input",inputs.length>0,inputs.length?inputs.length+" input node(s)":"Add an input component");
+        add("Model output/head",outs.length>0,outs.length?outs.length+" output/head node(s)":"Add an output or task head");
+        const keys=inputs.map(n=>String(n.params?.input_key||"").trim()).filter(Boolean);const dup=[...new Set(keys.filter(k=>keys.filter(x=>x===k).length>1))];
+        add("Named runtime inputs",dup.length===0,dup.length?"Duplicate keys: "+dup.join(", "):"Unique runtime input keys");
+      }
+      const isolated=nodes.filter(n=>(incoming[n.id]||0)===0&&(outgoing[n.id]||0)===0);
+      if(isolated.length)add("Isolated nodes",false,isolated.length+" disconnected node(s)","warning");
+      return {ok:!checks.some(c=>!c.ok&&c.severity==="error"),checks,warnings:checks.filter(c=>!c.ok&&c.severity==="warning")};
+    }
+    function humanCount(value){const n=Number(value)||0;if(n>=1e9)return (n/1e9).toFixed(n>=1e10?1:2)+"B";if(n>=1e6)return (n/1e6).toFixed(n>=1e7?1:2)+"M";if(n>=1e3)return (n/1e3).toFixed(n>=1e4?1:2)+"K";return String(Math.round(n));}
+    function currentLatestMetrics(){
+      const e=(state.model_outputs||[]).slice(-1)[0]||{};const out={};
+      [["loss",e.last_loss],["val_loss",e.validation_loss],["accuracy",e.accuracy??e.supervised_metrics?.accuracy??e.multimodal_metrics?.accuracy],["throughput",e.tokens_per_sec??e.samples_per_sec]].forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!==""&&Number.isFinite(Number(v)))out[k]=Number(v);});return out;
+    }
+    function setStudioMode(mode){if(!["learn","build","research"].includes(mode))return;studioMode=mode;state.studio_mode=mode;setStatus((mode==="learn"?"Learn":mode==="research"?"Research":"Build")+" Mode enabled.");draw();}
+    function explainCurrentGraph(){
+      const comp=current(state),profile=profileComponentGraph(comp),contract=graphContractReport(comp);const nodes=(comp?.nodes||[]).map((n,i)=>(i+1)+". "+nodeDisplayName(n)+" ["+n.type+"]");
+      const flow=(comp?.edges||[]).slice(0,30).map(e=>{const a=(comp.nodes||[]).find(n=>n.id===e.source),b=(comp.nodes||[]).find(n=>n.id===e.target);return "• "+(a?nodeDisplayName(a):"?")+" → "+(b?nodeDisplayName(b):"?");});
+      const text=[workspaceName()+" — Explain Graph","","Purpose: "+String(state.project?.description||state.project?.task||"Editable MLBricks graph."),"","COMPONENTS",...nodes,"","FLOW",...(flow.length?flow:["• No connections"]),"","PROFILE","• Nodes: "+profile.nodes,"• Connections: "+profile.edges,"• Visible parameter estimate: "+humanCount(profile.estimated_parameters),"","CONTRACT",...contract.checks.map(c=>(c.ok?"✓ ":c.severity==="warning"?"! ":"✕ ")+c.label+" — "+c.detail)].join("\n");
+      studioAlert(text,{title:"Explain "+workspaceName(),okLabel:"Close",variant:contract.ok?"info":"warning",multiline:true});
+    }
+    function dataPresetFields(preset){
+      const t=String(preset?.demo_type||"");
+      const map={tabular_regression:["features: float[]","target: float"],binary_classification:["features: float[]","label: 0|1"],multiclass_classification:["features: float[]","label: class"],clustering:["features: float[]"],high_dimensional:["features: float[16]"],image_classification:["image: H×W","label: class"],image_reconstruction:["image: H×W","target: image"],sequence_classification:["sequence: float[T]","label: class"],object_detection:["image: H×W","boxes: xywh[]","classes: int[]"],audio_tts:["text: string","audio: waveform"],audio_multispeaker:["text: string","audio: waveform","speaker_id: int","reference_audio: waveform"],audio_music:["caption: string","audio: waveform"],audio_sound:["caption: string","audio: waveform"],rf_iq:["i: float[T]","q: float[T]","label: class"],sensor_vision:["image: H×W","sensor: float[T]","label: class"],multimodal_image_text:["image: H×W","text: string"]};
+      if(map[t])return map[t];if(String(preset?.modality||"").toLowerCase()==="text")return ["text: string"];if(String(preset?.modality||"").toLowerCase()==="signal")return ["signal: float[T]","target/label: task dependent"];if(String(preset?.modality||"").toLowerCase()==="video")return ["video: frames[T,H,W]"];if(String(preset?.modality||"").toLowerCase()==="audio")return ["audio: waveform"];return ["input: "+String(preset?.modality||"data")];
+    }
+    function showDataPresetInspector(preset){
+      const fields=dataPresetFields(preset),models=preset.compatible_models||[];const text=[preset.name,"",preset.task+" · "+preset.modality,"Source: "+(preset.source_kind==="demo"?"Deterministic offline Studio demo":preset.dataset_id||preset.source_kind||"External"),"License: "+String(preset.license||"—"),preset.samples?("Samples: "+preset.samples):"","","DATA CONTRACT",...fields.map(x=>"• "+x),"","PIPELINE", "• Source", ...(preset.category==="JEPA"?["• JEPA Preparation"]:[]), ...(preset.modality==="Image"?["• Image processing"]:[]), ...(preset.modality==="Signal"?["• Signal schema mapping"]:[]),"• Train / validation / test split",...(preset.tokenize?["• Tokenization"]:[]),"• Prepared Dataset","","COMPATIBLE MODELS",...(models.length?models.map(x=>"• "+x):["• Any model matching the data contract"])].filter(x=>x!=="").join("\n");
+      studioAlert(text,{title:"Data Inspector",okLabel:"Close",variant:"info",multiline:true});
+    }
+    function showModelPresetExplanation(preset){
+      const data=modelPresetData(preset);const text=[preset.name,"",preset.task,"Category: "+preset.category,"Parameters: "+String(preset.parameters||"Calculated from graph"),"",preset.description||"Editable MLBricks Gallery model.","","GLASS-BOX RULE","• Open Model loads an editable graph.","• Every architecture node is available from the Component Library or as an inspectable module.","• Clone/save the graph, replace components, and retrain.","",data?("Recommended data: "+data.name):"No fixed dataset required."].join("\n");
+      studioAlert(text,{title:"Explain Model",okLabel:"Close",variant:"info",multiline:true});
+    }
+    function saveExperimentSnapshot(){
+      if(state.active_workspace!=="model"){setStatus("Experiment snapshots are available in Model Builder.");return;}
+      const profile=profileComponentGraph(),contract=graphContractReport();const stamp=new Date();
+      const snap={id:"exp_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7),name:String(state.project?.name||"Model")+" · "+stamp.toLocaleString(),saved_at:stamp.toISOString(),project:cp(state.project||{}),architecture:cp(current(state)),profile,contract,metrics:currentLatestMetrics()};
+      state.experiments=Array.isArray(state.experiments)?state.experiments:[];state.experiments.push(snap);if(state.experiments.length>30)state.experiments=state.experiments.slice(-30);setStatus("Research experiment snapshot saved.");draw();
+    }
+    function compareRecentExperiments(){
+      const list=state.experiments||[];if(list.length<2){studioAlert("Save at least two Research experiment snapshots first.",{title:"Compare Experiments",variant:"warning"});return;}
+      const a=list[list.length-2],b=list[list.length-1],keys=[...new Set([...Object.keys(a.metrics||{}),...Object.keys(b.metrics||{})])];
+      const lines=["A: "+a.name,"B: "+b.name,"","STRUCTURE","Nodes: "+a.profile.nodes+" → "+b.profile.nodes+" ("+(b.profile.nodes-a.profile.nodes>=0?"+":"")+(b.profile.nodes-a.profile.nodes)+")","Connections: "+a.profile.edges+" → "+b.profile.edges,"Parameters: "+humanCount(a.profile.estimated_parameters)+" → "+humanCount(b.profile.estimated_parameters),"","METRICS"];
+      if(!keys.length)lines.push("No numeric training metrics captured yet.");keys.forEach(k=>{const av=a.metrics?.[k],bv=b.metrics?.[k];const delta=Number.isFinite(Number(av))&&Number.isFinite(Number(bv))?Number(bv)-Number(av):null;lines.push(k+": "+String(av??"—")+" → "+String(bv??"—")+(delta===null?"":" · Δ "+delta.toPrecision(4)));});
+      studioAlert(lines.join("\n"),{title:"Experiment Comparison",okLabel:"Close",variant:"info",multiline:true});
+    }
+    function projectBundlePayload(){
+      rememberWorkspaceView();return {format:"mlbricks-project-bundle",format_version:"1.0",builder_version:"1.0.0b2",saved_at:new Date().toISOString(),manifest:{project_name:String(state.project?.name||"Untitled Model"),active_workspace:state.active_workspace,contains:["model_graph","data_graph","training_recipes","custom_components","experiments","gallery_metadata"]},state:sanitizedProjectState()};
+    }
+    function exportProjectBundle(){const blob=new Blob([JSON.stringify(projectBundlePayload(),null,2)],{type:"application/json"});downloadDesignBlob(blob,safeFilename(state.project?.name)+".mlbricks.bundle.json");setStatus("Reproducible project bundle exported.");}
+    function renderStep9Inspector(body){
+      if(galleryWorkspace.open||cloudWorkspace.open||runtimePanel)return;
+      const modeTitle=document.createElement("div");modeTitle.className="mlb-section-title";modeTitle.textContent=studioMode.toUpperCase()+" MODE";body.appendChild(modeTitle);
+      const report=graphContractReport(),profile=profileComponentGraph();const box=document.createElement("div");box.className="mlb-step9-diagnostics";
+      const statusRow=document.createElement("div");statusRow.className="mlb-step9-summary";statusRow.innerHTML='<span>Graph Contract</span><strong class="'+(report.ok?'ok':'bad')+'">'+(report.ok?'READY':'NEEDS ATTENTION')+'</strong>';box.appendChild(statusRow);
+      report.checks.slice(0,studioMode==="research"?99:4).forEach(c=>{const row=document.createElement("div");row.className="mlb-step9-check "+(c.ok?"ok":c.severity==="warning"?"warn":"bad");row.innerHTML='<span>'+(c.ok?'✓':c.severity==="warning"?'!':'✕')+' '+c.label+'</span><small>'+c.detail+'</small>';box.appendChild(row);});
+      if(studioMode==="research"){
+        const metrics=document.createElement("div");metrics.className="mlb-step9-profile-grid";[["Nodes",profile.nodes],["Connections",profile.edges],["Param estimate",humanCount(profile.estimated_parameters)],["Parameterized blocks",profile.trainable_nodes]].forEach(([k,v])=>{const m=document.createElement("div");m.innerHTML='<span>'+k+'</span><strong>'+v+'</strong>';metrics.appendChild(m);});box.appendChild(metrics);
+      }
+      body.appendChild(box);
+      const actions=document.createElement("div");actions.className="mlb-action-grid mlb-step9-actions";
+      const explain=btn(studioMode==="learn"?"Explain This Graph":"Explain Graph");explain.addEventListener("click",explainCurrentGraph);actions.appendChild(explain);
+      if(studioMode==="research"&&state.active_workspace==="model"){
+        const snap=btn("Save Experiment");snap.addEventListener("click",saveExperimentSnapshot);const compare=btn("Compare Last 2");compare.addEventListener("click",compareRecentExperiments);actions.append(snap,compare);
+      }
+      const bundle=btn("Export Project Bundle");bundle.addEventListener("click",exportProjectBundle);actions.appendChild(bundle);body.appendChild(actions);
+      if(studioMode==="learn"){
+        const learn=document.createElement("div");learn.className="mlb-step9-learn-note";learn.innerHTML='<strong>Learning view</strong><span>Select any node to study its purpose and configuration. Use Explain Graph to trace the complete architecture and data flow.</span>';body.appendChild(learn);
+      }
+      if(studioMode==="research"&&(state.experiments||[]).length){const title=document.createElement("div");title.className="mlb-section-title";title.textContent="EXPERIMENT HISTORY";body.appendChild(title);const history=document.createElement("div");history.className="mlb-step9-history";(state.experiments||[]).slice(-5).reverse().forEach(e=>{const row=document.createElement("div");row.innerHTML='<strong>'+String(e.name||"Experiment")+'</strong><span>'+humanCount(e.profile?.estimated_parameters||0)+' params · '+String(e.saved_at||"").replace('T',' ').slice(0,19)+'</span>';history.appendChild(row);});body.appendChild(history);}
+    }
+
     function renderGalleryView(container){
       container.className="mlb-gallery-view";
       const head=document.createElement("div");head.className="mlb-gallery-head";
@@ -5860,6 +6300,7 @@ function studioChoice(title,message,actions,options={}){
       galleryLoad.title="Load .mlbricks.json or .mlbricks.bin";galleryLoad.addEventListener("click",loadDesign);galleryActions.appendChild(galleryLoad);
       const galleryExport=btn("⇩ Export","mlb-gallery-action mlb-gallery-file-action");
       galleryExport.title="Export model config or workspace data";galleryExport.addEventListener("click",exportWorkspace);galleryActions.appendChild(galleryExport);
+      const bundleExport=btn("Bundle","mlb-gallery-action mlb-gallery-file-action");bundleExport.title="Export model graph, data graph, recipes, custom components and experiments as one reproducible project bundle";bundleExport.addEventListener("click",exportProjectBundle);galleryActions.appendChild(bundleExport);
 
       let canSave=false,saveLabel="";
       if(galleryWorkspace.tab==="models"&&state.active_workspace==="model"&&current(state)?.kind!=="custom_edit"){canSave=true;saveLabel="+ Save Current Model";}
@@ -5904,18 +6345,55 @@ function studioChoice(title,message,actions,options={}){
 
       if(galleryWorkspace.tab==="models"){
         body.classList.add("models-tab");
-        const samples=makeSection("PREBUILT MODELS","4 available","featured full-width");
-        const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
-        const loadTiny=btn("Open Model","mlb-gallery-action sample");loadTiny.addEventListener("click",openAndClose(loadTinyStories));
-        sampleGrid.appendChild(card("50M SLM","Parameters ~50M · Batch 16 · Block 512 · 10 layers","MODEL",[loadTiny]));
-        const loadSoup30=btn("Open Model","mlb-gallery-action sample");loadSoup30.addEventListener("click",openAndClose(loadSOUP30M1L));
-        sampleGrid.appendChild(card("50M SLM · SOUP","Parameters ~50M · Batch 16 · Block 512 · 2 SOUP layers","MODEL",[loadSoup30]));
-        const loadEsa200=btn("Open Model","mlb-gallery-action sample");loadEsa200.addEventListener("click",openAndClose(loadESA200M));
-        sampleGrid.appendChild(card("200M SLM","Parameters ~200M · Batch 16 · Block 256 · 12 layers","MODEL",[loadEsa200]));
-        const loadSoup200=btn("Open Model","mlb-gallery-action sample");loadSoup200.addEventListener("click",openAndClose(loadSOUP200M));
-        sampleGrid.appendChild(card("200M SLM · SOUP","Parameters 199,916,160 · Batch 16 · Block 256 · 3 SOUP layers","MODEL",[loadSoup200]));
-        samples.appendChild(sampleGrid);
-        body.appendChild(samples);
+
+        const filterBar=document.createElement("div");filterBar.className="mlb-gallery-category-bar";
+        const filterLabel=document.createElement("label");filterLabel.textContent="MODEL CATEGORY";
+        const filterSelect=document.createElement("select");filterSelect.className="mlb-gallery-category-select";
+        mlbricksModelCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryModelCategory===name;filterSelect.appendChild(opt);});
+        filterSelect.addEventListener("change",()=>{galleryModelCategory=filterSelect.value;draw();});
+        const categoryCount=document.createElement("span");
+        const visibleModels=galleryModelCategory==="All Models"?mlbricksModelPresets:mlbricksModelPresets.filter(p=>p.category===galleryModelCategory||(p.also_categories||[]).includes(galleryModelCategory));
+        const readyCount=visibleModels.filter(p=>!p.planned).length;
+        const plannedCount=visibleModels.filter(p=>p.planned).length;
+        categoryCount.textContent=readyCount+" ready"+(plannedCount?(" · "+plannedCount+" staged"):"");
+        filterBar.append(filterLabel,filterSelect,categoryCount);body.appendChild(filterBar);
+
+        const categories=galleryModelCategory==="All Models"?mlbricksModelCategories.filter(x=>x!=="All Models"):[galleryModelCategory];
+        let renderedModelCategory=false;
+        categories.forEach(category=>{
+          const presets=mlbricksModelPresets.filter(p=>p.category===category||(galleryModelCategory!=="All Models"&&(p.also_categories||[]).includes(category)));
+          if(!presets.length)return;
+          renderedModelCategory=true;
+          const ready=presets.filter(p=>!p.planned).length;
+          const planned=presets.length-ready;
+          const countText=ready+" ready"+(planned?(" · "+planned+" staged"):"");
+          const samples=makeSection(category.toUpperCase()+" MODELS",countText,"featured full-width model-category-section");
+          const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid model-preset-grid";
+          presets.forEach(preset=>{
+            const actions=[];
+            if(!preset.planned){
+              const load=btn("Open Model","mlb-gallery-action sample");
+              load.addEventListener("click",openAndClose(()=>loadModelPreset(preset)));actions.push(load);
+              const explain=btn("Explain","mlb-gallery-action");explain.addEventListener("click",()=>showModelPresetExplanation(preset));actions.push(explain);
+            }else{
+              const staged=btn("Fit Runtime Next","mlb-gallery-action staged");staged.disabled=true;actions.push(staged);
+            }
+            const data=modelPresetData(preset);
+            if(data){
+              const useData=btn("Open Data","mlb-gallery-action");
+              useData.title="Open "+data.name+" in the editable Data Processing workspace";
+              useData.addEventListener("click",openAndClose(()=>loadDataPreset(data)));actions.push(useData);
+            }
+            const meta=[preset.task,preset.parameters?("Parameters "+preset.parameters):"",preset.description,data?("Data: "+data.name):""].filter(Boolean).join(" · ");
+            sampleGrid.appendChild(card(preset.name,meta,preset.tag||"MODEL",actions));
+          });
+          samples.appendChild(sampleGrid);body.appendChild(samples);
+        });
+        if(!renderedModelCategory){
+          const pending=makeSection(galleryModelCategory.toUpperCase()+" MODELS","roadmap","featured full-width model-category-section");
+          pending.appendChild(empty("This model family is reserved in the Gallery and will be populated in a later roadmap step."));
+          body.appendChild(pending);
+        }
 
         const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
         if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Workshop will appear here."));}
@@ -5963,15 +6441,32 @@ function studioChoice(title,message,actions,options={}){
         renderLocalPersistencePanel(body);
       }else{
         body.classList.add("data-tab");
-        const samples=makeSection("PREBUILT DATA",mlbricksDataPresets.length+" available","featured full-width");
-        const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid";
-        mlbricksDataPresets.forEach(preset=>{
-          const load=btn("Open Pipeline","mlb-gallery-action sample");load.addEventListener("click",openAndClose(()=>loadDataPreset(preset)));
-          const meta=preset.focus+" · "+preset.edition+" · "+preset.license+" · 10k-row quickstart";
-          sampleGrid.appendChild(card(preset.name+" Pipeline",meta,"DATA",[load]));
+
+        const filterBar=document.createElement("div");filterBar.className="mlb-gallery-category-bar";
+        const filterLabel=document.createElement("label");filterLabel.textContent="DATA CATEGORY";
+        const filterSelect=document.createElement("select");filterSelect.className="mlb-gallery-category-select";
+        mlbricksDataCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryDataCategory===name;filterSelect.appendChild(opt);});
+        filterSelect.addEventListener("change",()=>{galleryDataCategory=filterSelect.value;draw();});
+        const categoryCount=document.createElement("span");
+        const visibleCount=galleryDataCategory==="All Data"?mlbricksDataPresets.length:mlbricksDataPresets.filter(p=>p.category===galleryDataCategory).length;
+        categoryCount.textContent=visibleCount+" dataset"+(visibleCount===1?"":"s");
+        filterBar.append(filterLabel,filterSelect,categoryCount);body.appendChild(filterBar);
+
+        const categories=galleryDataCategory==="All Data"?mlbricksDataCategories.filter(x=>x!=="All Data"):[galleryDataCategory];
+        categories.forEach(category=>{
+          const presets=mlbricksDataPresets.filter(p=>p.category===category);
+          if(!presets.length)return;
+          const samples=makeSection(category.toUpperCase()+" DATA",presets.length+" available","featured full-width data-category-section");
+          const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid data-preset-grid";
+          presets.forEach(preset=>{
+            const load=btn("Open Pipeline","mlb-gallery-action sample");load.addEventListener("click",openAndClose(()=>loadDataPreset(preset)));
+            const inspect=btn("Inspect","mlb-gallery-action");inspect.addEventListener("click",()=>showDataPresetInspector(preset));
+            const models=(preset.compatible_models||[]).join(", ");
+            const meta=[preset.modality,preset.task,preset.focus,preset.edition,preset.license,models?("Models: "+models):""].filter(Boolean).join(" · ");
+            sampleGrid.appendChild(card(preset.name,meta,"DATA",[load,inspect]));
+          });
+          samples.appendChild(sampleGrid);body.appendChild(samples);
         });
-        samples.appendChild(sampleGrid);
-        body.appendChild(samples);
 
         const mine=makeSection("MY DATA",(state.gallery.data||[]).length+" saved","full-width saved-data");
         if(!(state.gallery.data||[]).length)mine.appendChild(empty("Data pipelines you save to Workshop will appear here."));
@@ -6722,9 +7217,9 @@ function studioChoice(title,message,actions,options={}){
     function currentDataPipelineSnapshot(){
       const ws=state.workspaces?.data;
       const comp=state.components?.[ws?.root_component_id];
-      const snap={source:null,text_processing:null,split:null,tokenizer:null,image_processing:null,audio_processing:null,batch:null,output:null,steps:[]};
+      const snap={source:null,text_processing:null,split:null,tokenizer:null,image_processing:null,detection_processing:null,audio_processing:null,signal_processing:null,batch:null,output:null,steps:[]};
       if(!comp)return snap;
-      const sourceTypes=new Set(["manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
+      const sourceTypes=new Set(["demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
       (comp.nodes||[]).forEach(node=>{
         const value={type:node.type,name:node.name,...cp(node.params||{})};
         snap.steps.push({id:node.id,type:node.type,name:node.name,params:cp(node.params||{})});
@@ -6733,7 +7228,9 @@ function studioChoice(title,message,actions,options={}){
         else if(node.type==="train_test_split")snap.split=value;
         else if(node.type==="tokenize_text")snap.tokenizer=value;
         else if(node.type==="image_process")snap.image_processing=value;
+        else if(node.type==="detection_process")snap.detection_processing=value;
         else if(node.type==="audio_process")snap.audio_processing=value;
+        else if(node.type==="signal_process")snap.signal_processing=value;
         else if(node.type==="batch_data")snap.batch=value;
         else if(node.type==="prepared_dataset")snap.output=value;
       });
@@ -6741,10 +7238,10 @@ function studioChoice(title,message,actions,options={}){
     }
     function datasetPipeline(meta){return meta?.pipeline||currentDataPipelineSnapshot();}
     function prettyBool(value){if(value===undefined||value===null||value==="")return "—";const v=String(value).toLowerCase();return v==="true"?"Yes":v==="false"?"No":String(value);}
-    function sourceDisplay(source){if(!source)return "—";if(source.type==="hf_dataset")return source.dataset_id||"Hugging Face";if(source.type==="kaggle_dataset")return source.dataset_handle||"Kaggle";if(source.type==="url_dataset")return source.url||"URL";if(source.type==="local_dataset")return source.path||"Local File";if(source.type==="manual_dataset")return "Manual Text Data";return source.name||source.type||"—";}
+    function sourceDisplay(source){if(!source)return "—";if(source.type==="hf_dataset")return source.dataset_id||"Hugging Face";if(source.type==="kaggle_dataset")return source.dataset_handle||"Kaggle";if(source.type==="url_dataset")return source.url||"URL";if(source.type==="local_dataset")return source.path||"Local File";if(source.type==="demo_dataset")return source.name||source.demo_type||"Studio Demo Data";if(source.type==="manual_dataset")return "Manual Text Data";return source.name||source.type||"—";}
     function detailSection(body,title,rows){const st=document.createElement("div");st.className="mlb-section-title";st.textContent=title;body.appendChild(st);const box=document.createElement("div");box.className="mlb-dataset-detail-box";rows.filter(row=>row&&row[1]!==undefined&&row[1]!==null&&row[1]!=="").forEach(([label,value])=>{const r=document.createElement("div");r.className="mlb-dataset-detail-row";const a=document.createElement("span");a.textContent=label;const v=document.createElement("strong");v.textContent=String(value);v.title=String(value);r.append(a,v);box.appendChild(r);});body.appendChild(box);}
     function renderPreparedDatasetInspector(body,meta){
-      const p=datasetPipeline(meta),source=p.source||{},process=p.text_processing||{},split=p.split||{},tok=p.tokenizer||{},output=p.output||{};
+      const p=datasetPipeline(meta),source=p.source||{},process=p.text_processing||{},split=p.split||{},tok=p.tokenizer||{},img=p.image_processing||{},det=p.detection_processing||{},sig=p.signal_processing||{},output=p.output||{};
       const head=document.createElement("div");head.className="mlb-selected";head.innerHTML="<strong>"+meta.name+"</strong><span class='mlb-pill'>Prepared Data</span>";body.appendChild(head);
       const ready=document.createElement("div");ready.className="mlb-api-status ok";ready.textContent="✓ Dataset ready for Model Builder";body.appendChild(ready);
       const st=document.createElement("div");st.className="mlb-section-title";st.textContent="SPLITS";body.appendChild(st);body.appendChild(datasetSummaryCard(meta,"DATASET OUTPUT"));
@@ -6752,6 +7249,9 @@ function studioChoice(title,message,actions,options={}){
       detailSection(body,"TRAIN / VALIDATION / TEST",[["Train %",split.train_size!==undefined?split.train_size+"%":"—"],["Validation %",split.validation_size!==undefined?split.validation_size+"%":"—"],["Test %",split.test_size!==undefined?split.test_size+"%":"—"],["Seed",split.seed],["Shuffle",prettyBool(split.shuffle)]]);
       if(Object.keys(process).length)detailSection(body,"TEXT PROCESSING",[["Text Column",process.text_column],["Lowercase",prettyBool(process.lowercase)],["Trim Spaces",prettyBool(process.strip)],["Normalize Whitespace",prettyBool(process.normalize_whitespace)],["Normalize Unicode",prettyBool(process.unicode_nfkc)],["Remove Empty",prettyBool(process.remove_empty)],["Min Characters",process.min_chars],["Max Characters",!process.max_chars||Number(process.max_chars)===0?"All":process.max_chars]]);
       if(Object.keys(tok).length)detailSection(body,"TOKENIZER",[["Tokenizer",tok.tokenizer_name],["Text Column",tok.text_column],["Tokenizer Max Length",tok.context_length],["Truncation",prettyBool(tok.truncation)],["Padding",tok.padding],["Special Tokens",prettyBool(tok.add_special_tokens)]]);
+      if(Object.keys(img).length)detailSection(body,"IMAGE PROCESSING",[["Image Column",img.image_column],["Output Size",String(img.width||"—")+" × "+String(img.height||"—")],["Color Mode",img.mode],["Tensor Ready",prettyBool(img.tensor_ready)],["Normalize",prettyBool(img.normalize)]]);
+      if(Object.keys(det).length)detailSection(body,"DETECTION PROCESSING",[["Image Column",det.image_column],["Boxes",det.boxes_column],["Classes",det.classes_column],["Output Size",String(det.width||"—")+" × "+String(det.height||"—")],["Box Format",det.box_format],["Normalize Images",prettyBool(det.normalize_images)]]);
+      if(Object.keys(sig).length)detailSection(body,"SIGNAL PROCESSING",[["Signal Columns",sig.signal_columns],["Output Signal",sig.output_column],["Target Column",sig.target_column||"—"],["Output Target",sig.target_output_column||"target"],["Normalize",prettyBool(sig.normalize)],["Pad / Trim Length",Number(sig.pad_length||0)===0?"Keep":sig.pad_length]]);
       detailSection(body,"STORAGE",[["Storage",dataStorageLabel(meta)],["Total Rows",meta.total_rows??"—"],["Save To Disk",output.save_to_disk!==undefined?prettyBool(output.save_to_disk):(meta.path?"Yes":"No")],["Path",meta.path||"Python memory"],["Created",meta.created_at||"—"]]);
       const actions=document.createElement("div");actions.className="mlb-action-grid";
       const use=btn("Use in Model","mlb-dark-btn");use.addEventListener("click",()=>useDatasetInModel(meta));
@@ -6881,7 +7381,15 @@ function studioChoice(title,message,actions,options={}){
         return "from mlb_studio.data import process_image_dataset\n\n"+
           "processed = process_image_dataset(\n"+
           "    dataset, image_column="+arg("image_column","image")+", width="+arg("width",224)+", height="+arg("height",224)+",\n"+
-          "    mode="+arg("mode","RGB")+", center_crop="+arg("center_crop","false")+",\n)";
+          "    mode="+arg("mode","RGB")+", center_crop="+arg("center_crop","false")+",\n"+
+          "    tensor_ready="+arg("tensor_ready","false")+", normalize="+arg("normalize","true")+",\n)";
+      }
+      if(node.type==="detection_process"){
+        return "from mlb_studio.data import process_detection_dataset\n\n"+
+          "processed = process_detection_dataset(\n"+
+          "    dataset, image_column="+arg("image_column","image")+", boxes_column="+arg("boxes_column","boxes")+",\n"+
+          "    classes_column="+arg("classes_column","class_ids")+", width="+arg("width",16)+", height="+arg("height",16)+",\n"+
+          "    mode="+arg("mode","L")+", box_format="+arg("box_format","xywh")+", normalize_images="+arg("normalize_images","true")+",\n)";
       }
       if(node.type==="audio_process"){
         return "from mlb_studio.data import process_audio_dataset\n\n"+
@@ -6889,6 +7397,13 @@ function studioChoice(title,message,actions,options={}){
           "    dataset, audio_column="+arg("audio_column","audio")+", sample_rate="+arg("sample_rate",16000)+",\n"+
           "    normalize="+arg("normalize","true")+", trim_silence="+arg("trim_silence","false")+",\n"+
           "    silence_threshold="+arg("silence_threshold",0.01)+",\n)";
+      }
+      if(node.type==="signal_process"){
+        return "from mlb_studio.data import process_signal_dataset\n\n"+
+          "processed = process_signal_dataset(\n"+
+          "    dataset, signal_columns="+arg("signal_columns","signal")+", output_column="+arg("output_column","signal")+",\n"+
+          "    target_column="+(String(p.target_column||"").trim()?arg("target_column",""):"None")+", target_output_column="+arg("target_output_column","target")+",\n"+
+          "    normalize="+arg("normalize","false")+", pad_length="+arg("pad_length",0)+",\n)";
       }
       if(node.type==="batch_data"){
         return "from mlb_studio.data import make_torch_dataloader\n\n"+
@@ -7866,7 +8381,15 @@ function studioChoice(title,message,actions,options={}){
     // custom components remain excluded to avoid recursive/circular nesting.
     const apiComposerBuiltInTypes=new Set([
       "embedding","esa","layer_block","stateaware_esa_stack","soup","rmsnorm","layernorm",
-      "linear","ffn","residual","dropout","learned_position","sinusoidal_position","lm_head"
+      "linear","ffn","residual","dropout","learned_position","sinusoidal_position","lm_head",
+      // Educational PyTorch primitives are reusable inside user API Components too.
+      "linear_regression","logistic_regression","polynomial_features",
+      "relu","leaky_relu","gelu","silu","sigmoid","tanh","softmax","batchnorm1d","batchnorm2d",
+      "conv1d","conv2d","conv3d","maxpool1d","maxpool2d","avgpool1d","avgpool2d",
+      "adaptive_avgpool1d","adaptive_avgpool2d","rnn","lstm","gru","self_attention",
+      "learnable_parameter","constant","matmul","tensor_add","tensor_subtract","tensor_multiply",
+      "tensor_divide","concat","reduce_mean","reduce_sum","reduce_max","reduce_min",
+      "tensor_exp","tensor_log","tensor_sqrt","transpose","reshape","flatten","unsqueeze","squeeze"
     ]);
     function apiComposerAllowsCatalogItem(item){
       return !!item && apiComposerBuiltInTypes.has(String(item.type||""));
@@ -9914,13 +10437,360 @@ function studioChoice(title,message,actions,options={}){
       selected=null;pendingPort=null;
       execution={status:"idle",overall:0,message:"Ready",nodes:{}};
       collapseArtifactWorkspace();
-      setStatus(preset.name+" loaded from "+preset.dataset_id+" · 10k-row quickstart. Set Max Rows to 0 for the full edition.");
+      const sourceLabel=preset.source_kind==="demo"?"offline Studio demo":(preset.dataset_id+" · 10k-row quickstart");
+      setStatus(preset.name+" loaded from "+sourceLabel+". Data category: "+(preset.category||"Data")+".");
       switchingWorkspace=true;
       draw();
     }
 
     function loadTextDataStarter(){
       return loadDataPreset(mlbricksDataPresets[0]);
+    }
+
+
+    function loadEducationalModelPreset(preset){
+      if(!preset||!preset.template)return;
+      checkpoint("Load "+preset.name);rememberWorkspaceView();state.active_workspace="model";
+      const rootId=state.workspaces.model.root_component_id;state.root_component_id=rootId;state.view_component_id=rootId;
+      const data=modelPresetData(preset);
+      state.project={...(state.project||{}),name:preset.name,context_length:32,batch_size:16,
+        model_settings:{embedding_size:32,heads:1,block:32,default_batch:16,vocab_size:32000,precision:"fp32"},
+        dataset:data?.name||null,recommended_dataset_id:preset.data_id||null,estimated_parameters:preset.parameters||null,
+        educational_category:preset.category,task:preset.task,description:preset.description||""};
+      state.breadcrumbs=[{id:rootId,name:preset.name}];
+      state.workspaces.model.view_component_id=rootId;state.workspaces.model.breadcrumbs=cp(state.breadcrumbs);
+
+      const nodes=[];const edges=[];
+      const add=(type,name,params={})=>{
+        const n=makeNode(cat(catalog,type));
+        if(name)n.name=name;
+        n.params={...(n.params||{}),...cp(params)};
+        nodes.push(n);return n;
+      };
+      const link=(a,b,kind="main",sourcePort=null,targetPort=null)=>{
+        const e=edge(a.id,b.id,kind);
+        if(sourcePort)e.source_port=sourcePort;
+        if(targetPort)e.target_port=targetPort;
+        edges.push(e);return e;
+      };
+      const named=(a,b,targetKey,sourceKey="main")=>link(a,b,"named","named_out:"+sourceKey,"named_in:"+targetKey);
+
+      if(preset.template==="linear_regression"||preset.template==="logistic_regression"){
+        const x=add("feature_input","Feature Input",{feature_dim:4});
+        const w=add("learnable_parameter","Weight W",{shape:"4,1",init:"normal",scale:0.02});
+        const mm=add("matmul","X × W");
+        const bias=add("learnable_parameter","Bias b",{shape:"1",init:"zeros",scale:0.0});
+        const sum=add("tensor_add","+ Bias");
+        named(x,mm,"a");named(w,mm,"b");named(mm,sum,"a");named(bias,sum,"b");
+        let tail=sum;
+        if(preset.template==="logistic_regression"){
+          const sigmoid=add("sigmoid","Sigmoid Probability");link(sum,sigmoid);tail=sigmoid;
+        }
+        const out=add("tensor_output",preset.template==="logistic_regression"?"Probability Output":"Regression Output");link(tail,out);
+      }else if(preset.template==="knn"){
+        const x=add("feature_input","Feature Input",{feature_dim:8});
+        const fit=add("knn_classifier","KNN Classifier",{neighbors:5,weights:"uniform",p:2});
+        const out=add("tensor_output","Predicted Class");link(x,fit);link(fit,out);
+      }else if(preset.template==="decision_tree"){
+        const x=add("feature_input","Feature Input",{feature_dim:8});
+        const fit=add("decision_tree_classifier","Decision Tree",{max_depth:5,min_samples_split:2,min_samples_leaf:1,criterion:"gini"});
+        const out=add("tensor_output","Predicted Class");link(x,fit);link(fit,out);
+      }else if(preset.template==="kmeans"){
+        const x=add("feature_input","Feature Input",{feature_dim:2});
+        const fit=add("kmeans","K-Means",{clusters:3,max_iter:100,tolerance:0.0001,seed:42});
+        const out=add("tensor_output","Cluster ID");link(x,fit);link(fit,out);
+      }else if(preset.template==="pca"){
+        const x=add("feature_input","Feature Input",{feature_dim:16});
+        const fit=add("pca","PCA",{components:2,center:true,whiten:false});
+        const out=add("tensor_output","Principal Components");link(x,fit);link(fit,out);
+      }else if(preset.template==="single_neuron"){
+        const x=add("feature_input","Feature Input",{feature_dim:1});
+        const dense=add("linear","Single Dense Neuron",{in_features:1,out_features:1,bias:true});
+        const out=add("tensor_output","Neuron Output");link(x,dense);link(dense,out);
+      }else if(preset.template==="ann"){
+        const x=add("feature_input","Feature Input",{feature_dim:8});
+        const l1=add("linear","Dense 8 → 32",{in_features:8,out_features:32,bias:true});
+        const a1=add("relu","ReLU 1");
+        const l2=add("linear","Dense 32 → 16",{in_features:32,out_features:16,bias:true});
+        const a2=add("relu","ReLU 2");
+        const head=add("classifier","3-Class Head",{dim:16,hidden_size:16,classes:3});
+        link(x,l1);link(l1,a1);link(a1,l2);link(l2,a2);link(a2,head);
+      }else if(preset.template==="cnn"){
+        const x=add("image_input","Image Input");
+        const c1=add("conv2d","Conv2D 1 → 8",{in_channels:1,out_channels:8,kernel_size:3,stride:1,padding:1,bias:true});
+        const a1=add("relu","ReLU 1");
+        const p1=add("maxpool2d","MaxPool 2×2",{kernel_size:2,stride:2,padding:0});
+        const c2=add("conv2d","Conv2D 8 → 16",{in_channels:8,out_channels:16,kernel_size:3,stride:1,padding:1,bias:true});
+        const a2=add("relu","ReLU 2");
+        const p2=add("maxpool2d","MaxPool 2×2 · 2",{kernel_size:2,stride:2,padding:0});
+        const flat=add("flatten","Flatten",{start_dim:1,end_dim:-1});
+        const head=add("classifier","3-Class Head",{dim:256,hidden_size:256,classes:3});
+        [x,c1,a1,p1,c2,a2,p2,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(["rnn","lstm","gru"].includes(preset.template)){
+        const x=add("feature_input","Sequence Input",{feature_dim:32});
+        const shape=add("unsqueeze","Add Feature Dimension",{dim:-1});
+        const rec=add(preset.template,preset.name,{input_size:1,hidden_size:16,num_layers:1,dropout:0.0,bidirectional:false,output:"last",nonlinearity:"tanh"});
+        const head=add("classifier","Binary Classifier",{dim:16,hidden_size:16,classes:2});
+        link(x,shape);link(shape,rec);link(rec,head);
+      }else if(preset.template==="autoencoder"){
+        const x=add("image_input","Image Input");
+        const flat=add("flatten","Flatten 16×16",{start_dim:1,end_dim:-1});
+        const e1=add("linear","Encoder 256 → 64",{in_features:256,out_features:64,bias:true});
+        const a1=add("relu","ReLU Encoder");
+        const latent=add("linear","Latent 64 → 16",{in_features:64,out_features:16,bias:true});
+        const a2=add("relu","Latent ReLU");
+        const d1=add("linear","Decoder 16 → 64",{in_features:16,out_features:64,bias:true});
+        const a3=add("relu","ReLU Decoder");
+        const d2=add("linear","Reconstruction 64 → 256",{in_features:64,out_features:256,bias:true});
+        const shape=add("reshape","Restore Image",{shape:"0,1,16,16"});
+        const out=add("tensor_output","Reconstructed Image");
+        [x,flat,e1,a1,latent,a2,d1,a3,d2,shape,out].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(["jepa_image","jepa_video","jepa_text","jepa_audio","jepa_signal"].includes(preset.template)){
+        const modality=preset.template.replace("jepa_","");
+        const inputType={image:"image_input",video:"video_input",text:"text_input",audio:"audio_input",signal:"signal_input"}[modality];
+        const input=add(inputType,preset.name.replace(" JEPA","")+" Input",modality==="image"?{channels:1,image_size:16}:{});
+        const mask=add("jepa_mask","JEPA Context / Target Mask",{mask_ratio:0.35,mask_value:0.0,mode:modality==="video"?"spatiotemporal":"auto"});
+        const encoderParams={modality,latent_dim:64,hidden_dim:64,vocab_size:257,in_channels:1};
+        const context=add("jepa_encoder","Context Encoder",{...encoderParams,role:"context"});
+        const target=add("jepa_encoder","Target Encoder · EMA",{...encoderParams,role:"target"});
+        const predictor=add("jepa_predictor","JEPA Predictor",{latent_dim:64,hidden_dim:128,dropout:0.0});
+        const loss=add("jepa_latent_loss","JEPA Latent Loss",{loss:"mse",normalize:"true"});
+        const out=add("tensor_output","Latent Prediction Loss");
+        link(input,mask);
+        link(mask,context,"main","named_out:context","main_in");
+        link(mask,target,"main","named_out:target","main_in");
+        link(context,predictor);
+        named(predictor,loss,"prediction");
+        named(target,loss,"target");
+        link(loss,out);
+        state.project.context_length=modality==="video"?8:64;
+        state.project.model_settings={...(state.project.model_settings||{}),embedding_size:64,heads:1,block:state.project.context_length,default_batch:16,precision:"fp32"};
+      }else if(["audio_tts","audio_voice_tts","audio_voice_clone","audio_sound","audio_music"].includes(preset.template)){
+        const isVoice=preset.template==="audio_voice_tts";
+        const isClone=preset.template==="audio_voice_clone";
+        const textLabel=(preset.template==="audio_music"||preset.template==="audio_sound")?"Caption Input":"Transcript Input";
+        const text=add("text_input",textLabel,{input_mode:"prepared_dataset",input_key:""});
+        const emb=add("embedding","Byte/Text Embedding 257 → 32",{vocab_size:257,embedding_dim:32});
+        const pool=add("reduce_mean","Pool Text State",{dim:1,keepdim:false});
+        link(text,emb);link(emb,pool);
+        let conditioned=pool;
+        if(isVoice){
+          const spk=add("feature_input","Speaker ID Input",{feature_dim:1,input_key:"speaker_id"});
+          const spke=add("speaker_embedding","Speaker Embedding",{num_speakers:4,embedding_dim:16});
+          const fuse=add("concat","Text + Speaker Fusion",{dim:-1});
+          link(spk,spke);named(pool,fuse,"a");named(spke,fuse,"b");conditioned=fuse;
+        }else if(isClone){
+          const ref=add("audio_input","Reference Voice",{input_mode:"file",sample_rate:16000,input_key:"reference_audio"});
+          const refenc=add("audio_codec_encoder","Reference Audio Encoder",{latent_dim:16,hidden_channels:12});
+          const fuse=add("concat","Text + Voice Reference Fusion",{dim:-1});
+          link(ref,refenc);named(pool,fuse,"a");named(refenc,fuse,"b");conditioned=fuse;
+        }
+        const inDim=(isVoice||isClone)?48:32;
+        const pred=add("audio_token_predictor",preset.template==="audio_music"?"Music Latent Predictor":preset.template==="audio_sound"?"Sound Latent Predictor":"Speech Latent Predictor",{in_features:inDim,latent_dim:64,hidden_dim:64});
+        const dec=add("audio_codec_decoder","Neural Audio Decoder · 256 Samples",{latent_dim:64,output_samples:256,hidden_dim:128});
+        const out=add("audio_output","Audio Waveform Output",{sample_rate:16000});
+        link(conditioned,pred);link(pred,dec);link(dec,out);
+        state.project.context_length=64;
+        state.project.model_settings={...(state.project.model_settings||{}),embedding_size:32,heads:1,block:64,default_batch:16,vocab_size:257,precision:"fp32"};
+      }else if(preset.template==="signal_forecast"){
+        const x=add("signal_input","Signal Window Input",{input_mode:"static",sample_rate:100,buffer_size:32});
+        const ch=add("unsqueeze","Add Signal Channel",{dim:1});
+        const c1=add("conv1d","Temporal Conv 1 → 16",{in_channels:1,out_channels:16,kernel_size:5,stride:1,padding:2,bias:true});
+        const a1=add("gelu","GELU");
+        const c2=add("conv1d","Temporal Conv 16 → 32",{in_channels:16,out_channels:32,kernel_size:5,stride:2,padding:2,bias:true});
+        const a2=add("gelu","GELU 2");
+        const pool=add("adaptive_avgpool1d","Temporal Pool",{output_size:1});
+        const flat=add("flatten","Flatten State",{start_dim:1,end_dim:-1});
+        const head=add("linear","Forecast Head · 8 Samples",{in_features:32,out_features:8,bias:true});
+        const out=add("tensor_output","Future Signal");
+        [x,ch,c1,a1,c2,a2,pool,flat,head,out].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(preset.template==="signal_classifier"||preset.template==="signal_anomaly"){
+        const classes=preset.template==="signal_anomaly"?2:3;
+        const x=add("signal_input","Signal Window Input",{input_mode:"static",sample_rate:100,buffer_size:64});
+        const ch=add("unsqueeze","Add Signal Channel",{dim:1});
+        const c1=add("conv1d","Conv1D 1 → 16",{in_channels:1,out_channels:16,kernel_size:5,stride:1,padding:2,bias:false});
+        const bn=add("batchnorm1d","Signal BatchNorm",{num_features:16,layout:"channels_first"});
+        const a1=add("silu","SiLU");
+        const c2=add("conv1d","Conv1D 16 → 32",{in_channels:16,out_channels:32,kernel_size:5,stride:2,padding:2,bias:true});
+        const a2=add("silu","SiLU 2");
+        const pool=add("adaptive_avgpool1d","Global Temporal Pool",{output_size:1});
+        const flat=add("flatten","Flatten State",{start_dim:1,end_dim:-1});
+        const head=add("classifier",classes+"-Class Head",{dim:32,classes});
+        [x,ch,c1,bn,a1,c2,a2,pool,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(preset.template==="signal_denoiser"){
+        const x=add("signal_input","Noisy Signal Input",{input_mode:"static",sample_rate:100,buffer_size:64});
+        const ch=add("unsqueeze","Add Signal Channel",{dim:1});
+        const c1=add("conv1d","Denoise Conv 1 → 16",{in_channels:1,out_channels:16,kernel_size:5,stride:1,padding:2,bias:true});
+        const a1=add("gelu","GELU");
+        const c2=add("conv1d","Denoise Conv 16 → 16",{in_channels:16,out_channels:16,kernel_size:5,stride:1,padding:2,bias:true});
+        const a2=add("gelu","GELU 2");
+        const c3=add("conv1d","Clean Waveform Head",{in_channels:16,out_channels:1,kernel_size:5,stride:1,padding:2,bias:true});
+        const sq=add("squeeze","Remove Signal Channel",{dim:1});
+        const out=add("tensor_output","Clean Signal");
+        [x,ch,c1,a1,c2,a2,c3,sq,out].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(preset.template==="signal_fusion_model"){
+        const x=add("signal_input","3-Channel Sensor Input",{input_mode:"static",sample_rate:100,buffer_size:32});
+        const c1=add("conv1d","Sensor Fusion Conv 3 → 24",{in_channels:3,out_channels:24,kernel_size:5,stride:1,padding:2,bias:false});
+        const bn=add("batchnorm1d","Fusion BatchNorm",{num_features:24,layout:"channels_first"});
+        const a1=add("silu","SiLU");
+        const c2=add("conv1d","Fusion Conv 24 → 32",{in_channels:24,out_channels:32,kernel_size:3,stride:2,padding:1,bias:true});
+        const a2=add("silu","SiLU 2");
+        const pool=add("adaptive_avgpool1d","Global Temporal Pool",{output_size:1});
+        const flat=add("flatten","Flatten Fusion State",{start_dim:1,end_dim:-1});
+        const head=add("classifier","3-Class Sensor Head",{dim:32,classes:3});
+        [x,c1,bn,a1,c2,a2,pool,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(preset.template==="signal_spectral_model"){
+        const x=add("signal_input","Waveform Input",{input_mode:"static",sample_rate:100,buffer_size:64});
+        const fft=add("signal_fft","FFT Magnitude · 16 Bins",{bins:16,log_scale:false,remove_dc:false,flatten_channels:true});
+        const l1=add("linear","Spectral Projection 16 → 32",{in_features:16,out_features:32,bias:true});
+        const act=add("gelu","Spectral GELU");
+        const l2=add("linear","Spectrum Head 32 → 16",{in_features:32,out_features:16,bias:true});
+        const out=add("tensor_output","Predicted Spectrum");
+        [x,fft,l1,act,l2,out].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(preset.template==="signal_rf_model"){
+        const x=add("signal_input","I/Q Input · 2 Channels",{input_mode:"static",sample_rate:1000000,buffer_size:64});
+        const c1=add("conv1d","RF Conv 2 → 24",{in_channels:2,out_channels:24,kernel_size:7,stride:1,padding:3,bias:false});
+        const bn=add("batchnorm1d","RF BatchNorm",{num_features:24,layout:"channels_first"});
+        const a1=add("silu","SiLU");
+        const c2=add("conv1d","RF Conv 24 → 32",{in_channels:24,out_channels:32,kernel_size:5,stride:2,padding:2,bias:true});
+        const a2=add("silu","SiLU 2");
+        const pool=add("adaptive_avgpool1d","RF Temporal Pool",{output_size:1});
+        const flat=add("flatten","Flatten RF State",{start_dim:1,end_dim:-1});
+        const head=add("classifier","3-Class Modulation Head",{dim:32,classes:3});
+        [x,c1,bn,a1,c2,a2,pool,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(preset.template==="signal_soup"){
+        const x=add("signal_input","Long Signal Input",{input_mode:"static",sample_rate:100,buffer_size:256});
+        const feat=add("unsqueeze","Sample → Feature",{dim:-1});
+        const embed=add("linear","Signal Embedding 1 → 32",{in_features:1,out_features:32,bias:true});
+        const soup=add("soup","SOUP Signal State",{dim:32,width:64,depth:2,mixer:"esa",ffn:"saffn",memory_dim:16,fusion_hidden:64});
+        const pool=add("reduce_mean","Pool Sequence State",{dim:1,keepdim:false});
+        const head=add("linear","Future Horizon Head · 16",{in_features:32,out_features:16,bias:true});
+        const out=add("tensor_output","Future Signal Horizon");
+        [x,feat,embed,soup,pool,head,out].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+        state.project.context_length=256;
+        state.project.model_settings={...(state.project.model_settings||{}),embedding_size:32,heads:1,block:256,default_batch:8,precision:"fp32"};
+      }else if(preset.template==="multimodal_jepa"){
+        const image=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single",input_key:""});
+        const text=add("text_input","Aligned Text Input",{input_mode:"prepared_dataset",input_key:"text"});
+        const imageEnc=add("jepa_encoder","Image Encoder",{modality:"image",role:"context",latent_dim:64,hidden_dim:64,vocab_size:257,in_channels:1});
+        const textEnc=add("jepa_encoder","Text Encoder",{modality:"text",role:"context",latent_dim:64,hidden_dim:64,vocab_size:257,in_channels:1});
+        const i2t=add("jepa_predictor","Image → Text Predictor",{latent_dim:64,hidden_dim:128,dropout:0.0});
+        const t2i=add("jepa_predictor","Text → Image Predictor",{latent_dim:64,hidden_dim:128,dropout:0.0});
+        const li=add("jepa_latent_loss","Image → Text Latent Loss",{loss:"mse",normalize:"true"});
+        const lt=add("jepa_latent_loss","Text → Image Latent Loss",{loss:"mse",normalize:"true"});
+        const total=add("tensor_add","Symmetric JEPA Loss",{dim:-1});
+        const out=add("tensor_output","Multimodal JEPA Loss");
+        link(image,imageEnc);link(text,textEnc);link(imageEnc,i2t);link(textEnc,t2i);
+        named(i2t,li,"prediction");named(textEnc,li,"target");
+        named(t2i,lt,"prediction");named(imageEnc,lt,"target");
+        named(li,total,"a");named(lt,total,"b");link(total,out);
+        state.project.context_length=32;
+        state.project.model_settings={...(state.project.model_settings||{}),embedding_size:64,heads:1,block:32,default_batch:16,vocab_size:257,precision:"fp32"};
+      }else if(preset.template==="sensor_vision_fusion"){
+        const image=add("image_input","Vision Input",{channels:1,image_size:16,input_mode:"single",input_key:""});
+        const ic1=add("conv2d","Vision Conv 1 → 16",{in_channels:1,out_channels:16,kernel_size:3,stride:1,padding:1,bias:false});
+        const ia1=add("silu","Vision SiLU");
+        const ic2=add("conv2d","Vision Conv 16 → 32",{in_channels:16,out_channels:32,kernel_size:3,stride:2,padding:1,bias:true});
+        const ia2=add("silu","Vision SiLU 2");
+        const ip=add("adaptive_avgpool2d","Vision Global Pool",{output_size:1});
+        const iflat=add("flatten","Vision Latent · 32",{start_dim:1,end_dim:-1});
+        [image,ic1,ia1,ic2,ia2,ip,iflat].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+
+        const sensor=add("signal_input","Sensor Input",{input_mode:"static",sample_rate:100,buffer_size:32,input_key:"sensor"});
+        const sch=add("unsqueeze","Add Sensor Channel",{dim:1});
+        const sc1=add("conv1d","Sensor Conv 1 → 16",{in_channels:1,out_channels:16,kernel_size:5,stride:1,padding:2,bias:false});
+        const sa1=add("silu","Sensor SiLU");
+        const sc2=add("conv1d","Sensor Conv 16 → 32",{in_channels:16,out_channels:32,kernel_size:3,stride:2,padding:1,bias:true});
+        const sa2=add("silu","Sensor SiLU 2");
+        const sp=add("adaptive_avgpool1d","Sensor Global Pool",{output_size:1});
+        const sflat=add("flatten","Sensor Latent · 32",{start_dim:1,end_dim:-1});
+        [sensor,sch,sc1,sa1,sc2,sa2,sp,sflat].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+
+        const fuse=add("concat","Vision + Sensor Fusion",{dim:-1});
+        const proj=add("linear","Fusion Projection 64 → 32",{in_features:64,out_features:32,bias:true});
+        const act=add("gelu","Fusion GELU");
+        const head=add("classifier","3-Class Fusion Head",{dim:32,hidden_size:32,classes:3});
+        named(iflat,fuse,"a");named(sflat,fuse,"b");link(fuse,proj);link(proj,act);link(act,head);
+        state.project.context_length=32;
+        state.project.model_settings={...(state.project.model_settings||{}),embedding_size:32,heads:1,block:32,default_batch:16,precision:"fp32"};
+      }else if(preset.template==="image_classifier"){
+        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
+        const c1=add("conv2d","Conv Stem 1 → 16",{in_channels:1,out_channels:16,kernel_size:3,stride:1,padding:1,bias:false});
+        const b1=add("batchnorm2d","BatchNorm 16",{num_features:16});
+        const a1=add("silu","SiLU 1");
+        const p1=add("maxpool2d","MaxPool 2×2",{kernel_size:2,stride:2,padding:0});
+        const c2=add("conv2d","Conv 16 → 32",{in_channels:16,out_channels:32,kernel_size:3,stride:1,padding:1,bias:false});
+        const b2=add("batchnorm2d","BatchNorm 32",{num_features:32});
+        const a2=add("silu","SiLU 2");
+        const pool=add("adaptive_avgpool2d","Global AvgPool",{output_size:1});
+        const flat=add("flatten","Flatten Features",{start_dim:1,end_dim:-1});
+        const head=add("classifier","3-Class Head",{dim:32,hidden_size:32,classes:3});
+        [x,c1,b1,a1,p1,c2,b2,a2,pool,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+      }else if(preset.template==="yolo_detector"){
+        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
+        const stem=add("conv2d","Stem Conv 1 → 16",{in_channels:1,out_channels:16,kernel_size:3,stride:1,padding:1,bias:false});
+        const sbn=add("batchnorm2d","Stem BatchNorm",{num_features:16});
+        const sact=add("silu","Stem SiLU");
+        const p3c=add("conv2d","P3 Downsample 16 → 32",{in_channels:16,out_channels:32,kernel_size:3,stride:2,padding:1,bias:false});
+        const p3b=add("batchnorm2d","P3 BatchNorm",{num_features:32});
+        const p3=add("silu","P3 Backbone · 8×8");
+        const p4c=add("conv2d","P4 Downsample 32 → 64",{in_channels:32,out_channels:64,kernel_size:3,stride:2,padding:1,bias:false});
+        const p4b=add("batchnorm2d","P4 BatchNorm",{num_features:64});
+        const p4=add("silu","P4 Backbone · 4×4");
+        const p5c=add("conv2d","P5 Downsample 64 → 96",{in_channels:64,out_channels:96,kernel_size:3,stride:2,padding:1,bias:false});
+        const p5b=add("batchnorm2d","P5 BatchNorm",{num_features:96});
+        const p5=add("silu","P5 Backbone · 2×2");
+        const fpn4=add("fpn_fusion","FPN P5 → P4",{high_channels:96,lateral_channels:64,out_channels:64,fusion:"add"});
+        const fpn3=add("fpn_fusion","FPN P4 → P3",{high_channels:64,lateral_channels:32,out_channels:32,fusion:"add"});
+        const pan4=add("pan_fusion","PAN P3 → P4",{fine_channels:32,coarse_channels:64,out_channels:64,fusion:"concat"});
+        const pan5=add("pan_fusion","PAN P4 → P5",{fine_channels:64,coarse_channels:96,out_channels:96,fusion:"concat"});
+        const det=add("detection_pyramid_head","P3/P4/P5 Detection Head",{p3_channels:32,p4_channels:64,p5_channels:96,classes:3,slots:3});
+        [x,stem,sbn,sact,p3c,p3b,p3,p4c,p4b,p4,p5c,p5b,p5].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+        named(p5,fpn4,"high");named(p4,fpn4,"lateral");
+        named(fpn4,fpn3,"high");named(p3,fpn3,"lateral");
+        named(fpn3,pan4,"fine");named(fpn4,pan4,"coarse");
+        named(pan4,pan5,"fine");named(p5,pan5,"coarse");
+        named(fpn3,det,"p3");named(pan4,det,"p4");named(pan5,det,"p5");
+      }else if(preset.template==="vesa_yolo"){
+        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
+        const p3c=add("conv2d","CNN P3 1 → 32",{in_channels:1,out_channels:32,kernel_size:3,stride:2,padding:1,bias:false});
+        const p3b=add("batchnorm2d","CNN P3 BatchNorm",{num_features:32});
+        const p3=add("silu","CNN P3 · 8×8");link(x,p3c);link(p3c,p3b);link(p3b,p3);
+        const p4c=add("conv2d","CNN P4 32 → 64",{in_channels:32,out_channels:64,kernel_size:3,stride:2,padding:1,bias:false});
+        const p4b=add("batchnorm2d","CNN P4 BatchNorm",{num_features:64});
+        const p4=add("silu","CNN P4 · 4×4");link(p3,p4c);link(p4c,p4b);link(p4b,p4);
+        const vesa=add("vesa","VESA P5 Projection",{image_size:16,patch_size:4,in_channels:1,num_classes:384,dim:96,depth:2,heads:4,engine:"Serpentine",kernel:"auto",backend:"pytorch"});
+        const p5=add("reshape","VESA P5 · 96×2×2",{shape:"0,96,2,2"});link(x,vesa);link(vesa,p5);
+        const fpn4=add("fpn_fusion","FPN VESA P5 → P4",{high_channels:96,lateral_channels:64,out_channels:64,fusion:"add"});
+        const fpn3=add("fpn_fusion","FPN P4 → P3",{high_channels:64,lateral_channels:32,out_channels:32,fusion:"add"});
+        const pan4=add("pan_fusion","PAN P3 → P4",{fine_channels:32,coarse_channels:64,out_channels:64,fusion:"concat"});
+        const pan5=add("pan_fusion","PAN P4 → VESA P5",{fine_channels:64,coarse_channels:96,out_channels:96,fusion:"concat"});
+        const det=add("detection_pyramid_head","VESA Multi-Scale Detection Head",{p3_channels:32,p4_channels:64,p5_channels:96,classes:3,slots:3});
+        named(p5,fpn4,"high");named(p4,fpn4,"lateral");named(fpn4,fpn3,"high");named(p3,fpn3,"lateral");
+        named(fpn3,pan4,"fine");named(fpn4,pan4,"coarse");named(pan4,pan5,"fine");named(p5,pan5,"coarse");
+        named(fpn3,det,"p3");named(pan4,det,"p4");named(pan5,det,"p5");
+      }else{
+        setStatus("Unknown educational model template: "+preset.template);return;
+      }
+
+      state.components[rootId]={id:rootId,name:preset.name,kind:"model",revision:1,nodes,edges};
+      selected=null;pendingPort=null;execution={status:"idle",overall:0,message:"Ready",nodes:{}};
+      collapseArtifactWorkspace();
+      setStatus(preset.name+" loaded as an editable "+preset.category+" graph"+(data?(" · recommended data: "+data.name):"")+".");
+      draw();
+    }
+
+    function loadModelPreset(preset){
+      if(!preset)return;
+      if(preset.planned){
+        setStatus(preset.name+" is staged in the Gallery.");
+        return;
+      }
+      if(preset.loader==="tiny")return loadTinyStories();
+      if(preset.loader==="soup50")return loadSOUP30M1L();
+      if(preset.loader==="esa200")return loadESA200M();
+      if(preset.loader==="soup200")return loadSOUP200M();
+      return loadEducationalModelPreset(preset);
     }
 
     function loadStandardESASLM(spec){
@@ -10122,6 +10992,8 @@ function studioChoice(title,message,actions,options={}){
         '• Export downloads a model config or workspace export file.',
         '• Load opens .mlbricks.json or .mlbricks.bin files.',
         '• Select a node to edit config and read what it does in Inspector.',
+        '• Learn Mode explains graphs; Research Mode adds contracts, profiling and experiment snapshots.',
+        '• Project Bundle exports model + data graphs + recipes + custom components + experiment history.',
       ].join('\n');
       studioAlert(help,{title:"MLBricks Studio Help",okLabel:"Close",variant:"info",multiline:true});
       setStatus("Help opened.");
@@ -10148,7 +11020,7 @@ function studioChoice(title,message,actions,options={}){
     function loadDesign(){
       const input=document.createElement("input");
       input.type="file";
-      input.accept=".json,.mlbricks,.bin,.mlbricks.bin,application/json,application/octet-stream";
+      input.accept=".json,.mlbricks,.bin,.mlbricks.bin,.bundle.json,.mlbricks.bundle.json,application/json,application/octet-stream";
       input.style.display="none";
       input.addEventListener("change",()=>{
         const file=input.files?.[0];
@@ -10163,16 +11035,20 @@ function studioChoice(title,message,actions,options={}){
             for(let i=0;i<magicBytes.length&&isBin;i++) if(bytes[i]!==magicBytes[i])isBin=false;
             const text=new TextDecoder().decode(isBin?bytes.slice(magicBytes.length):bytes);
             const parsed=JSON.parse(text);
+            const isBundle=parsed?.format==="mlbricks-project-bundle";
             const incoming=parsed.state||parsed;
             if(!incoming||!incoming.components||!incoming.root_component_id) throw new Error("This file is not an MLB Studio design.");
             checkpoint("Load design");
             state=cp(incoming);
+            if(!Array.isArray(state.experiments))state.experiments=[];
+            studioMode=["learn","build","research"].includes(String(state.studio_mode))?String(state.studio_mode):"build";
+            state.studio_mode=studioMode;
             Object.values(state.components||{}).forEach(c=>{if(!c.edges)c.edges=[];});
             ensureWorkspaces();
             if(!state.view_component_id||!state.components[state.view_component_id])state.view_component_id=state.root_component_id;
             if(!Array.isArray(state.breadcrumbs)||!state.breadcrumbs.length)state.breadcrumbs=[{id:state.root_component_id,name:state.project?.name||"Model"}];
             selected=null;pendingPort=null;collapseArtifactWorkspace();switchingWorkspace=true;
-            setStatus((isBin?"Binary":"JSON")+" design loaded: "+file.name);
+            setStatus((isBundle?"Project bundle":isBin?"Binary":"JSON")+" loaded: "+file.name);
             draw();
           }catch(err){
             studioAlert("Could not load design: "+err.message,{title:"Design Load Failed",variant:"danger"});setStatus("Design load failed.");draw();
@@ -10225,6 +11101,9 @@ function studioChoice(title,message,actions,options={}){
     }
 
     function drawUnsafe(force=false){
+      root.classList.toggle("mlb-mode-learn",studioMode==="learn");
+      root.classList.toggle("mlb-mode-build",studioMode==="build");
+      root.classList.toggle("mlb-mode-research",studioMode==="research");
       if(!force && (pointerInteractionActive || focusedEditorActive)){
         deferredInteractionDraw=true;
         return;
@@ -10427,7 +11306,8 @@ function studioChoice(title,message,actions,options={}){
           const header=side.querySelector('.mlb-category[data-search-category="'+CSS.escape(category)+'"]');
           if(header)header.classList.toggle("mlb-search-hidden",!!term&&matches===0);
           pal.classList.toggle("mlb-search-hidden",!!term&&matches===0);
-          const collapsed=collapsedCategories.has(category);
+          const categoryFiltered=(libraryCategoryByWorkspace[state.active_workspace]||"All Components")!=="All Components";
+          const collapsed=!categoryFiltered&&collapsedCategories.has(category);
           pal.classList.toggle("collapsed",!term&&collapsed);
           if(header){
             header.setAttribute("aria-expanded",String(term||!collapsed));
@@ -10442,11 +11322,13 @@ function studioChoice(title,message,actions,options={}){
             const hit=!term||String(el.dataset.searchText||"").includes(term);
             el.classList.toggle("mlb-search-hidden",!hit);if(hit)matches++;
           });
-          customList.hidden=!term&&myBricksCollapsed;
-          customList.classList.toggle("mlb-search-hidden",!!term&&matches===0);
+          const activeCategory=libraryCategoryByWorkspace.model||"All Components";
+          const categoryAllowsCustom=activeCategory==="All Components"||activeCategory==="My Modules / API";
+          customList.hidden=!categoryAllowsCustom||(!term&&myBricksCollapsed);
+          customList.classList.toggle("mlb-search-hidden",!categoryAllowsCustom||(!!term&&matches===0));
           const customHeader=side.querySelector('.mlb-category[data-search-role="mybricks"]');
           if(customHeader){
-            customHeader.classList.toggle("mlb-search-hidden",!!term&&matches===0);
+            customHeader.classList.toggle("mlb-search-hidden",!categoryAllowsCustom||(!!term&&matches===0));
             customHeader.setAttribute("aria-expanded",String(term||!myBricksCollapsed));
             const caret=customHeader.querySelector(".mlb-category-caret");
             if(caret)caret.textContent=term||!myBricksCollapsed?"▾":"▸";
@@ -10455,13 +11337,41 @@ function studioChoice(title,message,actions,options={}){
       }
       searchInput.addEventListener("input",()=>{
         search=searchInput.value;
-        // Search is now a local DOM filter. Typing never destroys/rebuilds the
+        // Search is a local DOM filter. Typing never destroys/rebuilds the
         // graph, inspector, toolbar, event handlers, or edge layer.
         applySidebarSearch();
       });
       sr.appendChild(searchInput);side.appendChild(sr);
+
+      // Compute the catalog visible in the current workspace once. The category
+      // dropdown filters this set; the search box then filters the rendered cards.
+      const apiComposerMode=isApiComposerView();
+      const sidebarCatalogBase=catalog.filter(item=>{
+        if(item.library_hidden===true)return false;
+        if(itemWorkspace(item)!==state.active_workspace)return false;
+        if(apiComposerMode&&!apiComposerAllowsCatalogItem(item))return false;
+        return true;
+      });
+      const preferredCategoryOrder=[
+        "ML Core","Deep Learning Core","Math & Tensor Ops","Inputs",
+        "Core Components","Core Blocks","JEPA & Predictive","Signal","Position","Heads","Outputs",
+        "Image","Audio","Advanced","Data Source","Text","Splitting","Dataset","Output"
+      ];
+      const categoryNames=[...new Set(sidebarCatalogBase.map(item=>String(item.category||"Other")))];
+      categoryNames.sort((a,b)=>{
+        const ai=preferredCategoryOrder.indexOf(a),bi=preferredCategoryOrder.indexOf(b);
+        if(ai>=0||bi>=0)return (ai<0?999:ai)-(bi<0?999:bi)||a.localeCompare(b);
+        return a.localeCompare(b);
+      });
+      let activeLibraryCategory=libraryCategoryByWorkspace[state.active_workspace]||"All Components";
+      const supportsMyModules=state.active_workspace==="model";
+      if(activeLibraryCategory!=="All Components"&&!categoryNames.includes(activeLibraryCategory)&&!(supportsMyModules&&activeLibraryCategory==="My Modules / API")){
+        activeLibraryCategory="All Components";
+        libraryCategoryByWorkspace[state.active_workspace]=activeLibraryCategory;
+      }
+
       // Workshop owns the center workspace while it is open, so keep the sidebar
-      // focused on the Component/Data Library and hide the Build Workspace switcher.
+      // focused on the Component/Data Library and hide workspace/category controls.
       if(current(state)?.kind!=="custom_edit" && !galleryWorkspace.open){
         const workspaceBox=document.createElement("div");workspaceBox.className="mlb-workspace-box";
         const workspaceLabel=document.createElement("label");workspaceLabel.textContent="BUILD WORKSPACE";
@@ -10472,8 +11382,6 @@ function studioChoice(title,message,actions,options={}){
         workspaceTrigger.setAttribute("aria-haspopup","listbox");
         workspaceTrigger.setAttribute("aria-expanded","false");
         const activeWorkspaceLabel=state.active_workspace==="data"?"Data Processing":"Model Builder";
-        // Keep the workspace selector visually clean: clicking the label still
-        // opens/closes the menu, but no up/down caret is rendered.
         workspaceTrigger.textContent=activeWorkspaceLabel;
         const workspaceMenu=document.createElement("div");
         workspaceMenu.className="mlb-workspace-menu";
@@ -10503,7 +11411,6 @@ function studioChoice(title,message,actions,options={}){
         workspacePicker.append(workspaceTrigger,workspaceMenu);
         workspaceBox.append(workspaceLabel,workspacePicker);
         side.insertBefore(workspaceBox,sr);
-        // Close the small workspace menu when focus/click moves elsewhere.
         workspaceBox.addEventListener("focusout",()=>setTimeout(()=>{
           if(!workspaceBox.contains((root.ownerDocument||document).activeElement)){
             workspaceMenu.hidden=true;
@@ -10512,24 +11419,51 @@ function studioChoice(title,message,actions,options={}){
         },0));
       }
 
-      const apiComposerMode=isApiComposerView();
+      if(!galleryWorkspace.open){
+        const categoryBox=document.createElement("div");categoryBox.className="mlb-workspace-box mlb-library-category-box";
+        const categoryLabel=document.createElement("label");categoryLabel.textContent=state.active_workspace==="data"?"DATA CATEGORY":"COMPONENT CATEGORY";
+        const categoryPicker=document.createElement("div");categoryPicker.className="mlb-workspace-picker";
+        const categoryTrigger=document.createElement("button");categoryTrigger.type="button";categoryTrigger.className="mlb-workspace-trigger mlb-category-trigger";
+        categoryTrigger.setAttribute("aria-haspopup","listbox");categoryTrigger.setAttribute("aria-expanded","false");
+        const selectedCount=activeLibraryCategory==="All Components"
+          ?sidebarCatalogBase.length
+          :activeLibraryCategory==="My Modules / API"
+            ?Object.values(state.custom_components||{}).filter(def=>def.palette_hidden!==true).length
+            :sidebarCatalogBase.filter(item=>String(item.category||"Other")===activeLibraryCategory).length;
+        categoryTrigger.innerHTML='<span>'+activeLibraryCategory+'</span><small>'+selectedCount+'</small>';
+        const categoryMenu=document.createElement("div");categoryMenu.className="mlb-workspace-menu mlb-category-menu";categoryMenu.setAttribute("role","listbox");categoryMenu.hidden=true;
+        const options=["All Components",...categoryNames];
+        if(supportsMyModules)options.push("My Modules / API");
+        options.forEach(label=>{
+          const option=document.createElement("button");option.type="button";option.className="mlb-workspace-option"+(activeLibraryCategory===label?" active":"");
+          option.setAttribute("role","option");option.setAttribute("aria-selected",String(activeLibraryCategory===label));
+          const count=label==="All Components"?sidebarCatalogBase.length:label==="My Modules / API"?Object.values(state.custom_components||{}).filter(def=>def.palette_hidden!==true).length:sidebarCatalogBase.filter(item=>String(item.category||"Other")===label).length;
+          option.innerHTML='<span>'+label+'</span><small>'+count+'</small>';
+          option.addEventListener("click",ev=>{
+            ev.stopPropagation();categoryMenu.hidden=true;categoryTrigger.setAttribute("aria-expanded","false");
+            libraryCategoryByWorkspace[state.active_workspace]=label;search="";draw(true);
+          });
+          categoryMenu.appendChild(option);
+        });
+        categoryTrigger.addEventListener("click",ev=>{ev.stopPropagation();const opening=categoryMenu.hidden;categoryMenu.hidden=!opening;categoryTrigger.setAttribute("aria-expanded",String(opening));});
+        categoryPicker.append(categoryTrigger,categoryMenu);categoryBox.append(categoryLabel,categoryPicker);
+        side.insertBefore(categoryBox,sr);
+        categoryBox.addEventListener("focusout",()=>setTimeout(()=>{
+          if(!categoryBox.contains((root.ownerDocument||document).activeElement)){categoryMenu.hidden=true;categoryTrigger.setAttribute("aria-expanded","false");}
+        },0));
+      }
+
       if(apiComposerMode){
         const modeBox=document.createElement("div");modeBox.className="mlb-api-composer-sidebar-note";
         modeBox.innerHTML="<strong>API COMPONENT</strong><span>Add API functions from the Inspector, Components below, or saved Modules from My Modules.</span><span>Example: API half → <b>FFN</b> → API half.</span>";
         side.appendChild(modeBox);
       }
-      const visible=catalog.filter(item=>{
-        // Some MLBricks APIs are code-level composition containers rather than
-        // visual Builder components. Keep them in the catalog/API registry for
-        // backward compatibility, but do not show them in the component library.
-        if(item.library_hidden===true)return false;
-        if(itemWorkspace(item)!==state.active_workspace)return false;
-        if(apiComposerMode&&!apiComposerAllowsCatalogItem(item))return false;
-        return true;
-      });
+      const visible=sidebarCatalogBase.filter(item=>activeLibraryCategory==="All Components"||String(item.category||"Other")===activeLibraryCategory);
+
 
       [...new Set(visible.map(x=>x.category))].forEach(category=>{
-        const collapsed=collapsedCategories.has(category);
+        const categoryFiltered=activeLibraryCategory!=="All Components";
+        const collapsed=!categoryFiltered&&collapsedCategories.has(category);
         const h=document.createElement("button");
         h.type="button";
         h.className="mlb-category";
@@ -10547,7 +11481,7 @@ function studioChoice(title,message,actions,options={}){
           h.setAttribute("aria-expanded",String(!nextCollapsed));
           const caret=h.querySelector(".mlb-category-caret");if(caret)caret.textContent=nextCollapsed?"▸":"▾";
         });
-        side.appendChild(h);
+        if(!categoryFiltered)side.appendChild(h);
 
         visible.filter(x=>x.category===category).forEach(item=>{
           const b=document.createElement("button");b.type="button";b.dataset.type=item.type||"";
@@ -10584,7 +11518,7 @@ function studioChoice(title,message,actions,options={}){
         }
       }
 
-      if(state.active_workspace==="model"){
+      if(state.active_workspace==="model" && (activeLibraryCategory==="All Components"||activeLibraryCategory==="My Modules / API")){
         const mh=document.createElement("button");
         mh.type="button";
         mh.className="mlb-category";
@@ -10671,6 +11605,8 @@ function studioChoice(title,message,actions,options={}){
         const device=entry?selectedRuntimeDevice(runtimePanel.mode==="train"?entry.training_config:runtimePanel.mode==="generate"?entry.generation_config:entry.serve_config):null;
         if(device){const d=document.createElement("div");d.className="mlb-toolbar-device";d.textContent=device.label;toolbar.appendChild(d);}
       }else{
+        const modeSwitch=document.createElement("div");modeSwitch.className="mlb-studio-mode-switch";
+        [["learn","Learn"],["build","Build"],["research","Research"]].forEach(([key,label])=>{const b=btn(label,"mlb-studio-mode-btn"+(studioMode===key?" active":""));b.title=key==="learn"?"Guided explanations":key==="research"?"Contracts, profiling and experiment comparison":"Standard visual model building";b.addEventListener("click",()=>setStudioMode(key));modeSwitch.appendChild(b);});toolbar.appendChild(modeSwitch);
         const lockToggle=btn(layoutIsLocked()?"✎ Edit Layout":"🔒 Lock Layout","mlb-tool mlb-layout-toggle"+(layoutIsLocked()?" locked":" editing"));
         lockToggle.title=layoutIsLocked()?"Unlock structural editing":"Protect component positions, order and connections";
         lockToggle.addEventListener("click",toggleLayoutLock);
@@ -11316,6 +12252,7 @@ function studioChoice(title,message,actions,options={}){
           appendCustomSaveActions(body);
         }
       }
+      renderStep9Inspector(body);
       ins.appendChild(body);
 
       shell.append(side,main,ins);root.appendChild(shell);

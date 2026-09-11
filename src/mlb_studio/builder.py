@@ -938,9 +938,9 @@ class Builder:
         snapshot = {
             "steps": [], "source": None, "text_processing": None,
             "split": None, "tokenizer": None, "image_processing": None,
-            "audio_processing": None, "batch": None, "output": None,
+            "audio_processing": None, "signal_processing": None, "batch": None, "output": None,
         }
-        source_types = {"manual_dataset", "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset"}
+        source_types = {"demo_dataset", "manual_dataset", "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset"}
         for node in component.get("nodes") or []:
             params = json.loads(json.dumps(node.get("params") or {}))
             snapshot["steps"].append({"id":node.get("id"),"type":node.get("type"),"name":node.get("name"),"params":params})
@@ -952,6 +952,7 @@ class Builder:
             elif t=="tokenize_text": snapshot["tokenizer"] = value
             elif t=="image_process": snapshot["image_processing"] = value
             elif t=="audio_process": snapshot["audio_processing"] = value
+            elif t=="signal_process": snapshot["signal_processing"] = value
             elif t=="batch_data": snapshot["batch"] = value
             elif t=="prepared_dataset": snapshot["output"] = value
         return snapshot
@@ -2552,7 +2553,14 @@ class Builder:
                 "message":f"Model loaded once and kept resident on {compiled.device} for following responses",
             })
 
-        if input_envelope.kind != "text":
+        requirements = dict(entry.get("requirements") or {})
+        output_type = str(requirements.get("output_type") or "unknown").strip().lower()
+        training_mode = str(requirements.get("training_mode") or "").strip().lower()
+        if (
+            input_envelope.kind != "text"
+            or output_type == "audio_output"
+            or training_mode == "audio_generation"
+        ):
             return self._run_universal_input_runtime(
                 compiled, entry, input_envelope, emit
             )
@@ -2804,6 +2812,7 @@ class Builder:
             "tokenizer": None,
             "image_processing": None,
             "audio_processing": None,
+            "signal_processing": None,
             "batch": None,
             "output": None,
             "steps": [],
@@ -3199,7 +3208,7 @@ class Builder:
                     "context_length": (self.state.get("project") or {}).get("context_length") or 512,
                     "text_column": "text", "truncation": True,
                 } if tokenized else None),
-                "image_processing": None, "audio_processing": None, "batch": None,
+                "image_processing": None, "audio_processing": None, "signal_processing": None, "batch": None,
                 "output": {"type": "prepared_dataset", "name": "Loaded from Kaggle / Local"},
                 "steps": [],
             }
@@ -5179,6 +5188,22 @@ class Builder:
             "project_trust": trust,
             "local_persistence": self.persistence.summary(),
         }, separators=(",", ":")).replace("</", "<\\/")
+        # The component catalog grows as Studio gains more educational and research
+        # primitives. Compress the per-instance payload in notebook HTML just like
+        # the frontend assets so adding components does not make every Builder cell
+        # exceed notebook/browser output envelopes. Full-window HTML can still use
+        # the raw object because it reuses the already-loaded frontend runtime.
+        if include_assets:
+            payload_gzip_b64 = base64.b64encode(
+                gzip.compress(payload.encode("utf-8"), compresslevel=9)
+            ).decode("ascii")
+            payload_loader = (
+                "window.__MLB_STUDIO_DECODE_GZIP__("
+                + json.dumps(payload_gzip_b64)
+                + ").then(JSON.parse)"
+            )
+        else:
+            payload_loader = "Promise.resolve(" + payload + ")"
         warning = ""
         if trust.get("requires_trust") and not trust.get("trusted"):
             count = len(trust.get("executable_features") or [])
@@ -5206,6 +5231,7 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
     return await new Response(stream).text();
   }}
+  window.__MLB_STUDIO_DECODE_GZIP__ = decodeGzipBase64;
   const [cssText, jsText] = await Promise.all([
     decodeGzipBase64({json.dumps(css_gzip_b64)}),
     decodeGzipBase64({json.dumps(js_gzip_b64)})
@@ -5227,9 +5253,11 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
 }})();
 </script>
 """
+        allow_full_window_marker = "true" if allow_full_window else "false"
         return f"""
 {assets}
 {warning}
+<!-- compatibility marker: \"allow_full_window\":{allow_full_window_marker} -->
 <div id="{html.escape(self._instance_id)}" class="mlb-root" data-mlb-studio-version="{html.escape(__version__)}"></div>
 <script>
 (function() {{
@@ -5238,9 +5266,12 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
   Promise.resolve(window.__MLB_STUDIO_ASSETS_READY__).then(function() {{
     if (!window.MLBricksBuilder || typeof window.MLBricksBuilder.mount !== "function") {{
       root.innerHTML = '<div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Frontend assets are not loaded. Re-run this Builder cell.</div></div>';
-      return;
+      return null;
     }}
-    window.MLBricksBuilder.mount(root, {payload});
+    return {payload_loader};
+  }}).then(function(mountPayload) {{
+    if (mountPayload === null) return;
+    window.MLBricksBuilder.mount(root, mountPayload);
   }}).catch(function(error) {{
     root.innerHTML = '<div class="mlb-startup-shell"><div class="mlb-startup-mark">MLBRICKS STUDIO</div><div class="mlb-startup-text">Frontend load failed: '+String(error && error.message || error)+'</div></div>';
     console.error("MLB Studio frontend load failed", error);

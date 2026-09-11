@@ -261,9 +261,9 @@
   }
 
   var TrainingHeroState=connected(function(s){
-    var live=s.live||{},entry=s.entry||{};
-    var label=live.status==='running'?'TRAINING':live.status==='done'?'COMPLETE':live.status==='error'?'ERROR':live.status==='stopped'?'STOPPED':entry.weights_ready?'TRAINED':'NOT STARTED';
-    return {status:live.status||entry.training_status||'idle',label:label,message:live.message||'Configure training, then press Start Training.',overall:pct(live.overall),phase:live.phase||'idle'};
+    var live=s.live||{},entry=s.entry||{},mode=String((entry.requirements||{}).training_mode||'gradient'),fit=mode==='classical_fit',supervised=mode==='supervised'||mode==='jepa'||mode==='audio_generation';
+    var label=live.status==='running'?(fit?'FITTING':'TRAINING'):live.status==='done'?'COMPLETE':live.status==='error'?'ERROR':live.status==='stopped'?'STOPPED':entry.weights_ready?(fit?'FITTED':'TRAINED'):'NOT STARTED';
+    return {status:live.status||entry.training_status||'idle',label:label,message:live.message||(fit?'Choose compatible data, then press Start Fit.':supervised?'Choose compatible data and train this supervised model.':'Configure training, then press Start Training.'),overall:pct(live.overall),phase:live.phase||'idle'};
   },function(x){return h('div',{className:'mlb-training-status-top'},
     h('div',{className:'mlb-training-state '+x.status},h('strong',null,x.label),h('span',null,x.message)),
     h('div',{className:'mlb-training-percent'},h('strong',null,Math.round(x.overall)+'%'),h('span',null,x.phase))
@@ -272,16 +272,16 @@
   var ProgressBar=connected(function(s){return pct((s.live||{}).overall);},function(value){return h('div',{className:'mlb-status-progress'},h('i',{style:{width:value+'%'}}));});
 
   var TrainingValidation=connected(function(s){
-    var e=s.entry||{},c=s.config||{},d=s.dataset||{};
+    var e=s.entry||{},c=s.config||{},d=s.dataset||{},supervised=['supervised','jepa','audio_generation'].includes(String((e.requirements||{}).training_mode||''));
     return {dataset:d.name||'—',split:c.validation_split||'—',every:(c.validate_every||0)+' steps',steps:c.validation_steps==null?'—':c.validation_steps,
       latest:e.latest_validation_loss==null?'—':fmtFloat(e.latest_validation_loss,4),latestStep:e.latest_validation_step?'step '+e.latest_validation_step:null,
-      sampleTokens:c.generate_on_validation?c.validation_generate_tokens:'Off',enabled:!!c.generate_on_validation,prompt:c.validation_prompt||'',sample:e.latest_validation_sample||'No validation sample generated yet.'};
-  },function(x){return h(Section,{title:'Validation + Generated Sample'},
+      sampleTokens:c.generate_on_validation?c.validation_generate_tokens:'Off',enabled:!!c.generate_on_validation,prompt:c.validation_prompt||'',sample:e.latest_validation_sample||'No validation sample generated yet.',supervised:supervised};
+  },function(x){return h(Section,{title:x.supervised?'Validation':'Validation + Generated Sample'},
     h(Grid,{className:'mlb-validation-status-grid'},
       h(StaticMetric,{label:'Dataset',value:x.dataset}),h(StaticMetric,{label:'Validation Split',value:x.split}),
       h(StaticMetric,{label:'Validate Every',value:x.every}),h(StaticMetric,{label:'Validation Steps',value:x.steps}),
       h(StaticMetric,{label:'Latest Val',value:x.latest,sub:x.latestStep}),h(StaticMetric,{label:'Sample Tokens',value:x.sampleTokens})),
-    h('div',{className:'mlb-status-sample'},
+    x.supervised?null:h('div',{className:'mlb-status-sample'},
       h('div',null,h('strong',null,'VALIDATION GENERATION'),h('span',null,x.enabled?'Prompt: '+x.prompt:'Disabled in Training Setup')),
       h('pre',null,x.sample))
   );},shallowEqual);
@@ -290,9 +290,9 @@
     var events=history.slice(-100);
     return h(Section,{title:props.title},h('div',{className:'mlb-training-log'},events.length?events.map(function(ev,index){
       var meta=[];if(ev.step!=null)meta.push('step '+ev.step);if(ev.generated_tokens!=null)meta.push(ev.generated_tokens+' tokens');if(ev.phase)meta.push(ev.phase);
-      var extra=[];if(ev.tokens_per_sec!=null)extra.push(fmtInt(ev.tokens_per_sec)+' tok/s');if(ev.end_to_end_tokens_per_sec!=null)extra.push('E2E '+fmtInt(ev.end_to_end_tokens_per_sec)+' tok/s');
-      if(ev.memory_allocated_gb!=null)extra.push('mem '+fmtFloat(ev.memory_allocated_gb,2)+' GB');if(ev.loss!=null)extra.push('loss '+fmtFloat(ev.loss,4));if(ev.ppl!=null)extra.push('ppl '+fmtFloat(ev.ppl,2));
-      if(ev.val_loss!=null)extra.push('val '+fmtFloat(ev.val_loss,4));if(ev.val_ppl!=null)extra.push('val ppl '+fmtFloat(ev.val_ppl,2));
+      var extra=[];if(ev.tokens_per_sec!=null)extra.push(fmtInt(ev.tokens_per_sec)+' tok/s');if(ev.end_to_end_tokens_per_sec!=null)extra.push('E2E '+fmtInt(ev.end_to_end_tokens_per_sec)+' tok/s');if(ev.samples_per_sec!=null)extra.push(fmtInt(ev.samples_per_sec)+' samples/s');
+      if(ev.memory_allocated_gb!=null)extra.push('mem '+fmtFloat(ev.memory_allocated_gb,2)+' GB');if(ev.loss!=null)extra.push('loss '+fmtFloat(ev.loss,4));if(ev.ppl!=null)extra.push('ppl '+fmtFloat(ev.ppl,2));if(ev.accuracy!=null)extra.push('accuracy '+fmtFloat(Number(ev.accuracy)*100,1)+'%');if(ev.mae!=null)extra.push('MAE '+fmtFloat(ev.mae,4));
+      if(ev.val_loss!=null)extra.push('val '+fmtFloat(ev.val_loss,4));if(ev.val_ppl!=null)extra.push('val ppl '+fmtFloat(ev.val_ppl,2));if(ev.val_accuracy!=null)extra.push('val accuracy '+fmtFloat(Number(ev.val_accuracy)*100,1)+'%');if(ev.val_mae!=null)extra.push('val MAE '+fmtFloat(ev.val_mae,4));
       return h('div',{className:'mlb-log-row '+(ev.status||''),key:ev.key||String(ev.event_seq||index)},h('span',null,meta.join(' · ')),h('strong',null,(ev.message||'Runtime event')+(extra.length?' · '+extra.join(' · '):'')));
     }):h('div',{className:'mlb-log-empty'},props.emptyText)));
   },function(a,b){return a===b;});
@@ -331,9 +331,41 @@
     h(StaticMetric,{label:'Checkpoint Every',value:x.every}),h(StaticMetric,{label:'Latest Checkpoint',value:x.path}),h(StaticMetric,{label:'Weights',value:x.weights}),h(StaticMetric,{label:'Training Status',value:x.status}),h(StaticMetric,{label:'Trained At',value:x.trainedAt})));
   },shallowEqual);
 
-  function TrainingMain(props){var store=props.store;return h('div',{className:'mlb-react-runtime-stack'},
-    h(Section,{title:'Training Status',className:'mlb-training-status-hero'},h('div',{className:'mlb-react-runtime-hero'},h(TrainingHeroState,{store:store}),h(ProgressBar,{store:store}),
-      h(Grid,null,
+  var ClassicalFitMetrics=connected(function(s){
+    var e=s.entry||{},l=s.live||{},m=l.fit_metrics||e.fit_metrics||{},algo=l.fit_algorithm||e.fit_algorithm||(e.requirements||{}).fit_algorithm||'classical_fit';
+    return {algorithm:algo,samples:m.samples,features:m.features,train:m.train_accuracy,val:m.validation_accuracy,inertia:m.inertia,variance:m.explained_variance_total,iterations:m.iterations,seconds:m.fit_seconds};
+  },function(x){var pctValue=function(v){return v==null?'—':fmtFloat(Number(v)*100,1)+'%';};return h(Section,{title:'Fit Metrics'},h(Grid,{className:'mlb-validation-status-grid'},
+    h(StaticMetric,{label:'Algorithm',value:x.algorithm}),h(StaticMetric,{label:'Samples',value:x.samples==null?'—':Number(x.samples).toLocaleString()}),h(StaticMetric,{label:'Features',value:x.features==null?'—':Number(x.features).toLocaleString()}),
+    h(StaticMetric,{label:'Train Accuracy',value:pctValue(x.train)}),h(StaticMetric,{label:'Validation Accuracy',value:pctValue(x.val)}),
+    h(StaticMetric,{label:'Inertia',value:x.inertia==null?'—':fmtFloat(x.inertia,4)}),h(StaticMetric,{label:'Explained Variance',value:pctValue(x.variance)}),
+    h(StaticMetric,{label:'Iterations',value:x.iterations==null?'—':x.iterations}),h(StaticMetric,{label:'Fit Time',value:x.seconds==null?'—':fmtDuration(x.seconds)})));
+  },shallowEqual);
+
+  var SupervisedTrainingMetrics=connected(function(s){
+    var e=s.entry||{},l=s.live||{},task=l.training_task||e.training_task||(e.requirements||{}).training_task||'supervised';
+    var attempt=['running','error','stopped'].indexOf(String(l.status||''))>=0;
+    function pick(current,stored){return current!=null?current:(attempt?null:stored);}
+    var stored=e.supervised_metrics||{};
+    return {task:task,step:pick(l.step,e.trained_steps),max:l.max_steps,samples:pick(l.samples_seen,e.samples_seen),sps:pick(l.samples_per_sec,e.avg_samples_per_sec),loss:pick(l.loss,e.last_loss),valLoss:pick(l.val_loss,e.last_val_loss),accuracy:pick(l.accuracy,stored.accuracy),valAccuracy:pick(l.val_accuracy,stored.validation_accuracy),mae:pick(l.mae,stored.mae),valMae:pick(l.val_mae,stored.validation_mae),memory:l.memory_allocated_gb,peak:pick(l.memory_peak_gb,e.memory_peak_gb),elapsed:l.elapsed_seconds};
+  },function(x){var detection=String(x.task).indexOf('detection')>=0,classification=String(x.task).indexOf('classification')>=0;return h(Grid,null,
+    h(StaticMetric,{label:'Task',value:String(x.task).replace(/_/g,' ')}),
+    h(StaticMetric,{label:'Step',value:(x.step==null?0:x.step)+(x.max?' / '+x.max:'')}),
+    h(StaticMetric,{label:'Samples/s',value:x.sps==null?'—':fmtInt(x.sps)}),
+    h(StaticMetric,{label:'Samples',value:x.samples==null?'—':Number(x.samples).toLocaleString()}),
+    h(StaticMetric,{label:'Loss',value:x.loss==null?'—':fmtFloat(x.loss,4)}),
+    h(StaticMetric,{label:detection?'Class Accuracy':classification?'Accuracy':'MAE',value:(detection||classification)?(x.accuracy==null?'—':fmtFloat(Number(x.accuracy)*100,1)+'%'):(x.mae==null?'—':fmtFloat(x.mae,4))}),
+    detection?h(StaticMetric,{label:'BBox MAE',value:x.mae==null?'—':fmtFloat(x.mae,4)}):null,
+    h(StaticMetric,{label:'Val Loss',value:x.valLoss==null?'—':fmtFloat(x.valLoss,4)}),
+    h(StaticMetric,{label:detection?'Val Class Accuracy':classification?'Val Accuracy':'Val MAE',value:(detection||classification)?(x.valAccuracy==null?'—':fmtFloat(Number(x.valAccuracy)*100,1)+'%'):(x.valMae==null?'—':fmtFloat(x.valMae,4))}),
+    detection?h(StaticMetric,{label:'Val BBox MAE',value:x.valMae==null?'—':fmtFloat(x.valMae,4)}):null,
+    h(StaticMetric,{label:'GPU Memory',value:x.memory==null?'—':fmtFloat(x.memory,2)+' GB'}),
+    h(StaticMetric,{label:'Peak Memory',value:x.peak==null?'—':fmtFloat(x.peak,2)+' GB'}),
+    h(StaticMetric,{label:'Elapsed',value:fmtDuration(x.elapsed)}));
+  },shallowEqual);
+
+  function TrainingMain(props){var store=props.store,snap=store.getState?store.getState():{},mode=String((snap.entry&&snap.entry.requirements&&snap.entry.requirements.training_mode)||'gradient'),fit=mode==='classical_fit',supervised=mode==='supervised'||mode==='jepa'||mode==='audio_generation';return h('div',{className:'mlb-react-runtime-stack'},
+    h(Section,{title:fit?'Fit Status':'Training Status',className:'mlb-training-status-hero'},h('div',{className:'mlb-react-runtime-hero'},h(TrainingHeroState,{store:store}),h(ProgressBar,{store:store}),
+      fit?h(ClassicalFitMetrics,{store:store}):supervised?h(SupervisedTrainingMetrics,{store:store}):h(Grid,null,
         metric(function(s){var l=s.live||{};var v=trainingPick(s,'step','trained_steps');return (v==null?0:v)+(l.max_steps?' / '+l.max_steps:'');},'Step')(store,'step'),
         metric(function(s){return trainingPick(s,'tokens_per_sec','avg_tokens_per_sec');},'Tok/s',fmtInt)(store,'tok'),
         metric(function(s){return trainingPick(s,'end_to_end_tokens_per_sec','avg_end_to_end_tokens_per_sec');},'E2E Tok/s',fmtInt)(store,'e2e'),
@@ -347,8 +379,8 @@
         metric(function(s){return trainingPick(s,'tokens_seen','tokens_seen');},'Tokens',function(v){return Number(v||0).toLocaleString();})(store,'tokens'),
         metric(function(s){return (s.live||{}).elapsed_seconds;},'Elapsed',fmtDuration)(store,'elapsed')
       ))),
-    h(TrainingValidation,{store:store}),
-    h(TrainingEventLog,{store:store,emptyText:'Training has not started yet.'}),
+    fit?null:h(TrainingValidation,{store:store}),
+    fit?h(EventLog,{store:store,title:'Fit Log',emptyText:'Fit has not started yet.'}):supervised?h(EventLog,{store:store,title:'Supervised Training Log',emptyText:'Training has not started yet.'}):h(TrainingEventLog,{store:store,emptyText:'Training has not started yet.'}),
     h(TrainingCheckpoint,{store:store})
   );}
 
@@ -382,10 +414,10 @@
 
   function GenerationMain(props){var store=props.store;return h('div',{className:'mlb-react-runtime-stack'},h(GenerationHero,{store:store}),h(GenerationInput,{store:store}),h(GenerationOutput,{store:store}),h(EventLog,{store:store,title:'Runtime Log',emptyText:'Runtime has not started yet.'}),h(GenerationRuntime,{store:store}));}
 
-  var TrainingSide=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{},v=s.valid||{};var label=l.status==='running'?'TRAINING':l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':e.weights_ready?'TRAINED':'NOT STARTED';return {label:label,device:d.label||'Auto',backend:c.backend||'auto',execution:c.execution_mode||'eager',precision:c.precision||'auto',running:l.status==='running',valid:v.ok!==false,weights:!!e.weights_ready,locked:!!s.generationLocked,compat:v.compat||null};},function(x,props){var a=props.store.actions||{};return h('div',{className:'mlb-react-runtime-side'},
-    h('div',{className:'mlb-runtime-summary'},h('h3',null,'Training Control'),h('div',null,h('span',null,'Status'),h('strong',null,x.label)),h('div',null,h('span',null,'Device'),h('strong',null,x.device)),h('div',null,h('span',null,'Backend'),h('strong',null,x.backend)),h('div',null,h('span',null,'Execution'),h('strong',null,x.execution)),h('div',null,h('span',null,'Precision'),h('strong',null,x.precision))),
+  var TrainingSide=connected(function(s){var l=s.live||{},e=s.entry||{},c=s.config||{},d=s.device||{},v=s.valid||{},fit=!!(e.requirements&&e.requirements.training_mode==='classical_fit');var label=l.status==='running'?(fit?'FITTING':'TRAINING'):l.status==='done'?'COMPLETE':l.status==='error'?'ERROR':l.status==='stopped'?'STOPPED':e.weights_ready?(fit?'FITTED':'TRAINED'):'NOT STARTED';return {label:label,device:d.label||'Auto',backend:c.backend||'auto',execution:c.execution_mode||'eager',precision:c.precision||'auto',running:l.status==='running',valid:v.ok!==false,weights:!!e.weights_ready,locked:!!s.generationLocked,compat:v.compat||null,fit:fit};},function(x,props){var a=props.store.actions||{};return h('div',{className:'mlb-react-runtime-side'},
+    h('div',{className:'mlb-runtime-summary'},h('h3',null,x.fit?'Fit Control':'Training Control'),h('div',null,h('span',null,'Status'),h('strong',null,x.label)),h('div',null,h('span',null,'Device'),h('strong',null,x.device)),h('div',null,h('span',null,'Backend'),h('strong',null,x.backend)),h('div',null,h('span',null,'Execution'),h('strong',null,x.execution)),h('div',null,h('span',null,'Precision'),h('strong',null,x.precision))),
     x.compat?h('div',{className:'mlb-compat-card '+(x.compat.ok?'compatible':'incompatible')},h('div',{className:'mlb-compat-head'},h('strong',null,x.compat.ok?'✓ Compatible':'✕ Not Compatible'),h('span',null,x.compat.ok?'Ready for training':'Fix the items below')),asArray(x.compat.checks).map(function(c,i){c=c||{};return h('div',{className:'mlb-compat-row '+(c.ok?'pass':'fail'),key:i},h('span',null,(c.ok?'✓ ':'✕ ')+escText(c.label)),h('strong',null,escText(c.detail)));})):null,
-    x.running?h('button',{type:'button',className:'mlb-runtime-stop',onClick:a.stop},'Stop Training'):h('button',{type:'button',className:'mlb-runtime-start',disabled:!x.valid,onClick:a.start,title:!x.valid?'Fix training compatibility/settings before starting':'Start training'},'Start Training'),
+    x.running?h('button',{type:'button',className:'mlb-runtime-stop',onClick:a.stop},x.fit?'Stop Fit':'Stop Training'):h('button',{type:'button',className:'mlb-runtime-start',disabled:!x.valid,onClick:a.start,title:!x.valid?'Fix data compatibility/settings before starting':(x.fit?'Fit the classical model':'Start training')},x.fit?'Start Fit':'Start Training'),
     h('button',{type:'button',className:'mlb-vram-clean-btn',disabled:x.running,onClick:a.cleanVram,title:x.running?'Stop the active runtime before cleaning GPU memory':'Release cached model runtimes and empty the CUDA allocator cache'},'Clean GPU VRAM'),
     h('button',{type:'button',className:'mlb-runtime-cancel',onClick:a.cancel},'Cancel'),
     x.weights?h('button',{type:'button',className:'mlb-generate-btn',disabled:x.locked,onClick:a.openGeneration,title:x.locked?'Generation is disabled while training is running':'Open generation'},'Open Generation'):null

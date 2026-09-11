@@ -332,7 +332,9 @@ def test_full_window_invalidates_stale_frontend_source_snapshot():
     block = text[start:end]
     assert 'window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__()' in block
     assert 'window.__MLB_STUDIO_JS_SOURCE__||(window.__MLB_STUDIO_GET_JS_SOURCE__' not in block
-    assert 'PREBUILT MODELS' in text
+    assert 'MODEL CATEGORY' in text
+    assert 'category.toUpperCase()+" MODELS"' in text
+    assert '"Language"' in text
 
 
 def test_graph_resize_observer_does_not_observe_self_resized_wrapper():
@@ -397,7 +399,9 @@ def test_logo_is_centered_over_left_sidebar():
 
 def test_gallery_excludes_test_models_compositions_and_specialized_probes():
     js = _builder_js()
-    assert 'PREBUILT MODELS' in js
+    assert 'MODEL CATEGORY' in js
+    assert 'category.toUpperCase()+" MODELS"' in js
+    assert '"Machine Learning","Deep Learning","Language"' in js
     assert 'COMPONENT TEST MODELS' not in js
     assert 'SPECIALIZED API PROBES' not in js
     assert 'Open Test' not in js
@@ -423,10 +427,12 @@ def test_gallery_excludes_test_models_compositions_and_specialized_probes():
         assert fn not in js
 
 
-def test_data_gallery_has_six_mlbricks_curated_presets():
+def test_data_gallery_is_categorized_and_keeps_language_quickstarts():
     js = _builder_js()
     assert 'const mlbricksDataPresets=[' in js
-    assert 'mlbricksDataPresets.length+" available"' in js
+    assert 'const mlbricksDataCategories=["All Data","Machine Learning","Deep Learning","Language","JEPA","Vision","Audio","Signal","Multimodal"]' in js
+    assert 'filterLabel.textContent="DATA CATEGORY"' in js
+    assert 'visibleCount+" dataset"' in js
     for repo_id in (
         'MlBricks/tinystories',
         'MlBricks/wikipedia-en-1b',
@@ -437,12 +443,16 @@ def test_data_gallery_has_six_mlbricks_curated_presets():
     ):
         assert repo_id in js
     for label in (
-        'TinyStories', 'Wikipedia EN 1B', 'Cosmopedia Education',
-        'FineWeb-Edu 1B', 'OpenWebMath 1B', 'UltraChat 200K',
+        'Tabular Regression Demo', 'Binary Classification Demo',
+        'Image Classification Demo', 'Sequence Classification Demo',
+        'TinyStories', 'Wikipedia EN 1B', 'Image JEPA Demo', 'Video JEPA Demo',
+        'Object Detection Demo', 'Speech + Transcript Demo', 'RF / IQ Demo',
+        'Aligned Image + Text Demo', 'Sensor + Vision Demo',
     ):
         assert label in js
     assert '10k-row quickstart' in js
     assert 'function loadDataPreset(preset)' in js
+    assert 'source=makeNode(cat(catalog,"demo_dataset"))' in js
     assert 'source.params.max_rows=10000;' in js
 
 
@@ -717,10 +727,11 @@ def test_workshop_name_and_slm_presets_are_release_configured():
     js = _builder_js()
     assert 'actionBtn("Workshop"' in js
     assert 'actionBtn("Gallery"' not in js
-    assert 'card("50M SLM","Parameters ~50M · Batch 16 · Block 512 · 10 layers"' in js
-    assert 'card("50M SLM · SOUP","Parameters ~50M · Batch 16 · Block 512 · 2 SOUP layers"' in js
-    assert 'card("200M SLM","Parameters ~200M · Batch 16 · Block 256 · 12 layers"' in js
-    assert 'card("200M SLM · SOUP","Parameters 199,916,160 · Batch 16 · Block 256 · 3 SOUP layers"' in js
+    assert 'name:"50M SLM",category:"Language"' in js
+    assert 'name:"50M SLM · SOUP",category:"Language"' in js
+    assert 'name:"200M SLM",category:"Language"' in js
+    assert 'name:"200M SLM · SOUP",category:"Language"' in js
+    assert 'btn("Open Data","mlb-gallery-action")' in js
     assert 'function loadStandardESASLM(spec)' in js
     assert 'name:"50M SLM",parameters:"~50M"' in js
     assert 'dim:480,heads:6,layers:10,ffn:1920,block:512' in js
@@ -739,7 +750,7 @@ def test_workshop_name_and_slm_presets_are_release_configured():
     assert 'pos.name="Learned Position"' in js
     assert 'finalNorm.name="Final LayerNorm"' in js
     assert 'tie_embeddings:true' in js
-    assert 'loadEsa200.addEventListener("click",openAndClose(loadESA200M));' in js
+    assert 'if(preset.loader==="esa200")return loadESA200M();' in js
     assert 'coreName:"StateAware ESA ×12"' in js
     assert 'layers:12' in js
     assert 'coreName:"SOUP ×2"' in js

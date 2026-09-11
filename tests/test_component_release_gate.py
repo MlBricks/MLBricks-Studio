@@ -23,14 +23,28 @@ from mlb_studio.runner import EXECUTABLE_TYPES, SOURCE_TYPES, validate_data_pipe
 
 EXPECTED_COMPONENT_TYPES = {
     "text_input", "image_input", "audio_input", "video_input", "signal_input",
-    "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset",
+    "demo_dataset", "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset",
     "text_process", "train_test_split", "tokenize_text", "manual_dataset",
-    "image_process", "audio_process", "batch_data", "prepared_dataset",
+    "image_process", "detection_process", "audio_process", "signal_process", "jepa_prepare", "batch_data", "prepared_dataset",
     "embedding", "esa", "abstract_layer", "abstract_input", "abstract_output", "layer_block", "soup", "stateaware_esa_stack", "vesa", "rmsnorm",
     "ffn", "saffn", "residual", "dropout", "bolt", "visualbolt",
     "value_buffer", "linear", "layernorm", "rescontroller", "micro_ffn",
     "virtual_saffn", "elasticbit_runtime", "rope", "learned_position",
-    "sinusoidal_position", "lm_head", "classifier", "text_output", "logits_output",
+    "sinusoidal_position", "lm_head", "classifier", "text_output", "audio_output", "logits_output",
+    # Educational ML / DL foundations and first-principles tensor math.
+    "feature_input", "linear_regression", "logistic_regression", "polynomial_features",
+    "knn_classifier", "decision_tree_classifier", "kmeans", "pca",
+    "relu", "leaky_relu", "gelu", "silu", "sigmoid", "tanh", "softmax",
+    "batchnorm1d", "batchnorm2d", "conv1d", "conv2d", "conv3d",
+    "jepa_mask", "jepa_encoder", "jepa_predictor", "jepa_latent_loss", "signal_fft",
+    "speaker_embedding", "audio_codec_encoder", "audio_token_predictor", "audio_codec_decoder",
+    "fpn_fusion", "pan_fusion", "detection_head", "detection_pyramid_head", "detection_nms",
+    "maxpool1d", "maxpool2d", "avgpool1d", "avgpool2d",
+    "adaptive_avgpool1d", "adaptive_avgpool2d", "rnn", "lstm", "gru", "self_attention",
+    "learnable_parameter", "constant", "matmul", "tensor_add", "tensor_subtract",
+    "tensor_multiply", "tensor_divide", "concat", "reduce_mean", "reduce_sum",
+    "reduce_max", "reduce_min", "tensor_exp", "tensor_log", "tensor_sqrt",
+    "transpose", "reshape", "flatten", "unsqueeze", "squeeze", "tensor_output",
 }
 
 VALID_FIELD_TYPES = {
@@ -72,10 +86,10 @@ def _topological_ok(component):
     return len(seen) == len(ids)
 
 
-def test_release_gate_catalog_has_exactly_the_47_supported_studio_components():
+def test_release_gate_catalog_has_exactly_the_117_supported_studio_components():
     catalog = primitive_catalog()
     types = [item.get("type") for item in catalog]
-    assert len(catalog) == 47
+    assert len(catalog) == 117
     assert len(types) == len(set(types))
     assert set(types) == EXPECTED_COMPONENT_TYPES
 
