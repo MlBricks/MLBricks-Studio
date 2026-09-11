@@ -4262,20 +4262,37 @@ function studioChoice(title,message,actions,options={}){
 
     function datasetModality(meta){
       const p=meta?.pipeline||{};
-      if(p.image_processing)return "image";
-      if(p.audio_processing)return "audio";
-      if(p.signal_processing)return "signal";
       const demo=String(p?.source?.demo_type||"").toLowerCase();
+
+      // The source/data contract is authoritative. Processing nodes are only
+      // transforms and must never change a tabular dataset into a signal
+      // dataset. This also repairs older autosaved prepared-dataset metadata
+      // that may still contain a stale signal_processing snapshot.
       if(["image_classification","image_reconstruction","image_jepa","object_detection"].includes(demo))return "image";
       if(["audio_jepa","speech_transcript","multispeaker_speech","music_caption","sound_caption"].includes(demo))return "audio";
       if(["video_jepa"].includes(demo))return "video";
       if([
         "tabular_regression","neuron_regression","binary_classification","multiclass_classification",
-        "tabular_classification","high_dimensional","clustering","sequence_classification",
-        "signal_jepa","signal_classification","anomaly_detection","long_signal","spectral_signal",
-        "timeseries_forecast","signal_denoise","sensor_fusion","rf_iq"
+        "tabular_classification","high_dimensional","clustering"
+      ].includes(demo))return "tabular";
+      if([
+        "sequence_classification","signal_jepa","signal_classification","anomaly_detection",
+        "long_signal","spectral_signal","timeseries_forecast","signal_denoise","sensor_fusion","rf_iq"
       ].includes(demo))return "signal";
       if(["multimodal_image_text","sensor_vision"].includes(demo))return "multimodal";
+
+      const declared=String(meta?.modality||meta?.data_modality||"").trim().toLowerCase();
+      if(["tabular","image","audio","video","signal","text","multimodal"].includes(declared))return declared;
+
+      // Prepared tabular datasets expose scalar feature_N columns. Infer from
+      // the actual data contract before looking at optional processing nodes.
+      const cols=meta?.splits?.train?.columns||[];
+      if(cols.some(c=>/^feature_\d+$/.test(String(c))))return "tabular";
+
+      if(p.image_processing||p.detection_processing)return "image";
+      if(p.audio_processing)return "audio";
+      if(p.signal_processing)return "signal";
+      if(p.text_processing||p.tokenizer)return "text";
       return "text";
     }
 
