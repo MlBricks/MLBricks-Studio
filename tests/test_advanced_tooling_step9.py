@@ -75,18 +75,17 @@ def test_step9_experiment_comparison():
     assert result["metrics"][0]["delta"] == -0.2
 
 
-def test_step9_frontend_has_modes_inspector_experiments_and_bundle():
+def test_step9_frontend_keeps_diagnostics_experiments_and_bundle_without_modes():
     root = Path(__file__).resolve().parents[1]
     js = (root / "frontend/src/legacy-builder.js").read_text(encoding="utf-8")
     css = (root / "frontend/src/builder.css").read_text(encoding="utf-8")
     for token in [
-        '"learn","Learn"', '"build","Build"', '"research","Research"',
         "graphContractReport", "profileComponentGraph", "Explain Graph",
         "Save Experiment", "Compare Last 2", "mlbricks-project-bundle",
         "showDataPresetInspector", 'btn("Inspect","mlb-gallery-action")',
     ]:
         assert token in js
-    assert "mlb-studio-mode-switch" in css
+    assert 'modeSwitch.className="mlb-studio-mode-switch"' not in js
     assert "mlb-step9-diagnostics" in css
 
 

@@ -168,10 +168,11 @@ function __MLB_STUDIO_FACTORY__(){
     let galleryCoreCategory="All Core";
     let galleryModelCategory="All Models";
     let galleryPreviousBottomExpanded=true;
-    // Step 9 — Studio modes, diagnostics and reproducible experiment snapshots.
-    if(!state.studio_mode)state.studio_mode="build";
+    // Step 9 diagnostics remain available, but Studio now has one direct Builder workflow.
+    // Old saved Learn/Build/Research mode values are normalized for compatibility.
+    state.studio_mode="build";
     if(!Array.isArray(state.experiments))state.experiments=[];
-    let studioMode=["learn","build","research"].includes(String(state.studio_mode))?String(state.studio_mode):"build";
+    let studioMode="build";
     let componentInsertPicker={open:false,afterNodeId:null};
     let cloudWorkspace={open:false};
     let cloudPreviousBottomExpanded=true;
@@ -580,7 +581,7 @@ function __MLB_STUDIO_FACTORY__(){
         const dataRoot=uid("component");
         const starter=defaultDataNodes();
         state.components[dataRoot]={
-          id:dataRoot,name:"Data Processing",kind:"data",revision:1,nodes:starter.nodes,edges:starter.edges
+          id:dataRoot,name:"Data Builder",kind:"data",revision:1,nodes:starter.nodes,edges:starter.edges
         };
         state.workspaces={
           model:{
@@ -590,13 +591,22 @@ function __MLB_STUDIO_FACTORY__(){
             breadcrumbs:cp(state.breadcrumbs||[{id:modelRoot,name:state.project?.name||"Model"}])
           },
           data:{
-            name:"Data Processing",
+            name:"Data Builder",
             root_component_id:dataRoot,
             view_component_id:dataRoot,
-            breadcrumbs:[{id:dataRoot,name:"Data Processing"}]
+            breadcrumbs:[{id:dataRoot,name:"Data Builder"}]
           }
         };
         state.active_workspace="model";
+      }
+      if(state.workspaces?.data){
+        state.workspaces.data.name="Data Builder";
+        const dataRoot=state.components?.[state.workspaces.data.root_component_id];
+        if(dataRoot&&dataRoot.kind==="data"&&(!dataRoot.name||dataRoot.name==="Data Processing"||dataRoot.name==="Data Builder"))dataRoot.name="Data Builder";
+        if(Array.isArray(state.workspaces.data.breadcrumbs)&&state.workspaces.data.breadcrumbs.length&&
+           (!state.workspaces.data.breadcrumbs[0].name||state.workspaces.data.breadcrumbs[0].name==="Data Processing"||state.workspaces.data.breadcrumbs[0].name==="Data Builder")){
+          state.workspaces.data.breadcrumbs[0].name="Data Builder";
+        }
       }
       if(!state.active_workspace || !state.workspaces[state.active_workspace]){
         state.active_workspace="model";
@@ -628,7 +638,7 @@ function __MLB_STUDIO_FACTORY__(){
         const def=state.custom_components?.[c.definition_id];
         return String(def?.implementation||"graph")==="api" ? "API Component Editor" : "Module Editor";
       }
-      return state.active_workspace==="data" ? "Data Processing" : "Model Builder";
+      return state.active_workspace==="data" ? "Data Builder" : "Model Builder";
     }
 
     function inspectorRenderKey(){
@@ -1211,7 +1221,7 @@ function __MLB_STUDIO_FACTORY__(){
         setTimeout(()=>requestPersistenceCommand("persistence_save_item",{kind:"data",name},true),180);return;
       }
       if(state.active_workspace!=="model"){
-        setStatus("Open Model Builder or Data Processing to save the current design to Workshop.");return;
+        setStatus("Open Model Builder or Data Builder to save the current design to Workshop.");return;
       }
       const model=modelRootComponent();if(!model)return;
       const name=await askGalleryName("models",state.project?.name||model.name||"My Model","Save model to Workshop as:");
@@ -2299,7 +2309,7 @@ function __MLB_STUDIO_FACTORY__(){
 
     function requestRunWithOverwrite(overwriteExisting=false){
       if(state.active_workspace!=="data"){
-        setStatus("Model execution is not compiled yet. Run is currently available for Data Processing.");
+        setStatus("Model execution is not compiled yet. Run is currently available for Data Builder.");
         draw();
         return;
       }
@@ -4222,31 +4232,22 @@ function studioChoice(title,message,actions,options={}){
 
       let index=0;
       const finish=()=>{
-        // A model build is anchored to Model Builder. Background data progress,
-        // Full Window state sync, or another transient UI update must not leave
-        // the completed model displayed under Data Processing.
-        state.active_workspace="model";
+        // Model Builder and Data Builder are persistent siblings. A model build may
+        // finish while the user is inspecting/fetching data; completion updates the
+        // model workspace without stealing the currently visible canvas.
+        const modelWasVisible=state.active_workspace==="model";
         const modelWs=state.workspaces?.model;
-        if(modelWs){
-          state.view_component_id=modelWs.view_component_id||modelWs.root_component_id;
-          state.breadcrumbs=cp(modelWs.breadcrumbs||[{id:modelWs.root_component_id,name:modelWs.name||"Model Builder"}]);
-        }
-        galleryWorkspace.open=false;
-        cloudWorkspace.open=false;
-        runtimePanel=null;
+        galleryWorkspace.open=false;cloudWorkspace.open=false;runtimePanel=null;
         const entry=registerBuiltModel();
-        execution={
-          status:"done",overall:100,message:"Model built: "+entry.name,
-          nodes:Object.fromEntries(nodes.map(n=>[n.id,{status:"done",message:"Built"}]))
-        };
-        bottomView="outputs";
-        // Keep the workspace collapsed by default, but open it after a successful
-        // build so the newly built model is immediately available for selection.
-        bottomExpanded=true;
-        outputDirectorySelection=entry.id;
-        selected=null;
-        scrollBuiltModelActionsOnce=true;
-        setStatus("Build complete. Select training data and check compatibility.");
+        execution={status:"done",overall:100,message:"Model built: "+entry.name,nodes:Object.fromEntries(nodes.map(n=>[n.id,{status:"done",message:"Built"}]))};
+        if(modelWs){modelWs.view_component_id=modelWs.root_component_id;modelWs.breadcrumbs=[{id:modelWs.root_component_id,name:state.project?.name||entry.name||"Model Builder"}];}
+        if(modelWasVisible){
+          state.view_component_id=modelWs?.view_component_id||state.view_component_id;state.breadcrumbs=cp(modelWs?.breadcrumbs||state.breadcrumbs);
+          bottomView="outputs";bottomExpanded=true;outputDirectorySelection=entry.id;selected=null;scrollBuiltModelActionsOnce=true;
+          setStatus("Build complete. Select training data and check compatibility.");
+        }else{
+          setStatus("Model build complete in Model Builder. Data Builder stayed open.");
+        }
         draw();
       };
 
@@ -6048,7 +6049,7 @@ function studioChoice(title,message,actions,options={}){
     function renderDataOutputDirectory(container){
       const entries=availablePreparedDatasets();
       const head=document.createElement("div");head.className="mlb-output-head";head.innerHTML="<div><strong>DATA REPOSITORY</strong><span>"+entries.length+" dataset"+(entries.length===1?"":"s")+" · processed, loaded and imported data</span></div>";container.appendChild(head);
-      if(!entries.length){container.appendChild(makeDirectoryEmpty("No prepared datasets yet.","Run a Data Processing pipeline. Completed datasets will appear here automatically."));return;}
+      if(!entries.length){container.appendChild(makeDirectoryEmpty("No prepared datasets yet.","Run a Data Builder pipeline. Completed datasets will appear here automatically."));return;}
       const list=document.createElement("div");list.className="mlb-output-list compact";
       entries.forEach(meta=>{const card=document.createElement("div");card.className="mlb-output-entry compact"+(outputDirectorySelection===meta.id?" selected":"");const top=document.createElement("div");top.className="mlb-output-entry-top";const sourceLabel=meta.local_source?"Local Environment Data":dataStorageLabel(meta);top.innerHTML="<div class='mlb-output-name'><strong>"+meta.name+"</strong><span>"+sourceLabel+"</span></div><span class='mlb-output-type data'>DATA</span>";card.appendChild(top);const stats=document.createElement("div");stats.className="mlb-output-stats compact";[["train","Train"],["validation","Val"],["test","Test"]].forEach(([key,label])=>{if(meta.splits?.[key]){const item=document.createElement("div");item.innerHTML="<span>"+label+"</span><strong>"+splitRows(meta,key)+"</strong>";stats.appendChild(item);}});card.appendChild(stats);const foot=document.createElement("div");foot.className="mlb-output-compact-foot";foot.innerHTML="<span>"+(meta.total_rows??"?")+" rows</span><span>Details →</span>";card.appendChild(foot);card.addEventListener("click",()=>{outputDirectorySelection=meta.id;selected=null;inspectorTab="settings";setStatus(meta.name+" details opened.");draw();});list.appendChild(card);});container.appendChild(list);
     }
@@ -6185,6 +6186,8 @@ function studioChoice(title,message,actions,options={}){
         builder_version:"1.0.0b2",
         project:cp(state.project||{}),
         model:cp(model),
+        custom_components:cp(state.custom_components||{}),
+        component_cache:cp(state.component_cache||{}),
         selected_dataset:selectedModelDataset(),
       };
       const blob=new Blob([JSON.stringify(config,null,2)],{type:"application/json"});
@@ -6291,24 +6294,20 @@ function studioChoice(title,message,actions,options={}){
     function exportProjectBundle(){const blob=new Blob([JSON.stringify(projectBundlePayload(),null,2)],{type:"application/json"});downloadDesignBlob(blob,safeFilename(state.project?.name)+".mlbricks.bundle.json");setStatus("Reproducible project bundle exported.");}
     function renderStep9Inspector(body){
       if(galleryWorkspace.open||cloudWorkspace.open||runtimePanel)return;
-      const modeTitle=document.createElement("div");modeTitle.className="mlb-section-title";modeTitle.textContent=studioMode.toUpperCase()+" MODE";body.appendChild(modeTitle);
+      const modeTitle=document.createElement("div");modeTitle.className="mlb-section-title";modeTitle.textContent="BUILD MODE";body.appendChild(modeTitle);
       const report=graphContractReport(),profile=profileComponentGraph();const box=document.createElement("div");box.className="mlb-step9-diagnostics";
       const statusRow=document.createElement("div");statusRow.className="mlb-step9-summary";statusRow.innerHTML='<span>Graph Contract</span><strong class="'+(report.ok?'ok':'bad')+'">'+(report.ok?'READY':'NEEDS ATTENTION')+'</strong>';box.appendChild(statusRow);
-      report.checks.slice(0,studioMode==="research"?99:4).forEach(c=>{const row=document.createElement("div");row.className="mlb-step9-check "+(c.ok?"ok":c.severity==="warning"?"warn":"bad");row.innerHTML='<span>'+(c.ok?'✓':c.severity==="warning"?'!':'✕')+' '+c.label+'</span><small>'+c.detail+'</small>';box.appendChild(row);});
-      if(studioMode==="research"){
-        const metrics=document.createElement("div");metrics.className="mlb-step9-profile-grid";[["Nodes",profile.nodes],["Connections",profile.edges],["Param estimate",humanCount(profile.estimated_parameters)],["Parameterized blocks",profile.trainable_nodes]].forEach(([k,v])=>{const m=document.createElement("div");m.innerHTML='<span>'+k+'</span><strong>'+v+'</strong>';metrics.appendChild(m);});box.appendChild(metrics);
-      }
+      report.checks.slice(0,4).forEach(c=>{const row=document.createElement("div");row.className="mlb-step9-check "+(c.ok?"ok":c.severity==="warning"?"warn":"bad");row.innerHTML='<span>'+(c.ok?'✓':c.severity==="warning"?'!':'✕')+' '+c.label+'</span><small>'+c.detail+'</small>';box.appendChild(row);});
+      const metrics=document.createElement("div");metrics.className="mlb-step9-profile-grid";[["Nodes",profile.nodes],["Connections",profile.edges],["Param estimate",humanCount(profile.estimated_parameters)],["Parameterized blocks",profile.trainable_nodes]].forEach(([k,v])=>{const m=document.createElement("div");m.innerHTML='<span>'+k+'</span><strong>'+v+'</strong>';metrics.appendChild(m);});box.appendChild(metrics);
       body.appendChild(box);
       const actions=document.createElement("div");actions.className="mlb-action-grid mlb-step9-actions";
-      const explain=btn(studioMode==="learn"?"Explain This Graph":"Explain Graph");explain.addEventListener("click",explainCurrentGraph);actions.appendChild(explain);
-      if(studioMode==="research"&&state.active_workspace==="model"){
-        const snap=btn("Save Experiment");snap.addEventListener("click",saveExperimentSnapshot);const compare=btn("Compare Last 2");compare.addEventListener("click",compareRecentExperiments);actions.append(snap,compare);
+      const explain=btn("Explain Graph");explain.addEventListener("click",explainCurrentGraph);actions.appendChild(explain);
+      if(state.active_workspace==="model"){
+        const snap=btn("Save Experiment");snap.addEventListener("click",saveExperimentSnapshot);
+        const compare=btn("Compare Last 2");compare.disabled=(state.experiments||[]).length<2;compare.addEventListener("click",compareRecentExperiments);actions.append(snap,compare);
       }
       const bundle=btn("Export Project Bundle");bundle.addEventListener("click",exportProjectBundle);actions.appendChild(bundle);body.appendChild(actions);
-      if(studioMode==="learn"){
-        const learn=document.createElement("div");learn.className="mlb-step9-learn-note";learn.innerHTML='<strong>Learning view</strong><span>Select any node to study its purpose and configuration. Use Explain Graph to trace the complete architecture and data flow.</span>';body.appendChild(learn);
-      }
-      if(studioMode==="research"&&(state.experiments||[]).length){const title=document.createElement("div");title.className="mlb-section-title";title.textContent="EXPERIMENT HISTORY";body.appendChild(title);const history=document.createElement("div");history.className="mlb-step9-history";(state.experiments||[]).slice(-5).reverse().forEach(e=>{const row=document.createElement("div");row.innerHTML='<strong>'+String(e.name||"Experiment")+'</strong><span>'+humanCount(e.profile?.estimated_parameters||0)+' params · '+String(e.saved_at||"").replace('T',' ').slice(0,19)+'</span>';history.appendChild(row);});body.appendChild(history);}
+      if(state.active_workspace==="model"&&(state.experiments||[]).length){const title=document.createElement("div");title.className="mlb-section-title";title.textContent="EXPERIMENT HISTORY";body.appendChild(title);const history=document.createElement("div");history.className="mlb-step9-history";(state.experiments||[]).slice(-5).reverse().forEach(e=>{const row=document.createElement("div");row.innerHTML='<strong>'+String(e.name||"Experiment")+'</strong><span>'+humanCount(e.profile?.estimated_parameters||0)+' params · '+String(e.saved_at||"").replace('T',' ').slice(0,19)+'</span>';history.appendChild(row);});body.appendChild(history);}
     }
 
     function renderGalleryView(container){
@@ -6373,7 +6372,7 @@ function studioChoice(title,message,actions,options={}){
       });
 
       const dataSection=makeSection("MY DATA PIPELINES",(state.gallery.data||[]).length+" saved");
-      if(!(state.gallery.data||[]).length){const e=document.createElement("div");e.className="mlb-gallery-empty";e.textContent="Save a Data Processing pipeline here for reuse.";dataSection.appendChild(e);}
+      if(!(state.gallery.data||[]).length){const e=document.createElement("div");e.className="mlb-gallery-empty";e.textContent="Save a Data Builder pipeline here for reuse.";dataSection.appendChild(e);}
       (state.gallery.data||[]).forEach(entry=>{
         const card=document.createElement("div");card.className="mlb-gallery-card";
         const meta=document.createElement("div");meta.innerHTML="<strong>"+entry.name+"</strong><span>"+((entry.architecture?.nodes||[]).length)+" steps · "+(entry.saved_at?new Date(entry.saved_at).toLocaleDateString():"Saved")+"</span>";
@@ -6405,9 +6404,9 @@ function studioChoice(title,message,actions,options={}){
 
       const galleryActions=document.createElement("div");galleryActions.className="mlb-gallery-page-actions";
       const galleryLoad=btn("⇧ Load","mlb-gallery-action mlb-gallery-file-action");
-      galleryLoad.title="Load .mlbricks.json or .mlbricks.bin";galleryLoad.addEventListener("click",loadDesign);galleryActions.appendChild(galleryLoad);
+      galleryLoad.title="Load a model directly into Model Builder, data export into Data Builder, or open a full project bundle";galleryLoad.addEventListener("click",loadDesign);galleryActions.appendChild(galleryLoad);
       const galleryExport=btn("⇩ Export","mlb-gallery-action mlb-gallery-file-action");
-      galleryExport.title="Export model config or workspace data";galleryExport.addEventListener("click",exportWorkspace);galleryActions.appendChild(galleryExport);
+      galleryExport.title="Export the active Model Builder or Data Builder canvas";galleryExport.addEventListener("click",exportWorkspace);galleryActions.appendChild(galleryExport);
       const bundleExport=btn("Bundle","mlb-gallery-action mlb-gallery-file-action");bundleExport.title="Export model graph, data graph, recipes, custom components and experiments as one reproducible project bundle";bundleExport.addEventListener("click",exportProjectBundle);galleryActions.appendChild(bundleExport);
 
       let canSave=false,saveLabel="";
@@ -6490,7 +6489,7 @@ function studioChoice(title,message,actions,options={}){
               const data=modelPresetData(preset);
               if(data){
                 const useData=btn("Open Data","mlb-gallery-action");
-                useData.title="Open "+data.name+" in the editable Data Processing workspace";
+                useData.title="Open "+data.name+" in the editable Data Builder workspace";
                 useData.addEventListener("click",openAndClose(()=>loadDataPreset(data)));actions.push(useData);
               }
               const meta=[preset.task,preset.parameters?("Parameters "+preset.parameters):"",preset.description,data?("Data: "+data.name):""].filter(Boolean).join(" · ");
@@ -6933,7 +6932,7 @@ function studioChoice(title,message,actions,options={}){
     async function saveCurrentDesignToLocalRepository(kindOverride=""){
       const kind=kindOverride||((state.active_workspace==="data")?"data":"model");
       const defaultName=kind==="project"?(state.project?.name||"MLBricks Project"):
-        kind==="data"?(current(state)?.name||"Data Processing"):(state.project?.name||modelRootComponent()?.name||"Model Design");
+        kind==="data"?(current(state)?.name||"Data Builder"):(state.project?.name||modelRootComponent()?.name||"Model Design");
       const win=(root.ownerDocument&&root.ownerDocument.defaultView)||window;
       const proposed=await studioPrompt("Save design to Local Repository as:", defaultName, {title:"Save To Local Repository", okLabel:"Save"});
       if(proposed===null)return;
@@ -11140,7 +11139,7 @@ function studioChoice(title,message,actions,options={}){
         '• Export downloads a model config or workspace export file.',
         '• Load opens .mlbricks.json or .mlbricks.bin files.',
         '• Select a node to edit config and read what it does in Inspector.',
-        '• Learn Mode explains graphs; Research Mode adds contracts, profiling and experiment snapshots.',
+        '• Model Builder and Data Builder stay alive side by side; switch without losing either canvas.',
         '• Project Bundle exports model + data graphs + recipes + custom components + experiment history.',
       ].join('\n');
       studioAlert(help,{title:"MLBricks Studio Help",okLabel:"Close",variant:"info",multiline:true});
@@ -11165,6 +11164,38 @@ function studioChoice(title,message,actions,options={}){
       draw();
     }
 
+    function loadModelConfigIntoBuilder(config,sourceName="model config"){
+      if(!config?.model)return false;
+      checkpoint("Load model into Model Builder");rememberWorkspaceView();
+      state.active_workspace="model";
+      const ws=state.workspaces.model;const rootId=ws.root_component_id;
+      const architecture=cp(config.model);
+      Object.entries(config.component_cache||{}).forEach(([id,item])=>{if(id&&item)state.component_cache[id]=cp(item);});
+      const remap={};const imported=[];
+      Object.entries(config.custom_components||{}).forEach(([oldId,def])=>{const newId=uid("custom");remap[oldId]=newId;const copyDef=cp(def);copyDef.id=newId;copyDef.gallery_entry_id=null;hydrateCachedUserSources(copyDef);imported.push(copyDef);});
+      imported.forEach(def=>{(def.nodes||[]).forEach(n=>{if(n?.definition_id&&remap[n.definition_id])n.definition_id=remap[n.definition_id];});state.custom_components[def.id]=def;});
+      (architecture.nodes||[]).forEach(n=>{if(n?.definition_id&&remap[n.definition_id])n.definition_id=remap[n.definition_id];});
+      architecture.id=rootId;architecture.kind="model";architecture.name=String(config.project?.name||architecture.name||"Loaded Model");
+      state.components[rootId]=architecture;state.root_component_id=rootId;state.view_component_id=rootId;
+      state.project={...(state.project||{}),...(config.project||{}),name:architecture.name};
+      state.breadcrumbs=[{id:rootId,name:architecture.name}];ws.view_component_id=rootId;ws.breadcrumbs=cp(state.breadcrumbs);
+      selected=null;pendingPort=null;runtimePanel=null;galleryWorkspace.open=false;cloudWorkspace.open=false;collapseArtifactWorkspace();switchingWorkspace=true;
+      persistComponentCache();setStatus("Loaded into Model Builder: "+String(sourceName||architecture.name));draw();return true;
+    }
+
+    function loadWorkspaceExportIntoBuilder(config,sourceName="workspace export"){
+      const architecture=cp(config?.current_component||null);if(!architecture)return false;
+      const kind=String(config.workspace||architecture.kind||"")==="data"?"data":"model";
+      if(kind==="model")return loadModelConfigIntoBuilder({project:config.project||{},model:architecture,custom_components:config.custom_components||{},component_cache:config.component_cache||{}},sourceName);
+      checkpoint("Load data into Data Builder");rememberWorkspaceView();state.active_workspace="data";
+      const ws=state.workspaces.data;const rootId=ws.root_component_id;architecture.id=rootId;architecture.kind="data";architecture.name=String(architecture.name||"Data Builder");
+      state.components[rootId]=architecture;state.view_component_id=rootId;state.breadcrumbs=[{id:rootId,name:architecture.name}];ws.view_component_id=rootId;ws.breadcrumbs=cp(state.breadcrumbs);
+      if(Array.isArray(config.prepared_datasets))state.prepared_datasets=cp(config.prepared_datasets);
+      if(Array.isArray(config.project_files))state.project_files=cp(config.project_files);
+      selected=null;pendingPort=null;runtimePanel=null;galleryWorkspace.open=false;cloudWorkspace.open=false;execution={status:"idle",overall:0,message:"Ready",nodes:{}};collapseArtifactWorkspace();switchingWorkspace=true;
+      setStatus("Loaded into Data Builder: "+String(sourceName||architecture.name));draw();return true;
+    }
+
     function loadDesign(){
       const input=document.createElement("input");
       input.type="file";
@@ -11183,14 +11214,15 @@ function studioChoice(title,message,actions,options={}){
             for(let i=0;i<magicBytes.length&&isBin;i++) if(bytes[i]!==magicBytes[i])isBin=false;
             const text=new TextDecoder().decode(isBin?bytes.slice(magicBytes.length):bytes);
             const parsed=JSON.parse(text);
+            if(parsed?.format==="mlbricks-model-config"&&parsed?.model){loadModelConfigIntoBuilder(parsed,file.name);return;}
+            if(parsed?.format==="mlbricks-export"&&parsed?.current_component){loadWorkspaceExportIntoBuilder(parsed,file.name);return;}
             const isBundle=parsed?.format==="mlbricks-project-bundle";
             const incoming=parsed.state||parsed;
             if(!incoming||!incoming.components||!incoming.root_component_id) throw new Error("This file is not an MLB Studio design.");
             checkpoint("Load design");
             state=cp(incoming);
             if(!Array.isArray(state.experiments))state.experiments=[];
-            studioMode=["learn","build","research"].includes(String(state.studio_mode))?String(state.studio_mode):"build";
-            state.studio_mode=studioMode;
+            studioMode="build";state.studio_mode="build";
             Object.values(state.components||{}).forEach(c=>{if(!c.edges)c.edges=[];});
             ensureWorkspaces();
             if(!state.view_component_id||!state.components[state.view_component_id])state.view_component_id=state.root_component_id;
@@ -11518,53 +11550,32 @@ function studioChoice(title,message,actions,options={}){
         libraryCategoryByWorkspace[state.active_workspace]=activeLibraryCategory;
       }
 
-      // Workshop owns the center workspace while it is open, so keep the sidebar
-      // focused on the Component/Data Library and hide workspace/category controls.
+      // Model Builder and Data Builder are persistent sibling workspaces.
+      // Switching never destroys the other canvas, so data can keep fetching while
+      // the user continues designing a model (and vice versa).
       if(current(state)?.kind!=="custom_edit" && !galleryWorkspace.open){
         const workspaceBox=document.createElement("div");workspaceBox.className="mlb-workspace-box";
         const workspaceLabel=document.createElement("label");workspaceLabel.textContent="BUILD WORKSPACE";
-        const workspacePicker=document.createElement("div");workspacePicker.className="mlb-workspace-picker";
-        const workspaceTrigger=document.createElement("button");
-        workspaceTrigger.type="button";
-        workspaceTrigger.className="mlb-workspace-trigger";
-        workspaceTrigger.setAttribute("aria-haspopup","listbox");
-        workspaceTrigger.setAttribute("aria-expanded","false");
-        const activeWorkspaceLabel=state.active_workspace==="data"?"Data Processing":"Model Builder";
-        workspaceTrigger.textContent=activeWorkspaceLabel;
-        const workspaceMenu=document.createElement("div");
-        workspaceMenu.className="mlb-workspace-menu";
-        workspaceMenu.setAttribute("role","listbox");
-        workspaceMenu.hidden=true;
-        [["model","Model Builder"],["data","Data Processing"]].forEach(([value,label])=>{
+        const workspaceButtons=document.createElement("div");workspaceButtons.className="mlb-workspace-buttons";
+        const dataBusy=execution.status==="running"&&execution.runtime_kind==="data";
+        const modelRoot=state.components?.[state.workspaces?.model?.root_component_id];
+        const modelCaption=String(state.project?.name||modelRoot?.name||"Model canvas");
+        const dataCaption=dataBusy
+          ?("Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%")
+          :((state.prepared_datasets||[]).length?((state.prepared_datasets||[]).length+" dataset"+((state.prepared_datasets||[]).length===1?"":"s")+" ready"):"Data canvas");
+        [["model","Model Builder",modelCaption],["data","Data Builder",dataCaption]].forEach(([value,label,caption])=>{
           const option=document.createElement("button");
           option.type="button";
-          option.className="mlb-workspace-option"+(state.active_workspace===value?" active":"");
-          option.setAttribute("role","option");
-          option.setAttribute("aria-selected",String(state.active_workspace===value));
-          option.textContent=label;
-          option.addEventListener("click",ev=>{
-            ev.stopPropagation();
-            workspaceMenu.hidden=true;
-            workspaceTrigger.setAttribute("aria-expanded","false");
-            if(state.active_workspace!==value)switchWorkspace(value);
-          });
-          workspaceMenu.appendChild(option);
+          option.className="mlb-workspace-tab"+(state.active_workspace===value?" active":"")+(value==="data"&&dataBusy?" busy":"");
+          option.setAttribute("aria-pressed",String(state.active_workspace===value));
+          const strong=document.createElement("strong");strong.textContent=label;
+          const small=document.createElement("span");small.textContent=caption;
+          option.append(strong,small);
+          option.addEventListener("click",()=>{if(state.active_workspace!==value)switchWorkspace(value);});
+          workspaceButtons.appendChild(option);
         });
-        workspaceTrigger.addEventListener("click",ev=>{
-          ev.stopPropagation();
-          const opening=workspaceMenu.hidden;
-          workspaceMenu.hidden=!opening;
-          workspaceTrigger.setAttribute("aria-expanded",String(opening));
-        });
-        workspacePicker.append(workspaceTrigger,workspaceMenu);
-        workspaceBox.append(workspaceLabel,workspacePicker);
+        workspaceBox.append(workspaceLabel,workspaceButtons);
         side.insertBefore(workspaceBox,sr);
-        workspaceBox.addEventListener("focusout",()=>setTimeout(()=>{
-          if(!workspaceBox.contains((root.ownerDocument||document).activeElement)){
-            workspaceMenu.hidden=true;
-            workspaceTrigger.setAttribute("aria-expanded","false");
-          }
-        },0));
       }
 
       if(!galleryWorkspace.open){
@@ -11753,14 +11764,12 @@ function studioChoice(title,message,actions,options={}){
         const device=entry?selectedRuntimeDevice(runtimePanel.mode==="train"?entry.training_config:runtimePanel.mode==="generate"?entry.generation_config:entry.serve_config):null;
         if(device){const d=document.createElement("div");d.className="mlb-toolbar-device";d.textContent=device.label;toolbar.appendChild(d);}
       }else{
-        const modeSwitch=document.createElement("div");modeSwitch.className="mlb-studio-mode-switch";
-        [["learn","Learn"],["build","Build"],["research","Research"]].forEach(([key,label])=>{const b=btn(label,"mlb-studio-mode-btn"+(studioMode===key?" active":""));b.title=key==="learn"?"Guided explanations":key==="research"?"Contracts, profiling and experiment comparison":"Standard visual model building";b.addEventListener("click",()=>setStudioMode(key));modeSwitch.appendChild(b);});toolbar.appendChild(modeSwitch);
         const lockToggle=btn(layoutIsLocked()?"✎ Edit Layout":"🔒 Lock Layout","mlb-tool mlb-layout-toggle"+(layoutIsLocked()?" locked":" editing"));
         lockToggle.title=layoutIsLocked()?"Unlock structural editing":"Protect component positions, order and connections";
         lockToggle.addEventListener("click",toggleLayoutLock);
         toolbar.append(lockToggle);
 
-        // Data runtime health/progress belongs only to the Data Processing workspace.
+        // Data runtime health/progress belongs only to the Data Builder workspace.
         // Module/API Component editors may be opened while Data is the active parent
         // workspace, but they are reusable component editors and should stay clean.
         if(state.active_workspace==="data" && current(state)?.kind!=="custom_edit"){
@@ -11840,7 +11849,7 @@ function studioChoice(title,message,actions,options={}){
       });crumbs.appendChild(b);if(i<state.breadcrumbs.length-1){const sep=document.createElement("span");sep.textContent="/";crumbs.appendChild(sep);}});
       ctop.appendChild(crumbs);canvas.appendChild(ctop);
 
-      // Data Processing uses a compact top HUD: live processing progress sits
+      // Data Builder uses a compact top HUD: live processing progress sits
       // on the same horizontal row as the Data Blueprint. This keeps both status
       // surfaces above the graph without consuming a full extra canvas row.
       let dataProgress=null;

@@ -11,12 +11,12 @@ def test_visible_studio_brand_is_beta():
     assert '<title>MLB Studio</title>' in JS
 
 
-def test_build_workspace_uses_themed_picker():
-    assert 'mlb-workspace-trigger' in JS
-    assert 'mlb-workspace-menu' in JS
-    assert 'mlb-workspace-option' in JS
-    assert '.mlb-workspace-option.active' in CSS
-    assert 'background:#2878d4' in CSS
+def test_build_workspace_uses_persistent_dual_builder_tabs():
+    assert 'mlb-workspace-buttons' in JS
+    assert 'mlb-workspace-tab' in JS
+    assert 'Model Builder' in JS
+    assert 'Data Builder' in JS
+    assert '.mlb-workspace-tab.active' in CSS
 
 
 def test_build_workspace_hidden_while_gallery_is_open():
@@ -25,6 +25,7 @@ def test_build_workspace_hidden_while_gallery_is_open():
     assert 'galleryWorkspace.open=false;' in JS
 
 
-def test_build_workspace_picker_has_no_up_down_caret():
-    assert 'workspaceTrigger.textContent=activeWorkspaceLabel;' in JS
+def test_build_workspace_switcher_has_no_dropdown_or_caret():
+    assert 'workspaceTrigger.textContent=activeWorkspaceLabel;' not in JS
+    assert 'workspaceMenu.hidden' not in JS[JS.index('// Model Builder and Data Builder are persistent sibling workspaces.'):JS.index('if(!galleryWorkspace.open){', JS.index('// Model Builder and Data Builder are persistent sibling workspaces.'))]
     assert "mlb-workspace-caret'>⌄" not in JS

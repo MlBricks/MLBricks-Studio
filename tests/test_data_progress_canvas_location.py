@@ -19,7 +19,7 @@ def test_data_progress_lives_in_canvas_hud_not_toolbar():
 
     # Kernel health remains in the toolbar, but the old live progress pill is no
     # longer created/appended there, avoiding horizontal toolbar overflow.
-    start = js.index('// Data runtime health/progress belongs only to the Data Processing workspace.')
+    start = js.index('// Data runtime health/progress belongs only to the Data Builder workspace.')
     end = js.index('const tsp=document.createElement("div");tsp.className="mlb-toolspacer"', start)
     toolbar_section = js[start:end]
     assert 'toolbar.appendChild(kernel)' in toolbar_section

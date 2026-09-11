@@ -247,16 +247,18 @@ def test_successful_data_and_model_results_expand_output_workspace_without_steal
     assert 'if(state.active_workspace==="data"){' in prepared
     assert 'revealArtifactWorkspace("data",next.prepared_dataset.id);' in prepared
     assert 'Finishing a data job must never steal navigation from Model Builder.' in prepared
-    assert 'bottomExpanded=true;\n        outputDirectorySelection=entry.id;' in text
+    assert 'bottomView="outputs";bottomExpanded=true;outputDirectorySelection=entry.id;' in text
 
 
-def test_model_build_completion_is_anchored_to_model_workspace():
+def test_model_build_completion_updates_model_workspace_without_stealing_data_builder_focus():
     text = _builder_js()
     start = text.index('function requestModelBuild()')
     end = text.index('function datasetModality', start)
     block = text[start:end]
-    assert 'state.active_workspace="model";' in block
+    assert 'const modelWasVisible=state.active_workspace==="model"' in block
+    assert 'state.active_workspace="model";' not in block
     assert 'const modelWs=state.workspaces?.model;' in block
+    assert 'Model build complete in Model Builder. Data Builder stayed open.' in block
     assert 'galleryWorkspace.open=false;' in block
     assert 'cloudWorkspace.open=false;' in block
     assert 'runtimePanel=null;' in block

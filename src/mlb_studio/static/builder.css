@@ -4028,3 +4028,14 @@ body.mlb-local-app .mlb-root{
 .mlb-step9-actions{margin-top:8px}.mlb-step9-learn-note{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:9px;border-left:3px solid #38bdf8;background:rgba(56,189,248,.07);font-size:11px}.mlb-step9-learn-note span{color:var(--muted,#98a2b3);line-height:1.45}
 .mlb-step9-history{display:flex;flex-direction:column;gap:5px}.mlb-step9-history>div{display:flex;flex-direction:column;gap:2px;padding:7px;border:1px solid var(--line,#2b3440);border-radius:6px}.mlb-step9-history span{font-size:10px;color:var(--muted,#98a2b3)}
 .mlb-mode-learn .mlb-code-preview{opacity:.72}.mlb-mode-research .mlb-inspector{min-width:320px}
+
+/* Step 10L — persistent Model/Data Builder workspace switcher */
+.mlb-workspace-buttons{display:grid;grid-template-columns:1fr;gap:5px;width:100%}
+.mlb-workspace-tab{width:100%;min-height:44px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;padding:7px 10px;border:1px solid #334556;border-radius:7px;background:#141f29;color:#dce6f0;text-align:left;cursor:pointer;transition:border-color .14s ease,background .14s ease,box-shadow .14s ease}
+.mlb-workspace-tab strong{font-size:12px;line-height:1.1;font-weight:850;color:#eef4fa}
+.mlb-workspace-tab span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9.5px;line-height:1.15;color:#7f91a4}
+.mlb-workspace-tab:hover{border-color:#51677d;background:#182631}
+.mlb-workspace-tab.active{border-color:#8063ee;background:#182331;box-shadow:inset 3px 0 0 #8063ee}
+.mlb-workspace-tab.active span{color:#9fadda}
+.mlb-workspace-tab.busy:not(.active){border-color:#2b7756}
+.mlb-workspace-tab.busy span{color:#63d79b}
