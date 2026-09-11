@@ -4982,13 +4982,15 @@ function studioChoice(title,message,actions,options={}){
       ].includes(demo))return "signal";
       if(["multimodal_image_text","sensor_vision"].includes(demo))return "multimodal";
 
-      const declared=String(meta?.modality||meta?.data_modality||"").trim().toLowerCase();
-      if(["tabular","image","audio","video","signal","text","multimodal"].includes(declared))return declared;
-
-      // Prepared tabular datasets expose scalar feature_N columns. Infer from
-      // the actual data contract before looking at optional processing nodes.
+      // Infer from the concrete prepared-data schema before trusting legacy
+      // top-level modality metadata. Older autosaved datasets can carry
+      // modality="signal" even though their actual columns are tabular.
+      // The schema is stronger evidence than that stale label.
       const cols=meta?.splits?.train?.columns||[];
       if(cols.some(c=>/^feature_\d+$/.test(String(c))))return "tabular";
+
+      const declared=String(meta?.modality||meta?.data_modality||"").trim().toLowerCase();
+      if(["tabular","image","audio","video","signal","text","multimodal"].includes(declared))return declared;
 
       if(p.image_processing||p.detection_processing)return "image";
       if(p.audio_processing)return "audio";

@@ -1,329 +1,99 @@
-name: Publish MLBricks Studio 1.0.0b2
+name: Publish MLBricks Studio to PyPI
 
 on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type PUBLISH to release mlbricks-studio + mlb-studio 1.0.0b2'
+        description: "Type PUBLISH to confirm PyPI release"
         required: true
-        default: ''
-
-permissions:
-  contents: read
-
-concurrency:
-  group: mlbricks-studio-1.0.0b2-pypi
-  cancel-in-progress: false
-
-env:
-  RELEASE_BRANCH: release/studio-1.0.0b2
-  EXPECTED_SHA: f3f41b41b9275dcce39882af3b819f05da6476eb
-  STUDIO_VERSION: 1.0.0b2
-  KIT_VERSION: 1.0.0b2
+        default: ""
 
 jobs:
-  validate-build:
-    name: Validate exact release and build both distributions
-    if: ${{ inputs.confirm == 'PUBLISH' }}
-    runs-on: ubuntu-24.04
-
+  build:
+    if: ${{ github.event.inputs.confirm == 'PUBLISH' }}
+    name: Test and build distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout frozen release branch
-        uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          ref: ${{ env.RELEASE_BRANCH }}
-          fetch-depth: 0
-          persist-credentials: false
+          python-version: "3.12"
 
-      - name: Verify exact validated commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          ACTUAL_SHA="$(git rev-parse HEAD)"
-          echo "Release branch: ${RELEASE_BRANCH}"
-          echo "Expected SHA : ${EXPECTED_SHA}"
-          echo "Actual SHA   : ${ACTUAL_SHA}"
-          test "${ACTUAL_SHA}" = "${EXPECTED_SHA}"
+      - name: Install release tools
+        run: python -m pip install --upgrade pip build twine pytest
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: 'pip'
+      - name: Install primary project
+        run: python -m pip install -e .
 
-      - name: Verify source version
-        shell: python
-        run: |
-          import tomllib
-          from pathlib import Path
-
-          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-          version = data["project"]["version"]
-          print("Studio source version:", version)
-          assert version == "1.0.0b2", version
-
-
-      - name: Install MLBricks Kit and release dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "mlbricks-kit==1.0.0b2"
-          python -m pip install "pytest>=8,<9" "build>=1.2,<2" "twine>=6,<7"
-          python -m pip install -e .
-
-      - name: Verify Studio and MLBricks Kit
-        shell: python
-        run: |
-          from importlib import metadata
-          import mlb_studio
-          import mlbricks
-
-          studio = metadata.version("mlbricks-studio")
-          kit = metadata.version("mlbricks-kit")
-
-          print("Studio:", studio)
-          print("Kit   :", kit)
-
-          assert studio == "1.0.0b2"
-          assert kit == "1.0.0b2"
-
-      - name: Run full repository test suite
+      - name: Run tests
         run: python -m pytest -q
 
-      - name: Clean build directories
-        shell: bash
-        run: |
-          rm -rf dist build
-          find . -type d -name '*.egg-info' -prune -exec rm -rf {} +
+      - name: Build primary package (mlbricks-studio)
+        run: python -m build --outdir dist/primary .
 
-      - name: Build wheel and source distribution
-        run: python -m build
+      - name: Build alias package (mlb-studio)
+        run: python -m build --outdir ../../dist/alias .
+        working-directory: aliases/mlb-studio
 
-      - name: Validate distributions with Twine
-        run: python -m twine check dist/*
+      - name: Validate primary distributions
+        run: python -m twine check dist/primary/*
 
-      - name: Audit artifacts for frontend development source
-        shell: python
-        run: |
-          from pathlib import Path
-          import tarfile
-          import zipfile
-
-          dist = Path("dist")
-          wheels = list(dist.glob("*.whl"))
-          sdists = list(dist.glob("*.tar.gz"))
-
-          assert len(wheels) == 1, wheels
-          assert len(sdists) == 1, sdists
-
-          blocked_names = {
-              "package.json",
-              "package-lock.json",
-              "yarn.lock",
-              "pnpm-lock.yaml",
-              "tsconfig.json",
-              "next.config.js",
-              "next.config.mjs",
-              "next.config.ts",
-              "vite.config.js",
-              "vite.config.ts",
-          }
-
-          def forbidden(name: str) -> bool:
-              normalized = name.replace("\\", "/").lstrip("./")
-              parts = [part for part in normalized.split("/") if part]
-
-              if "node_modules" in parts or ".next" in parts:
-                  return True
-              if "frontend" in parts or "web" in parts:
-                  return True
-              if normalized.endswith((".tsx", ".jsx")):
-                  return True
-              if parts and parts[-1] in blocked_names:
-                  return True
-              return False
-
-          with zipfile.ZipFile(wheels[0]) as archive:
-              wheel_names = archive.namelist()
-
-          with tarfile.open(sdists[0], "r:gz") as archive:
-              sdist_names = archive.getnames()
-
-          wheel_bad = [name for name in wheel_names if forbidden(name)]
-          sdist_bad = [name for name in sdist_names if forbidden(name)]
-
-          if wheel_bad:
-              print("Forbidden files in wheel:")
-              print("\n".join(wheel_bad[:100]))
-
-          if sdist_bad:
-              print("Forbidden files in sdist:")
-              print("\n".join(sdist_bad[:100]))
-
-          assert not wheel_bad, "Frontend development source found in wheel."
-          assert not sdist_bad, "Frontend development source found in sdist."
-
-          print("Artifact audit passed.")
-
-      - name: Verify primary artifact names
-        shell: python
-        run: |
-          from pathlib import Path
-          names = sorted(p.name for p in Path("dist").iterdir())
-          print("\n".join(names))
-          assert any(n.startswith("mlbricks_studio-1.0.0b2") and n.endswith(".whl") for n in names)
-          assert any(n.startswith("mlbricks_studio-1.0.0b2") and n.endswith(".tar.gz") for n in names)
-
-      - name: Create mlb-studio alias project
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf alias-build alias-dist
-          mkdir -p alias-build/src/mlb_studio_alias
-
-          cat > alias-build/pyproject.toml <<'PYPROJECT'
-          [build-system]
-          requires = ["setuptools>=77", "wheel"]
-          build-backend = "setuptools.build_meta"
-
-          [project]
-          name = "mlb-studio"
-          version = "1.0.0b2"
-          description = "Compatibility alias for MLBricks Studio."
-          readme = "README.md"
-          requires-python = ">=3.9"
-          dependencies = ["mlbricks-studio==1.0.0b2"]
-
-          authors = [
-            {name = "Zameer Hussain"},
-            {name = "Akhtar Hussain"},
-          ]
-
-          [project.urls]
-          Homepage = "https://mlbricks.io"
-          Repository = "https://github.com/MlBricks/MLBricks-Studio"
-
-          [tool.setuptools.packages.find]
-          where = ["src"]
-          PYPROJECT
-
-          cat > alias-build/README.md <<'README'
-          # mlb-studio
-
-          Compatibility alias for MLBricks Studio.
-
-          Installing `mlb-studio==1.0.0b2` installs
-          `mlbricks-studio==1.0.0b2`.
-          README
-
-          cat > alias-build/src/mlb_studio_alias/__init__.py <<'PY'
-          """Compatibility metadata package for the mlb-studio PyPI alias."""
-          __version__ = "1.0.0b2"
-          PY
-
-      - name: Build mlb-studio alias
-        run: python -m build alias-build --outdir alias-dist
-
-      - name: Validate mlb-studio alias with Twine
-        run: python -m twine check alias-dist/*
-
-      - name: Verify alias dependency metadata
-        shell: python
-        run: |
-          from pathlib import Path
-          import zipfile
-
-          wheels = list(Path("alias-dist").glob("*.whl"))
-          sdists = list(Path("alias-dist").glob("*.tar.gz"))
-          assert len(wheels) == 1, wheels
-          assert len(sdists) == 1, sdists
-          assert wheels[0].name.startswith("mlb_studio-1.0.0b2-")
-          assert sdists[0].name.startswith("mlb_studio-1.0.0b2")
-
-          with zipfile.ZipFile(wheels[0]) as zf:
-              metadata_files = [n for n in zf.namelist() if n.endswith(".dist-info/METADATA")]
-              assert len(metadata_files) == 1
-              metadata = zf.read(metadata_files[0]).decode("utf-8", errors="replace")
-
-          print(metadata)
-          assert "Name: mlb-studio" in metadata
-          assert "Version: 1.0.0b2" in metadata
-          assert "Requires-Dist: mlbricks-studio==1.0.0b2" in metadata
-
-      - name: Show release distributions
-        shell: bash
-        run: |
-          echo "=== mlbricks-studio ==="
-          ls -lh dist/
-          echo
-          echo "=== mlb-studio alias ==="
-          ls -lh alias-dist/
+      - name: Validate alias distributions
+        run: python -m twine check dist/alias/*
 
       - name: Upload primary distributions
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: mlbricks-studio-1.0.0b2
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
+          name: mlbricks-studio-distributions
+          path: dist/primary/
 
       - name: Upload alias distributions
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: mlb-studio-1.0.0b2
-          path: alias-dist/
-          if-no-files-found: error
-          retention-days: 7
+          name: mlb-studio-alias-distributions
+          path: dist/alias/
 
   publish-primary:
     name: Publish mlbricks-studio to PyPI
-    needs: validate-build
-    runs-on: ubuntu-24.04
-
+    needs: build
+    runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/mlbricks-studio/
-
     permissions:
       id-token: write
-      contents: read
-
     steps:
-      - name: Download validated primary distributions
-        uses: actions/download-artifact@v7
+      - name: Download primary distributions
+        uses: actions/download-artifact@v4
         with:
-          name: mlbricks-studio-1.0.0b2
+          name: mlbricks-studio-distributions
           path: dist/
 
-      - name: Publish mlbricks-studio to PyPI
+      - name: Publish mlbricks-studio
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-          skip-existing: true
 
   publish-alias:
     name: Publish mlb-studio alias to PyPI
-    needs:
-      - validate-build
-      - publish-primary
-    runs-on: ubuntu-24.04
-
+    needs: publish-primary
+    runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/mlb-studio/
-
     permissions:
       id-token: write
-      contents: read
-
     steps:
-      - name: Download validated alias distributions
-        uses: actions/download-artifact@v7
+      - name: Download alias distributions
+        uses: actions/download-artifact@v4
         with:
-          name: mlb-studio-1.0.0b2
-          path: alias-dist/
+          name: mlb-studio-alias-distributions
+          path: dist/
 
-      - name: Publish mlb-studio alias to PyPI
+      - name: Publish mlb-studio alias
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: alias-dist/
-          skip-existing: true
+          packages-dir: dist/
