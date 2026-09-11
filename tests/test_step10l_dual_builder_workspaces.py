@@ -25,7 +25,7 @@ def test_step10l_load_and_export_are_workspace_direct():
         assert 'parsed?.format==="mlbricks-export"' in text
         assert 'custom_components:cp(state.custom_components||{})' in text
         assert 'component_cache:cp(state.component_cache||{})' in text
-        assert 'galleryExport.title="Export the active Model Builder or Data Builder canvas"' in text
+        assert 'exportAction.addEventListener("click",exportWorkspace)' in text
 
 
 def test_step10l_model_build_completion_does_not_steal_data_builder_focus():

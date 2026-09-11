@@ -68,6 +68,8 @@
 .mlb-tool{border:1px solid var(--border2);background:#141d26;color:#cbd4df;border-radius:7px;
   padding:7px 9px;font-size:11.5px;cursor:pointer}
 .mlb-tool:hover{background:#1c2732}
+.mlb-toolbar>.mlb-builder-save-action{border-color:#6551bd;background:#241e43;color:#c8baff}
+.mlb-toolbar>.mlb-builder-save-action:hover{background:#30275a}
 .mlb-toolspacer{flex:1}
 .mlb-zoom{display:flex;gap:4px;align-items:center}
 .mlb-zoom button{width:30px;height:28px;border:1px solid var(--border2);background:#121a23;

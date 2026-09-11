@@ -14,11 +14,11 @@ def test_step10n_gallery_has_one_flat_navigation_row():
         assert '["core","models","mine"].includes(galleryWorkspace.tab)' in text
 
 
-def test_step10n_gallery_actions_move_into_header_and_filters_stay_contextual():
+def test_step10n_gallery_header_and_filters_stay_contextual():
     for rel in ("frontend/src/legacy-builder.js", "src/mlb_studio/static/builder.js"):
         text = (ROOT / rel).read_text(encoding="utf-8")
         assert 'headTools.className="mlb-gallery-head-tools"' in text
-        assert 'headTools.append(galleryActions,close)' in text
+        assert 'headTools.appendChild(close)' in text
         assert 'modelNavTools=navTools' in text
         assert 'openGallery(state.active_workspace==="data"?"data":"core")' in text
 

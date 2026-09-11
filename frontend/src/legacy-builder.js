@@ -6315,9 +6315,7 @@ function studioChoice(title,message,actions,options={}){
       container.className="mlb-gallery-view";
       const head=document.createElement("div");head.className="mlb-gallery-head";
       const title=document.createElement("div");title.innerHTML="<strong>GALLERY</strong><span>Sample models and data, plus reusable designs saved by you.</span>";
-      const saveLabel=state.active_workspace==="data"?"+ Save Current Data":"+ Save Current Model";
       head.appendChild(title);
-      if(current(state)?.kind!=="custom_edit"){const save=btn(saveLabel,"mlb-gallery-save");save.addEventListener("click",saveCurrentToGallery);head.appendChild(save);}
       container.appendChild(head);
 
       const grid=document.createElement("div");grid.className="mlb-gallery-grid";
@@ -6396,18 +6394,9 @@ function studioChoice(title,message,actions,options={}){
       head.append(copy,close);outer.appendChild(head);
 
       const headTools=document.createElement("div");headTools.className="mlb-gallery-head-tools";
-      const galleryActions=document.createElement("div");galleryActions.className="mlb-gallery-page-actions";
-      const galleryLoad=btn("⇧ Load","mlb-gallery-action mlb-gallery-file-action");
-      galleryLoad.title="Load a model directly into Model Builder, data export into Data Builder, or open a full project bundle";galleryLoad.addEventListener("click",loadDesign);galleryActions.appendChild(galleryLoad);
-      const galleryExport=btn("⇩ Export","mlb-gallery-action mlb-gallery-file-action");
-      galleryExport.title="Export the active Model Builder or Data Builder canvas";galleryExport.addEventListener("click",exportWorkspace);galleryActions.appendChild(galleryExport);
-      const bundleExport=btn("Bundle","mlb-gallery-action mlb-gallery-file-action");bundleExport.title="Export model graph, data graph, recipes, custom components and experiments as one reproducible project bundle";bundleExport.addEventListener("click",exportProjectBundle);galleryActions.appendChild(bundleExport);
-
-      let canSave=false,saveLabel="";
-      if(["core","models","mine"].includes(galleryWorkspace.tab)&&state.active_workspace==="model"&&current(state)?.kind!=="custom_edit"){canSave=true;saveLabel="+ Save Current Model";}
-      if(galleryWorkspace.tab==="data"&&state.active_workspace==="data"){canSave=true;saveLabel="+ Save Current Data";}
-      if(canSave){const save=btn(saveLabel,"mlb-gallery-save mlb-gallery-page-save");save.addEventListener("click",saveCurrentToGallery);galleryActions.appendChild(save);}
-      headTools.append(galleryActions,close);
+      // File/project actions belong to the active Builder toolbar, not Gallery.
+      // Gallery stays focused on discovery/opening items.
+      headTools.appendChild(close);
       head.replaceChildren(copy,headTools);
 
       const tabsRow=document.createElement("div");tabsRow.className="mlb-gallery-tabs-row mlb-gallery-flat-tabs-row";
@@ -11820,6 +11809,30 @@ function studioChoice(title,message,actions,options={}){
         const zs=document.createElement("span");zs.textContent=Math.round(zoom*100)+"%";
         const zp=btn("+");zp.addEventListener("click",()=>{zoom=Math.min(1.5,zoom+.1);draw();});
         z.append(fit,zm,zs,zp);toolbar.appendChild(z);
+
+        // Keep project/file actions where the user is working: on the active Builder toolbar.
+        const loadAction=btn("⇧ Load","mlb-tool mlb-builder-file-action");
+        loadAction.title="Load a model into Model Builder, data export into Data Builder, or open a project bundle";
+        loadAction.addEventListener("click",loadDesign);
+        toolbar.appendChild(loadAction);
+
+        const exportAction=btn("⇩ Export","mlb-tool mlb-builder-file-action");
+        exportAction.title="Export the active "+workspaceName()+" canvas";
+        exportAction.addEventListener("click",exportWorkspace);
+        toolbar.appendChild(exportAction);
+
+        const bundleAction=btn("Bundle","mlb-tool mlb-builder-file-action");
+        bundleAction.title="Export Model Builder + Data Builder + recipes + custom components + experiments";
+        bundleAction.addEventListener("click",exportProjectBundle);
+        toolbar.appendChild(bundleAction);
+
+        if(current(state)?.kind!=="custom_edit"){
+          const saveLabel=state.active_workspace==="data"?"+ Save Current Data":"+ Save Current Model";
+          const saveAction=btn(saveLabel,"mlb-tool mlb-builder-save-action");
+          saveAction.title=state.active_workspace==="data"?"Save the current Data Builder pipeline to My Data":"Save the current Model Builder graph to My Models";
+          saveAction.addEventListener("click",saveCurrentToGallery);
+          toolbar.appendChild(saveAction);
+        }
       }
       if(!galleryWorkspace.open&&!cloudWorkspace.open)main.appendChild(toolbar);
 
