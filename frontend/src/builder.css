@@ -4059,3 +4059,17 @@ body.mlb-local-app .mlb-root{
   padding-left:12px!important;
   padding-right:12px!important;
 }
+
+/* Step 10R — center canvas zoom controls beneath the top Build / Workshop switcher.
+   Keep builder file actions right-aligned and independent from the centered zoom cluster. */
+.mlb-toolbar{
+  position:relative!important;
+}
+.mlb-toolbar>.mlb-zoom{
+  position:absolute!important;
+  left:50%!important;
+  top:50%!important;
+  transform:translate(-50%,-50%)!important;
+  margin:0!important;
+  z-index:6!important;
+}
