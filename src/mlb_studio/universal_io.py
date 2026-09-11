@@ -24,7 +24,7 @@ import urllib.request
 import wave
 
 
-_INPUT_KINDS = {"text", "image", "audio", "video", "signal", "file", "multimodal"}
+_INPUT_KINDS = {"text", "image", "audio", "video", "signal", "tabular", "file", "multimodal"}
 _LIVE_MODES = {"live", "continuous", "cctv", "stream", "monitor"}
 
 
@@ -96,7 +96,15 @@ def normalize_input_config(config: dict[str, Any] | None, model_entry: dict[str,
     config = dict(config or {})
     requirements = dict((model_entry or {}).get("requirements") or {})
     model_kind = str(requirements.get("modality") or "text").strip().lower()
-    kind = str(config.get("input_kind") or model_kind or "text").strip().lower()
+    # Classical/feature-vector models are tabular numeric runtimes. Older
+    # browser drafts may still send `signal`; the model contract wins so those
+    # drafts start working immediately after the hotfix.
+    if str(requirements.get("training_mode") or "") == "classical_fit" or (
+        requirements.get("feature_dim") and model_kind != "multimodal"
+    ):
+        model_kind = "tabular"
+    requested_kind = str(config.get("input_kind") or model_kind or "text").strip().lower()
+    kind = model_kind if model_kind == "tabular" else requested_kind
     if kind not in _INPUT_KINDS:
         kind = "text"
 
@@ -106,6 +114,7 @@ def normalize_input_config(config: dict[str, Any] | None, model_entry: dict[str,
         "audio": "file",
         "video": "file",
         "signal": "static",
+        "tabular": "single",
         "file": "single",
         "multimodal": "single",
     }[kind]
@@ -117,11 +126,12 @@ def normalize_input_config(config: dict[str, Any] | None, model_entry: dict[str,
         "audio": "analyze",
         "video": "analyze",
         "signal": "analyze",
+        "tabular": "predict",
         "file": "process",
         "multimodal": "run",
     }[kind]
     task = str(config.get("task_type") or default_task).strip().lower()
-    source_type = str(config.get("input_source_type") or ("inline" if kind == "text" else "path_or_url")).strip().lower()
+    source_type = str(config.get("input_source_type") or ("inline" if kind in {"text", "tabular"} else "path_or_url")).strip().lower()
     source = str(config.get("input_source") or "").strip()
     mime = str(config.get("input_mime") or "").strip()
     prompt = str(config.get("prompt") or "")
@@ -214,6 +224,76 @@ def _signal_from_file(source: str) -> list[float]:
     return _numeric_values(text)
 
 
+def _tabular_tensor(envelope: InputEnvelope):
+    """Return one or more feature rows as a 2D float tensor [B, F].
+
+    Inline input accepts comma/newline separated values or JSON. File input
+    accepts .npy, JSON, CSV, or plain numeric text. A flat value list is one
+    feature row; nested lists are interpreted as a feature batch.
+    """
+    import numpy as np
+    import torch
+
+    raw = envelope.data
+    if raw in (None, "") and envelope.source:
+        path = Path(envelope.source).expanduser()
+        suffix = path.suffix.lower()
+        if suffix == ".npy":
+            arr = np.asarray(np.load(path), dtype="float32")
+        else:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if suffix == ".json":
+                raw = json.loads(text)
+                arr = np.asarray(raw, dtype="float32")
+            elif suffix == ".csv":
+                rows = []
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    vals = []
+                    ok = True
+                    for part in line.split(","):
+                        try:
+                            vals.append(float(part.strip()))
+                        except ValueError:
+                            ok = False
+                            break
+                    if ok and vals:
+                        rows.append(vals)
+                if not rows:
+                    raise ValueError("Tabular CSV input did not contain a numeric feature row.")
+                arr = np.asarray(rows, dtype="float32")
+            else:
+                vals = _numeric_values(text)
+                arr = np.asarray(vals, dtype="float32")
+    else:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                raise ValueError("Tabular input needs numeric feature values.")
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, (list, tuple)):
+                arr = np.asarray(parsed, dtype="float32")
+            else:
+                arr = np.asarray(_numeric_values(text), dtype="float32")
+        else:
+            arr = np.asarray(raw, dtype="float32")
+
+    if arr.size == 0:
+        raise ValueError("Tabular input needs numeric feature values.")
+    if arr.ndim == 0:
+        arr = arr.reshape(1, 1)
+    elif arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    elif arr.ndim > 2:
+        raise ValueError(f"Tabular input must be a feature row or matrix; received shape {tuple(arr.shape)}.")
+    return torch.from_numpy(np.ascontiguousarray(arr)), {"rows": int(arr.shape[0]), "features": int(arr.shape[1])}
+
+
 def _image_tensor(source: str, *, image_size: int | None = None):
     import numpy as np
     import torch
@@ -282,6 +362,8 @@ def load_single_input(envelope: InputEnvelope, *, image_size: int | None = None)
             raise ValueError("Signal input needs numeric samples or a signal file.")
         arr = np.asarray(values, dtype="float32")
         return torch.from_numpy(arr).view(1, -1, 1), {"samples": len(values), "sample_rate": envelope.sample_rate}
+    if envelope.kind == "tabular":
+        return _tabular_tensor(envelope)
     if envelope.kind == "file":
         raw = _read_bytes(envelope.source)
         return raw, {"bytes": len(raw), "name": Path(envelope.source).name}

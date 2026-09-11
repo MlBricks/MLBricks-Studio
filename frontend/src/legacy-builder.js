@@ -717,8 +717,8 @@ function __MLB_STUDIO_FACTORY__(){
     const mlbricksDataCategories=["All Data","Machine Learning","Deep Learning","Language","JEPA","Vision","Audio","Signal","Multimodal"];
     const mlbricksDataPresets=[
       // Machine Learning
-      {id:"ml_regression",name:"Tabular Regression Demo",category:"Machine Learning",modality:"Tabular",task:"Regression",source_kind:"demo",demo_type:"tabular_regression",samples:512,license:"Generated",focus:"Numeric features → continuous target",edition:"Offline Studio demo",compatible_models:["Linear Regression"]},
-      {id:"ml_binary",name:"Binary Classification Demo",category:"Machine Learning",modality:"Tabular",task:"Binary classification",source_kind:"demo",demo_type:"binary_classification",samples:512,license:"Generated",focus:"Numeric features → class 0/1",edition:"Offline Studio demo",compatible_models:["Logistic Regression"]},
+      {id:"ml_regression",name:"Tabular Regression Demo",category:"Machine Learning",modality:"Tabular",task:"Regression",source_kind:"demo",demo_type:"tabular_regression",samples:512,feature_count:4,license:"Generated",focus:"Numeric features → continuous target",edition:"Offline Studio demo",compatible_models:["Linear Regression"]},
+      {id:"ml_binary",name:"Binary Classification Demo",category:"Machine Learning",modality:"Tabular",task:"Binary classification",source_kind:"demo",demo_type:"binary_classification",samples:512,feature_count:4,license:"Generated",focus:"Numeric features → class 0/1",edition:"Offline Studio demo",compatible_models:["Logistic Regression"]},
       {id:"ml_multiclass",name:"Multiclass Classification Demo",category:"Machine Learning",modality:"Tabular",task:"Multiclass classification",source_kind:"demo",demo_type:"multiclass_classification",samples:600,license:"Generated",focus:"Numeric features → 3 classes",edition:"Offline Studio demo",compatible_models:["KNN","Decision Tree"]},
       {id:"ml_cluster",name:"Unlabeled Clustering Demo",category:"Machine Learning",modality:"Tabular",task:"Clustering",source_kind:"demo",demo_type:"clustering",samples:600,license:"Generated",focus:"Unlabeled numeric clusters",edition:"Offline Studio demo",compatible_models:["K-Means"]},
       {id:"ml_pca",name:"High-Dimensional Feature Demo",category:"Machine Learning",modality:"Tabular",task:"Dimensionality reduction",source_kind:"demo",demo_type:"high_dimensional",samples:512,license:"Generated",focus:"16-dimensional feature vectors",edition:"Offline Studio demo",compatible_models:["PCA"]},
@@ -4020,7 +4020,8 @@ function studioChoice(title,message,actions,options={}){
       else if(types.has("image_input"))modality="image";
       else if(types.has("audio_input"))modality="audio";
       else if(types.has("video_input"))modality="video";
-      else if(types.has("signal_input")||types.has("feature_input"))modality="signal";
+      else if(types.has("signal_input"))modality="signal";
+      else if(types.has("feature_input"))modality="tabular";
 
       const terminal=[...nodes].reverse().find(n=>
         ["text_output","audio_output","tensor_output","logits_output","classifier","detection_head","detection_pyramid_head","detection_nms","lm_head"].includes(n.type)
@@ -4062,8 +4063,11 @@ function studioChoice(title,message,actions,options={}){
       else if(terminal?.type!=="classifier"&&(projectTask.includes("binary")||types.has("sigmoid")))trainingTask="binary_classification";
       else if(terminal?.type==="classifier"||projectTask.includes("classification"))trainingTask="classification";
       else trainingTask="regression";
+      const featureInput=nodes.find(n=>n.type==="feature_input");
+      const featureDim=Number(featureInput?.params?.feature_dim||0)||null;
       return {
         modality,
+        feature_dim:featureDim,
         output_type:terminal?.type||"unknown",
         requires_tokenizer:!isJEPA&&modality==="text" && (types.has("embedding")||types.has("lm_head")),
         training_mode:isJEPA?"jepa":(isMultimodal?"multimodal":baselineRequirements.training_mode),
@@ -4315,6 +4319,14 @@ function studioChoice(title,message,actions,options={}){
       add("Train split",Number(trainRows)>0,"Train rows: "+(trainRows??0));
 
       const caps=datasetTrainingCapabilities(datasetMeta);
+      const scalarFeatureColumns=caps.columns.filter(c=>/^feature_\d+$/.test(String(c))).sort((a,b)=>Number(String(a).split("_").pop())-Number(String(b).split("_").pop()));
+      if(req.feature_dim && scalarFeatureColumns.length){
+        add(
+          "Feature width",
+          Number(req.feature_dim)===scalarFeatureColumns.length,
+          "Model expects "+Number(req.feature_dim)+" · Data provides "+scalarFeatureColumns.length
+        );
+      }
       if(req.training_task==="object_detection"){
         add("Bounding boxes",caps.columns.includes("boxes"),caps.columns.includes("boxes")?"boxes available":"boxes field missing");
         add("Class ids",caps.columns.includes("class_ids"),caps.columns.includes("class_ids")?"class_ids available":"class_ids field missing");
@@ -4403,8 +4415,26 @@ function studioChoice(title,message,actions,options={}){
     }
 
     function inferredRuntimeInputKind(entry){
-      const modality=String(entry?.requirements?.modality||"text").toLowerCase();
-      return ["text","image","audio","video","signal","file","multimodal"].includes(modality)?modality:"text";
+      const req=entry?.requirements||{};
+      // Feature-based/classical ML is tabular numeric input, never a signal.
+      // Force this for older saved builds too, whose requirement metadata may
+      // still say `signal` from the pre-Step10C runtime.
+      if(String(req.training_mode||"")==="classical_fit")return "tabular";
+      if(Number(req.feature_dim||0)>0 && String(req.modality||"").toLowerCase()!=="multimodal")return "tabular";
+      const modality=String(req.modality||"text").toLowerCase();
+      return ["text","image","audio","video","signal","tabular","file","multimodal"].includes(modality)?modality:"text";
+    }
+
+    function defaultRuntimeTask(entry,kind){
+      kind=String(kind||"").toLowerCase();
+      if(kind!=="tabular")return firstOptionValue(inputTaskOptions(kind,firstOptionValue(inputModeOptions(kind),"single")),"generate");
+      const req=entry?.requirements||{};
+      const fit=String(req.fit_algorithm||"").toLowerCase();
+      const task=String(req.training_task||state.project?.task||"").toLowerCase();
+      if(fit==="kmeans"||task.includes("cluster"))return "cluster";
+      if(fit==="pca"||task.includes("dimension"))return "transform";
+      if(task.includes("classification")||fit.includes("classifier"))return "classify";
+      return "predict";
     }
 
     function inputModeOptions(kind){
@@ -4413,6 +4443,7 @@ function studioChoice(title,message,actions,options={}){
       if(kind==="audio")return [{value:"file",label:"Audio File"},{value:"live",label:"Live Audio"},{value:"continuous",label:"Continuous Audio"}];
       if(kind==="video")return [{value:"file",label:"Video File"},{value:"live",label:"Live Camera"},{value:"cctv",label:"CCTV / Stream"}];
       if(kind==="signal")return [{value:"static",label:"Static Signal"},{value:"continuous",label:"Continuous Signal"}];
+      if(kind==="tabular")return [{value:"single",label:"Single Feature Row"},{value:"batch",label:"Feature Batch"}];
       if(kind==="file")return [{value:"single",label:"Single File"},{value:"batch",label:"Batch / Directory"}];
       if(kind==="multimodal")return [{value:"single",label:"Single Request"},{value:"live",label:"Live Multimodal"}];
       return [{value:"single",label:"Single Prompt"},{value:"batch",label:"Prompt Batch"}];
@@ -4427,6 +4458,7 @@ function studioChoice(title,message,actions,options={}){
       if(kind==="signal")return mode==="continuous"
         ?[{value:"monitor",label:"Monitor"},{value:"detect",label:"Detect Events"},{value:"anomaly",label:"Anomaly Detection"},{value:"classify",label:"Classify"}]
         :[{value:"analyze",label:"Analyze"},{value:"classify",label:"Classify"},{value:"forecast",label:"Forecast"},{value:"denoise",label:"Denoise"}];
+      if(kind==="tabular")return [{value:"predict",label:"Predict"},{value:"classify",label:"Classify"},{value:"cluster",label:"Assign Cluster"},{value:"transform",label:"Transform / Reduce"}];
       if(kind==="audio")return mode==="live"||mode==="continuous"
         ?[{value:"listen",label:"Listen / Monitor"},{value:"transcribe",label:"Transcribe"},{value:"detect",label:"Detect Events"}]
         :[{value:"analyze",label:"Analyze"},{value:"transcribe",label:"Transcribe"},{value:"classify",label:"Classify"}];
@@ -4450,6 +4482,7 @@ function studioChoice(title,message,actions,options={}){
       if(kind==="signal")return mode==="continuous"
         ?[{value:"serial",label:"Serial Port"},{value:"sensor",label:"Sensor / Serial"},{value:"antenna",label:"Antenna / Serial"},{value:"tcp",label:"TCP Stream"},{value:"file_tail",label:"Growing File"}]
         :[{value:"inline",label:"Inline Samples"},{value:"file",label:"Signal File"}];
+      if(kind==="tabular")return [{value:"inline",label:"Inline Features"},{value:"file",label:"CSV / JSON / Text File"}];
       if(kind==="audio")return mode==="file"
         ?[{value:"path_or_url",label:"WAV Path / URL"},{value:"inline",label:"Inline Samples"}]
         :[{value:"microphone",label:"Microphone / Adapter"},{value:"sensor",label:"Audio Sensor"}];
@@ -4461,14 +4494,22 @@ function studioChoice(title,message,actions,options={}){
     function firstOptionValue(options,fallback){return options?.[0]?.value??fallback;}
 
     function normalizeInputConfigInPlace(config,entry){
-      const kind=String(config.input_kind||inferredRuntimeInputKind(entry));
+      const inferred=inferredRuntimeInputKind(entry);
+      // Tabular is a structural model requirement. Do not allow stale local
+      // runtime settings (for example `signal · static`) to override it.
+      const kind=inferred==="tabular"?"tabular":String(config.input_kind||inferred);
       config.input_kind=kind;
       const modes=inputModeOptions(kind);
       if(!modes.some(x=>String(x.value)===String(config.input_mode)))config.input_mode=firstOptionValue(modes,"single");
       const tasks=inputTaskOptions(kind,config.input_mode);
-      if(!tasks.some(x=>String(x.value)===String(config.task_type)))config.task_type=firstOptionValue(tasks,"generate");
+      if(!tasks.some(x=>String(x.value)===String(config.task_type)))config.task_type=defaultRuntimeTask(entry,kind);
       const sources=inputSourceTypeOptions(kind,config.input_mode);
-      if(!sources.some(x=>String(x.value)===String(config.input_source_type)))config.input_source_type=firstOptionValue(sources,kind==="text"?"inline":"path_or_url");
+      if(!sources.some(x=>String(x.value)===String(config.input_source_type)))config.input_source_type=firstOptionValue(sources,kind==="text"?"inline":kind==="tabular"?"inline":"path_or_url");
+      if(kind==="tabular"){
+        config.prompt="";
+        const dim=Math.max(1,Number(entry?.requirements?.feature_dim||0)||1);
+        if(config.input_data==null || String(config.input_data).trim()==="")config.input_data=Array(dim).fill("0").join(", ");
+      }
       return config;
     }
 
@@ -4485,6 +4526,12 @@ function studioChoice(title,message,actions,options={}){
       if(kind==="image")return {start:"Process Image",stop:"Stop",running:"PROCESSING",noun:"image"};
       if(kind==="video")return {start:"Process Video",stop:"Stop Video",running:"PROCESSING",noun:"video"};
       if(kind==="signal")return {start:"Analyze Signal",stop:"Stop",running:"PROCESSING",noun:"signal"};
+      if(kind==="tabular"){
+        if(task==="classify")return {start:"Predict Class",stop:"Stop",running:"PREDICTING",noun:"feature row"};
+        if(task==="cluster")return {start:"Assign Cluster",stop:"Stop",running:"PREDICTING",noun:"feature row"};
+        if(task==="transform")return {start:"Transform Features",stop:"Stop",running:"PROCESSING",noun:"feature row"};
+        return {start:"Run Prediction",stop:"Stop",running:"PREDICTING",noun:"feature row"};
+      }
       if(kind==="audio")return {start:task==="transcribe"?"Transcribe Audio":"Process Audio",stop:"Stop",running:"PROCESSING",noun:"audio"};
       if(kind==="file")return {start:"Process File",stop:"Stop",running:"PROCESSING",noun:"file"};
       if(kind==="multimodal")return {start:"Run Multimodal",stop:"Stop",running:"PROCESSING",noun:"multimodal input"};
@@ -4496,16 +4543,16 @@ function studioChoice(title,message,actions,options={}){
       const base={
         input_kind:kind,
         input_mode:firstOptionValue(inputModeOptions(kind),"single"),
-        task_type:firstOptionValue(inputTaskOptions(kind,firstOptionValue(inputModeOptions(kind),"single")),"generate"),
-        input_source_type:firstOptionValue(inputSourceTypeOptions(kind,firstOptionValue(inputModeOptions(kind),"single")),kind==="text"?"inline":"path_or_url"),
+        task_type:defaultRuntimeTask(entry,kind),
+        input_source_type:firstOptionValue(inputSourceTypeOptions(kind,firstOptionValue(inputModeOptions(kind),"single")),kind==="text"||kind==="tabular"?"inline":"path_or_url"),
         input_source:"",
-        input_data:"",
+        input_data:kind==="tabular"?Array(Math.max(1,Number(entry?.requirements?.feature_dim||0)||1)).fill("0").join(", "):"",
         input_mime:"",
         input_sample_rate:16000,
         input_fps:5,
         input_buffer_size:256,
         input_channel:"",
-        prompt:"Once upon a time",
+        prompt:kind==="text"?"Once upon a time":"",
         max_new_tokens:128,
         temperature:0.8,
         top_k:50,
@@ -5546,7 +5593,7 @@ function studioChoice(title,message,actions,options={}){
           runtimeField("Input Type","select",config.input_kind,v=>update("input_kind",v),[
             {value:"text",label:"Text"},{value:"image",label:"Image"},{value:"audio",label:"Audio"},
             {value:"video",label:"Video / CCTV"},{value:"signal",label:"Signal / Sensor"},
-            {value:"file",label:"File"},{value:"multimodal",label:"Multimodal"}
+            {value:"tabular",label:"Tabular / Numeric Features"},{value:"file",label:"File"},{value:"multimodal",label:"Multimodal"}
           ]),
           runtimeField("Input Mode","select",config.input_mode,v=>update("input_mode",v),inputModeOptions(config.input_kind)),
           runtimeField("Task","select",config.task_type,v=>update("task_type",v),inputTaskOptions(config.input_kind,config.input_mode)),
@@ -5559,11 +5606,14 @@ function studioChoice(title,message,actions,options={}){
             kind==="signal"&&["serial","sensor","antenna"].includes(config.input_source_type)?"Port / Source":
             kind==="signal"&&config.input_source_type==="tcp"?"TCP host:port":
             kind==="video"&&(inputMode==="live"||inputMode==="cctv")?"Camera Index / Stream URL":
-            kind==="image"&&inputMode==="sequence"?"Image Directory":"Input Path / URL",
+            kind==="image"&&inputMode==="sequence"?"Image Directory":
+            kind==="tabular"?"Feature File":"Input Path / URL",
             "textarea",config.input_source,v=>update("input_source",v)
           ));
         }
-        if(kind==="signal" && inputMode==="static"){
+        if(kind==="tabular" && config.input_source_type==="inline"){
+          input.appendChild(runtimeField("Feature Values","textarea",config.input_data,v=>update("input_data",v)));
+        }else if(kind==="signal" && inputMode==="static"){
           input.appendChild(runtimeField("Signal Samples","textarea",config.input_data,v=>update("input_data",v)));
         }else if(kind==="multimodal"){
           input.appendChild(runtimeField("Multimodal JSON / Inline Data","textarea",config.input_data,v=>update("input_data",v)));
@@ -5589,7 +5639,9 @@ function studioChoice(title,message,actions,options={}){
 
         const action=inputActionSpec(config);
         const inputNote=document.createElement("div");inputNote.className="mlb-runtime-note";
-        inputNote.textContent="Studio separates input type, delivery mode, and task. Current action: "+action.start+". Live CCTV/video uses OpenCV when available; serial sensor/antenna sources use pyserial; TCP and growing-file signal streams use core Python adapters.";
+        inputNote.textContent=kind==="tabular"
+          ?"Enter one numeric feature row in the same order used during fitting/training. Current action: "+action.start+". Example: 0.25, -1.2, 3.0, 0.8"
+          :"Studio separates input type, delivery mode, and task. Current action: "+action.start+". Live CCTV/video uses OpenCV when available; serial sensor/antenna sources use pyserial; TCP and growing-file signal streams use core Python adapters.";
         input.appendChild(inputNote);main.appendChild(input);
 
         if(kind==="text"){
@@ -11585,7 +11637,7 @@ function studioChoice(title,message,actions,options={}){
         ?(runtimePanel.mode==="train"
           ?((runtimePanel.tab||"setup")==="status"?"TRAINING STATUS":"TRAINING SETUP")
           :runtimePanel.mode==="generate"
-            ?((runtimePanel.tab||"setup")==="status"?"GENERATION STATUS":"GENERATION SETUP")
+            ?(()=>{const e=builtModelById(runtimePanel.modelId);const k=String(e?.generation_config?.input_kind||inferredRuntimeInputKind(e));const text=k==="text";return (runtimePanel.tab||"setup")==="status"?(text?"GENERATION STATUS":"RUNTIME STATUS"):(text?"GENERATION SETUP":"RUNTIME SETUP");})()
             :((runtimePanel.tab||"setup")==="status"?"API SERVER STATUS":"API SERVER SETUP"))
         :workspaceName();
       toolbar.appendChild(workspaceBadge);

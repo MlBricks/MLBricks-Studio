@@ -4074,11 +4074,20 @@ def _supervised_graph_info(model_entry, state):
     else:
         task = "regression"
 
+    expected_feature_dim = None
+    if input_type == "feature_input":
+        try:
+            value = int((input_node.get("params") or {}).get("feature_dim") or 0)
+            expected_feature_dim = value if value > 0 else None
+        except (TypeError, ValueError):
+            expected_feature_dim = None
+
     return {
         "graph": graph,
         "nodes": nodes,
         "input_node": input_node,
         "input_type": input_type,
+        "expected_feature_dim": expected_feature_dim,
         "output": output,
         "output_type": output_type,
         "task": task,
@@ -4591,6 +4600,13 @@ def _train_supervised_builder_model(*, state, model_entry, dataset, dataset_meta
     val_name=str(config.get("validation_split") or "validation")
     val_split=dataset.get(val_name) if hasattr(dataset,"get") else None
     x_train,y_train,feature_columns=_supervised_xy(train_split,info)
+    expected_feature_dim=info.get("expected_feature_dim")
+    if expected_feature_dim and x_train.ndim==2 and int(x_train.shape[-1]) != int(expected_feature_dim):
+        raise ValueError(
+            f"Feature-width mismatch: model input expects {int(expected_feature_dim)} features, "
+            f"but the selected dataset provides {int(x_train.shape[-1])}. "
+            "Update the Feature Input/model weights or choose a compatible dataset before training."
+        )
     x_val=y_val=None
     if val_split is not None:
         try: x_val,y_val,_=_supervised_xy(val_split,info)
