@@ -5101,7 +5101,34 @@ function studioChoice(title,message,actions,options={}){
         const pre=document.createElement("pre");pre.textContent=preview.length?JSON.stringify(preview,null,2):String(env.data||"No signal samples yet.");wrap.appendChild(pre);
         card.appendChild(wrap);addMeta();section.appendChild(card);return;
       }
-      if(["json","tensor","embedding","classification"].includes(env.kind)){
+      if(env.kind==="classification"){
+        const payload=env.data&&typeof env.data==="object"&&!Array.isArray(env.data)?env.data:{};
+        const legacy=Array.isArray(env.data)?env.data.map(Number).filter(Number.isFinite):[];
+        let probabilities=Array.isArray(payload.probabilities)?payload.probabilities.map(Number):[];
+        const logits=Array.isArray(payload.logits)?payload.logits.map(Number):legacy;
+        if(!probabilities.length&&logits.length){
+          if(logits.length===1){const pos=1/(1+Math.exp(-logits[0]));probabilities=[1-pos,pos];}
+          else{const maxLogit=Math.max(...logits);const exp=logits.map(v=>Math.exp(v-maxLogit));const total=exp.reduce((a,b)=>a+b,0)||1;probabilities=exp.map(v=>v/total);}
+        }
+        let predicted=Number.isFinite(Number(payload.predicted_class))?Number(payload.predicted_class):0;
+        if(probabilities.length&&!Number.isFinite(Number(payload.predicted_class)))predicted=probabilities.reduce((best,v,i,a)=>v>a[best]?i:best,0);
+        const confidence=Number.isFinite(Number(payload.confidence))?Number(payload.confidence):(probabilities[predicted]||0);
+        const names=Array.isArray(env.meta?.class_names)?env.meta.class_names:(Array.isArray(payload.class_names)?payload.class_names:[]);
+        const className=i=>names[i]!=null?String(names[i]):`Class ${i}`;
+        const ranked=probabilities.map((p,id)=>({id,p:Number(p)||0})).sort((a,b)=>b.p-a.p).slice(0,Math.min(5,probabilities.length));
+        const imageSrc=env.meta?.input_image?String(env.meta.input_image):"";
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card mlb-classification-card";
+        if(imageSrc){const imageWrap=document.createElement("div");imageWrap.className="mlb-classification-image-wrap";const img=document.createElement("img");img.className="mlb-output-image mlb-classification-image";img.src=imageSrc;img.alt="Classification input";imageWrap.appendChild(img);wrap.appendChild(imageWrap);}
+        const result=document.createElement("div");result.className="mlb-classification-result";
+        const kicker=document.createElement("span");kicker.textContent="PREDICTION";
+        const prediction=document.createElement("strong");prediction.textContent=className(predicted);
+        const conf=document.createElement("b");conf.textContent=(confidence*100).toFixed(1)+"% confidence";
+        result.append(kicker,prediction,conf);wrap.appendChild(result);
+        if(ranked.length){const probs=document.createElement("div");probs.className="mlb-classification-probs";ranked.forEach(item=>{const row=document.createElement("div");row.className="mlb-classification-prob-row";const label=document.createElement("span");label.textContent=className(item.id);const track=document.createElement("div");track.className="mlb-classification-prob-track";const fill=document.createElement("i");fill.style.width=(Math.max(0,Math.min(1,item.p))*100)+"%";track.appendChild(fill);const pct=document.createElement("strong");pct.textContent=(item.p*100).toFixed(1)+"%";row.append(label,track,pct);probs.appendChild(row);});wrap.appendChild(probs);}
+        const details=document.createElement("details");details.className="mlb-classification-raw";const rawSummary=document.createElement("summary");rawSummary.textContent="Raw logits";const rawPre=document.createElement("pre");rawPre.textContent=JSON.stringify(logits,null,2);details.append(rawSummary,rawPre);wrap.appendChild(details);
+        card.appendChild(wrap);section.appendChild(card);return;
+      }
+      if(["json","tensor","embedding"].includes(env.kind)){
         const pre=document.createElement("pre");pre.textContent=typeof env.data==="string"?env.data:JSON.stringify(env.data,null,2);card.appendChild(pre);section.appendChild(card);return;
       }
       if(env.kind==="video"||env.kind==="file"){

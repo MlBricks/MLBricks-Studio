@@ -3530,6 +3530,62 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
             "data":payload,
             "metadata":detection_meta,
         }
+    # Classification is a semantic result, not a raw tensor dump. Convert
+    # logits into probabilities/predicted class and, for image models, carry
+    # a preview of the exact processed model input so Studio can present the
+    # prediction visually.
+    normalized_output_type=str(output_type or "").lower()
+    if normalized_output_type in {"classifier","classification","logits_output"} and str(input_kind or "").lower() not in {"signal","audio"}:
+        if isinstance(result, torch.Tensor):
+            logits=result.detach().float().cpu()
+            if logits.ndim==0:
+                logits=logits.reshape(1,1)
+            elif logits.ndim==1:
+                logits=logits.unsqueeze(0)
+            elif logits.ndim>2:
+                logits=logits.reshape(logits.shape[0],-1)
+            first=logits[0]
+            if first.numel()==1:
+                positive=float(torch.sigmoid(first[0]).item())
+                probabilities=[1.0-positive,positive]
+                raw_logits=[float(first[0].item())]
+            else:
+                probabilities=[float(v) for v in torch.softmax(first,dim=-1).tolist()]
+                raw_logits=[float(v) for v in first.tolist()]
+            predicted_class=int(max(range(len(probabilities)),key=lambda idx: probabilities[idx])) if probabilities else 0
+            confidence=float(probabilities[predicted_class]) if probabilities else 0.0
+            class_meta={
+                "predicted_class":predicted_class,
+                "confidence":confidence,
+                "probabilities":probabilities,
+                "logits":raw_logits,
+            }
+            class_names=(metadata or {}).get("class_names")
+            if isinstance(class_names,(list,tuple)):
+                class_meta["class_names"]=[str(v) for v in class_names]
+            output_meta={
+                "shape":list(result.shape),
+                "dtype":str(result.dtype).replace("torch.",""),
+                "classes":len(probabilities),
+            }
+            if str(input_kind or "").lower()=="image" and isinstance(sample,torch.Tensor):
+                preview=_tensor_image_data_uri(sample)
+                if preview is not None:
+                    data_uri,image_meta=preview
+                    output_meta["input_image"]=data_uri
+                    output_meta.update({
+                        "image_width":image_meta.get("width"),
+                        "image_height":image_meta.get("height"),
+                        "image_format":image_meta.get("format","png"),
+                    })
+            if "class_names" in class_meta:
+                output_meta["class_names"]=class_meta["class_names"]
+            return {
+                "kind":"classification",
+                "mime":"application/x-mlbricks-classification",
+                "data":class_meta,
+                "metadata":output_meta,
+            }
     return universal_output_envelope(
         result,output_type=output_type,input_kind=input_kind,task=task
     )

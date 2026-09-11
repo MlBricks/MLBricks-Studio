@@ -243,7 +243,34 @@
         env.meta&&Object.keys(env.meta).length?h('pre',{className:'mlb-output-meta'},JSON.stringify(env.meta,null,2)):null
       );
     }
-    if(env.kind==='json'||env.kind==='tensor'||env.kind==='embedding'||env.kind==='classification'){
+    if(env.kind==='classification'){
+      var payload=maybeObject(env.data)||{};
+      var legacy=Array.isArray(env.data)?env.data.map(Number).filter(function(v){return Number.isFinite(v);}):[];
+      var probabilities=Array.isArray(payload.probabilities)?payload.probabilities.map(Number):[];
+      var logits=Array.isArray(payload.logits)?payload.logits.map(Number):legacy;
+      if(!probabilities.length&&logits.length){
+        if(logits.length===1){var pos=1/(1+Math.exp(-logits[0]));probabilities=[1-pos,pos];}
+        else{var maxLogit=Math.max.apply(null,logits);var exp=logits.map(function(v){return Math.exp(v-maxLogit);});var total=exp.reduce(function(a,b){return a+b;},0)||1;probabilities=exp.map(function(v){return v/total;});}
+      }
+      var predicted=Number.isFinite(Number(payload.predicted_class))?Number(payload.predicted_class):0;
+      if(probabilities.length&&!Number.isFinite(Number(payload.predicted_class))){predicted=probabilities.reduce(function(best,v,i,a){return v>a[best]?i:best;},0);}
+      var confidence=Number.isFinite(Number(payload.confidence))?Number(payload.confidence):(probabilities[predicted]||0);
+      var names=(env.meta&&Array.isArray(env.meta.class_names)?env.meta.class_names:(Array.isArray(payload.class_names)?payload.class_names:[]));
+      function className(i){return names[i]!=null?String(names[i]):('Class '+i);}
+      var ranked=probabilities.map(function(v,i){return {id:i,p:Number(v)||0};}).sort(function(a,b){return b.p-a.p;}).slice(0,Math.min(5,probabilities.length));
+      var imageSrc=env.meta&&env.meta.input_image?String(env.meta.input_image):'';
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
+        h('div',{className:'mlb-output-visual-card mlb-classification-card'},
+          imageSrc?h('div',{className:'mlb-classification-image-wrap'},h('img',{className:'mlb-output-image mlb-classification-image',src:imageSrc,alt:'Classification input'})):null,
+          h('div',{className:'mlb-classification-result'},
+            h('span',null,'PREDICTION'),h('strong',null,className(predicted)),h('b',null,(confidence*100).toFixed(1)+'% confidence')),
+          ranked.length?h('div',{className:'mlb-classification-probs'},ranked.map(function(item){return h('div',{className:'mlb-classification-prob-row',key:item.id},
+            h('span',null,className(item.id)),h('div',{className:'mlb-classification-prob-track'},h('i',{style:{width:(Math.max(0,Math.min(1,item.p))*100)+'%'}})),h('strong',null,(item.p*100).toFixed(1)+'%'));})):null,
+          h('details',{className:'mlb-classification-raw'},h('summary',null,'Raw logits'),h('pre',null,JSON.stringify(logits,null,2)))
+        )
+      );
+    }
+    if(env.kind==='json'||env.kind==='tensor'||env.kind==='embedding'){
       var text=typeof env.data==='string'?env.data:JSON.stringify(env.data,null,2);
       return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,h('pre',null,text||'No structured output yet.'));
     }
