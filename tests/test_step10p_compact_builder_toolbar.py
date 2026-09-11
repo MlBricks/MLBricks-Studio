@@ -27,5 +27,5 @@ def test_zoom_cluster_is_nudged_left_without_reordering_actions():
         assert text.index('z.append(fit,zm,zs,zp);toolbar.appendChild(z);') < text.index('const loadAction=btn("⇧ Load"')
     for text in css_files:
         assert '.mlb-toolbar>.mlb-zoom{' in text
-        assert 'left:-11px!important;' in text
-        assert 'margin-right:-11px!important;' in text
+        assert 'transform:translateX(-12px)!important;' in text
+        assert 'margin-right:-11px!important;' not in text

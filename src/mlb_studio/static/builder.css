@@ -4052,9 +4052,7 @@ body.mlb-local-app .mlb-root{
 /* Step 10P — compact builder toolbar actions.
    Keep the zoom cluster slightly left of the file actions and use a compact Save label. */
 .mlb-toolbar>.mlb-zoom{
-  position:relative!important;
-  left:-11px!important;
-  margin-right:-11px!important;
+  transform:translateX(-12px)!important;
 }
 .mlb-toolbar>.mlb-builder-save-action{
   min-width:52px!important;
