@@ -16,10 +16,11 @@ def test_step10o_file_actions_live_on_builder_toolbar_not_gallery_header():
         assert 'btn("⇩ Export","mlb-gallery-action mlb-gallery-file-action")' not in text
 
 
-def test_step10o_save_button_is_contextual_to_active_builder():
+def test_step10o_save_button_remains_contextual_to_active_builder():
     for rel in ("frontend/src/legacy-builder.js", "src/mlb_studio/static/builder.js"):
         text = (ROOT / rel).read_text(encoding="utf-8")
-        assert 'state.active_workspace==="data"?"+ Save Current Data":"+ Save Current Model"' in text
+        assert 'const saveLabel="Save";' in text
+        assert 'state.active_workspace==="data"?"Save the current Data Builder pipeline to My Data":"Save the current Model Builder graph to My Models"' in text
         assert 'saveAction.addEventListener("click",saveCurrentToGallery)' in text
 
 

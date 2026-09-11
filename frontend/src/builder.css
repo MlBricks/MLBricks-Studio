@@ -4048,3 +4048,16 @@ body.mlb-local-app .mlb-root{
 .mlb-gallery-flat-nav-tools .mlb-model-gallery-count{font-size:9.5px!important}
 /* Legacy nested model navigation is intentionally retired in Step 10N. */
 .mlb-model-gallery-nav,.mlb-model-group-tabs{display:none!important}
+
+/* Step 10P — compact builder toolbar actions.
+   Keep the zoom cluster slightly left of the file actions and use a compact Save label. */
+.mlb-toolbar>.mlb-zoom{
+  position:relative!important;
+  left:-11px!important;
+  margin-right:-11px!important;
+}
+.mlb-toolbar>.mlb-builder-save-action{
+  min-width:52px!important;
+  padding-left:12px!important;
+  padding-right:12px!important;
+}

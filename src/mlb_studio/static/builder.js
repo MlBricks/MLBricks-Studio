@@ -12538,7 +12538,7 @@ function studioChoice(title,message,actions,options={}){
         toolbar.appendChild(bundleAction);
 
         if(current(state)?.kind!=="custom_edit"){
-          const saveLabel=state.active_workspace==="data"?"+ Save Current Data":"+ Save Current Model";
+          const saveLabel="Save";
           const saveAction=btn(saveLabel,"mlb-tool mlb-builder-save-action");
           saveAction.title=state.active_workspace==="data"?"Save the current Data Builder pipeline to My Data":"Save the current Model Builder graph to My Models";
           saveAction.addEventListener("click",saveCurrentToGallery);
