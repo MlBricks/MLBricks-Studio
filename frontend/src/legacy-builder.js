@@ -4512,6 +4512,16 @@ function studioChoice(title,message,actions,options={}){
 
     function firstOptionValue(options,fallback){return options?.[0]?.value??fallback;}
 
+    function runtimeTaskUsesPrompt(kind,task){
+      kind=String(kind||"text").toLowerCase();
+      task=String(task||"").toLowerCase();
+      if(kind==="text")return true;
+      if(kind==="image")return ["edit","caption"].includes(task);
+      if(kind==="video")return task==="caption";
+      if(kind==="multimodal")return task==="generate";
+      return false;
+    }
+
     function normalizeInputConfigInPlace(config,entry){
       const inferred=inferredRuntimeInputKind(entry);
       // Tabular is a structural model requirement. Do not allow stale local
@@ -4524,8 +4534,8 @@ function studioChoice(title,message,actions,options={}){
       if(!tasks.some(x=>String(x.value)===String(config.task_type)))config.task_type=defaultRuntimeTask(entry,kind);
       const sources=inputSourceTypeOptions(kind,config.input_mode);
       if(!sources.some(x=>String(x.value)===String(config.input_source_type)))config.input_source_type=firstOptionValue(sources,kind==="text"?"inline":kind==="tabular"?"inline":"path_or_url");
+      if(!runtimeTaskUsesPrompt(kind,config.task_type))config.prompt="";
       if(kind==="tabular"){
-        config.prompt="";
         const dim=Math.max(1,Number(entry?.requirements?.feature_dim||0)||1);
         if(config.input_data==null || String(config.input_data).trim()==="")config.input_data=Array(dim).fill("0").join(", ");
       }
@@ -5642,7 +5652,7 @@ function studioChoice(title,message,actions,options={}){
           input.appendChild(runtimeField("Image Data URL","textarea",config.input_data,v=>update("input_data",v)));
         }
 
-        if(["text","image","video","audio","multimodal"].includes(kind)){
+        if(runtimeTaskUsesPrompt(kind,config.task_type)){
           input.appendChild(runtimeField(kind==="text"?"Prompt":"Prompt / Instruction","textarea",config.prompt,v=>update("prompt",v)));
         }
 
@@ -5660,7 +5670,9 @@ function studioChoice(title,message,actions,options={}){
         const inputNote=document.createElement("div");inputNote.className="mlb-runtime-note";
         inputNote.textContent=kind==="tabular"
           ?"Enter one numeric feature row in the same order used during fitting/training. Current action: "+action.start+". Example: 0.25, -1.2, 3.0, 0.8"
-          :"Studio separates input type, delivery mode, and task. Current action: "+action.start+". Live CCTV/video uses OpenCV when available; serial sensor/antenna sources use pyserial; TCP and growing-file signal streams use core Python adapters.";
+          :kind==="image"&&inputMode==="single"
+            ?"Use a local image path or a direct image URL. Google/Bing result links with an embedded image URL are resolved automatically, but ordinary search/web pages are not image files. Studio resizes and converts channels to the model's Image Input contract before inference."
+            :"Studio separates input type, delivery mode, and task. Current action: "+action.start+". Live CCTV/video uses OpenCV when available; serial sensor/antenna sources use pyserial; TCP and growing-file signal streams use core Python adapters.";
         input.appendChild(inputNote);main.appendChild(input);
 
         if(kind==="text"){
@@ -10587,7 +10599,7 @@ function studioChoice(title,message,actions,options={}){
         const head=add("classifier","3-Class Head",{dim:16,hidden_size:16,classes:3});
         link(x,l1);link(l1,a1);link(a1,l2);link(l2,a2);link(a2,head);
       }else if(preset.template==="cnn"){
-        const x=add("image_input","Image Input");
+        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
         const c1=add("conv2d","Conv2D 1 → 8",{in_channels:1,out_channels:8,kernel_size:3,stride:1,padding:1,bias:true});
         const a1=add("relu","ReLU 1");
         const p1=add("maxpool2d","MaxPool 2×2",{kernel_size:2,stride:2,padding:0});
@@ -10604,7 +10616,7 @@ function studioChoice(title,message,actions,options={}){
         const head=add("classifier","Binary Classifier",{dim:16,hidden_size:16,classes:2});
         link(x,shape);link(shape,rec);link(rec,head);
       }else if(preset.template==="autoencoder"){
-        const x=add("image_input","Image Input");
+        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
         const flat=add("flatten","Flatten 16×16",{start_dim:1,end_dim:-1});
         const e1=add("linear","Encoder 256 → 64",{in_features:256,out_features:64,bias:true});
         const a1=add("relu","ReLU Encoder");

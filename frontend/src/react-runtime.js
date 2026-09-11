@@ -72,6 +72,16 @@
     return text||fallback;
   }
 
+  function runtimeTaskUsesPrompt(kind,task){
+    kind=String(kind||'text').toLowerCase();
+    task=String(task||'').toLowerCase();
+    if(kind==='text')return true;
+    if(kind==='image')return task==='edit'||task==='caption';
+    if(kind==='video')return task==='caption';
+    if(kind==='multimodal')return task==='generate';
+    return false;
+  }
+
   function inputActionSpec(config){
     config=config||{};
     var kind=String(config.input_kind||'text').toLowerCase();
@@ -402,7 +412,7 @@
       :h(Grid,null,h(StaticMetric,{label:'Input',value:x.kind.toUpperCase()}),h(StaticMetric,{label:'Mode',value:x.mode}),h(StaticMetric,{label:'Task',value:x.task}),h(StaticMetric,{label:'Processed',value:x.processed.toLocaleString()}),h(StaticMetric,{label:'Items/s',value:x.items==null?'—':fmtFloat(x.items,2)}),h(StaticMetric,{label:'Source',value:x.source}))
   );},shallowEqual);
 
-  var GenerationInput=connected(function(s){var c=s.config||{};return {kind:c.input_kind||'text',mode:c.input_mode||'single',task:c.task_type||'generate',sourceType:c.input_source_type||'inline',source:c.input_source||'',prompt:c.prompt||'',data:c.input_data||''};},function(x){return h(Section,{title:'Active Input'},
+  var GenerationInput=connected(function(s){var c=s.config||{};var kind=c.input_kind||'text',task=c.task_type||'generate';return {kind:kind,mode:c.input_mode||'single',task:task,sourceType:c.input_source_type||'inline',source:c.input_source||'',prompt:runtimeTaskUsesPrompt(kind,task)?(c.prompt||''):'',data:c.input_data||''};},function(x){return h(Section,{title:'Active Input'},
     h(Grid,{className:'mlb-validation-status-grid'},h(StaticMetric,{label:'Type',value:x.kind}),h(StaticMetric,{label:'Mode',value:x.mode}),h(StaticMetric,{label:'Task',value:x.task}),h(StaticMetric,{label:'Source Type',value:x.sourceType}),x.source?h(StaticMetric,{label:'Source',value:x.source}):null),
     x.kind==='tabular'&&x.data?h('div',{className:'mlb-status-prompt'},h('strong',null,'FEATURE VALUES'),h('pre',null,x.data)):null,
     x.prompt?h('div',{className:'mlb-status-prompt'},h('strong',null,'PROMPT / INSTRUCTION'),h('pre',null,x.prompt)):null

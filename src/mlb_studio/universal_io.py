@@ -20,6 +20,7 @@ import json
 import queue
 import socket
 import time
+import urllib.parse
 import urllib.request
 import wave
 
@@ -135,6 +136,14 @@ def normalize_input_config(config: dict[str, Any] | None, model_entry: dict[str,
     source = str(config.get("input_source") or "").strip()
     mime = str(config.get("input_mime") or "").strip()
     prompt = str(config.get("prompt") or "")
+    prompt_allowed = (
+        kind == "text"
+        or (kind == "image" and task in {"edit", "caption"})
+        or (kind == "video" and task == "caption")
+        or (kind == "multimodal" and task == "generate")
+    )
+    if not prompt_allowed:
+        prompt = ""
     channel = str(config.get("input_channel") or "").strip()
     metadata = dict(config.get("input_metadata") or {}) if isinstance(config.get("input_metadata"), dict) else {}
 
@@ -155,18 +164,57 @@ def normalize_input_config(config: dict[str, Any] | None, model_entry: dict[str,
     )
 
 
-def _read_bytes(source: str) -> bytes:
+def _embedded_media_url(source: str) -> str | None:
+    """Resolve common image-search/result URLs to their embedded media URL.
+
+    Browsers often copy a Google/Bing result-page URL rather than the actual
+    image resource.  Those pages are HTML, so Pillow cannot decode them.  When
+    a well-known query parameter carries the real media URL, unwrap it before
+    fetching.
+    """
+    try:
+        parsed = urllib.parse.urlparse(str(source or ""))
+        query = urllib.parse.parse_qs(parsed.query)
+    except Exception:
+        return None
+    for key in ("imgurl", "mediaurl", "media_url", "image_url"):
+        values = query.get(key) or []
+        if values:
+            candidate = urllib.parse.unquote(str(values[0] or "")).strip()
+            if candidate.startswith(("http://", "https://", "data:")):
+                return candidate
+    return None
+
+
+def _read_bytes(source: str, *, expected_media: str | None = None) -> bytes:
     source = str(source or "").strip()
     if not source:
         raise ValueError("An input source is required.")
+    if expected_media == "image":
+        nested = _embedded_media_url(source)
+        if nested and nested != source:
+            source = nested
     if source.startswith("data:"):
         head, _, payload = source.partition(",")
         if not payload:
             raise ValueError("Invalid data URL input.")
         return base64.b64decode(payload) if ";base64" in head else payload.encode("utf-8")
     if source.startswith(("http://", "https://")):
-        with urllib.request.urlopen(source, timeout=15) as response:  # nosec - explicit user source
-            return response.read()
+        headers = {
+            "User-Agent": "Mozilla/5.0 MLBricks-Studio/1.0",
+            "Accept": "image/*,*/*;q=0.8" if expected_media == "image" else "*/*",
+        }
+        request = urllib.request.Request(source, headers=headers)
+        with urllib.request.urlopen(request, timeout=15) as response:  # nosec - explicit user source
+            content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            raw = response.read()
+        if expected_media == "image" and content_type and not content_type.startswith("image/"):
+            raise ValueError(
+                "The supplied URL returned %s instead of an image. "
+                "Use a direct image URL (ending in .png/.jpg/.webp etc.), a local image path, "
+                "or copy the image itself rather than the search-results page." % content_type
+            )
+        return raw
     path = Path(source).expanduser()
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"Input source was not found: {source}")
@@ -294,18 +342,34 @@ def _tabular_tensor(envelope: InputEnvelope):
     return torch.from_numpy(np.ascontiguousarray(arr)), {"rows": int(arr.shape[0]), "features": int(arr.shape[1])}
 
 
-def _image_tensor(source: str, *, image_size: int | None = None):
+def _image_tensor(source: str, *, image_size: int | None = None, channels: int | None = None):
     import numpy as np
     import torch
-    from PIL import Image
+    from PIL import Image, UnidentifiedImageError
 
-    raw = _read_bytes(source)
-    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    raw = _read_bytes(source, expected_media="image")
+    try:
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+    except UnidentifiedImageError as exc:
+        raise ValueError(
+            "The selected source did not contain a decodable image. Use a direct image URL "
+            "or a local PNG/JPG/WEBP/BMP file; search-result pages are not image files."
+        ) from exc
+    requested_channels = int(channels or 3)
+    if requested_channels == 1:
+        image = image.convert("L")
+    else:
+        requested_channels = 3
+        image = image.convert("RGB")
     if image_size and image_size > 0:
         image = image.resize((int(image_size), int(image_size)))
     arr = np.asarray(image, dtype="float32") / 255.0
-    tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).contiguous()
-    return tensor, {"width": image.width, "height": image.height, "channels": 3}
+    if requested_channels == 1:
+        tensor = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).contiguous()
+    else:
+        tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).contiguous()
+    return tensor, {"width": image.width, "height": image.height, "channels": requested_channels}
 
 
 def _audio_tensor(envelope: InputEnvelope):
@@ -342,7 +406,7 @@ def _audio_tensor(envelope: InputEnvelope):
     return torch.from_numpy(arr).unsqueeze(0), {"samples": int(arr.shape[0]), "sample_rate": rate, "channels": channels}
 
 
-def load_single_input(envelope: InputEnvelope, *, image_size: int | None = None):
+def load_single_input(envelope: InputEnvelope, *, image_size: int | None = None, image_channels: int | None = None):
     """Load one envelope into a model-ready Python value plus metadata."""
     import numpy as np
     import torch
@@ -351,7 +415,7 @@ def load_single_input(envelope: InputEnvelope, *, image_size: int | None = None)
         return envelope.prompt, {"characters": len(envelope.prompt)}
     if envelope.kind == "image":
         source = envelope.source or (envelope.data if isinstance(envelope.data, str) else "")
-        return _image_tensor(source, image_size=image_size)
+        return _image_tensor(source, image_size=image_size, channels=image_channels)
     if envelope.kind == "audio":
         return _audio_tensor(envelope)
     if envelope.kind == "signal":
@@ -377,7 +441,7 @@ def load_single_input(envelope: InputEnvelope, *, image_size: int | None = None)
         return data, {"parts": len(data) if isinstance(data, dict) else 1}
     if envelope.kind == "video":
         # A file-mode video is a finite frame stream; the runtime loop owns it.
-        iterator = iter_input_stream(envelope, image_size=image_size)
+        iterator = iter_input_stream(envelope, image_size=image_size, image_channels=image_channels)
         try:
             return next(iterator)
         finally:
@@ -387,23 +451,32 @@ def load_single_input(envelope: InputEnvelope, *, image_size: int | None = None)
     raise ValueError(f"Unsupported input kind: {envelope.kind}")
 
 
-def _cv2_frame_tensor(frame, image_size: int | None = None):
+def _cv2_frame_tensor(frame, image_size: int | None = None, channels: int | None = None):
     import numpy as np
     import torch
     try:
         import cv2
     except ImportError as exc:
         raise RuntimeError("Video/CCTV input needs OpenCV. Install `opencv-python-headless` in the runtime environment.") from exc
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    requested_channels = int(channels or 3)
+    if requested_channels == 1:
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    else:
+        requested_channels = 3
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     if image_size and image_size > 0:
         frame = cv2.resize(frame, (int(image_size), int(image_size)))
     arr = np.asarray(frame, dtype="float32") / 255.0
-    return torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).contiguous(), {
-        "width": int(arr.shape[1]), "height": int(arr.shape[0]), "channels": int(arr.shape[2])
-    }
+    if requested_channels == 1:
+        tensor = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).contiguous()
+        height, width = arr.shape
+    else:
+        tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).contiguous()
+        height, width = arr.shape[:2]
+    return tensor, {"width": int(width), "height": int(height), "channels": requested_channels}
 
 
-def _video_stream(envelope: InputEnvelope, image_size: int | None = None, stop_event=None) -> Iterator[tuple[Any, dict[str, Any]]]:
+def _video_stream(envelope: InputEnvelope, image_size: int | None = None, image_channels: int | None = None, stop_event=None) -> Iterator[tuple[Any, dict[str, Any]]]:
     try:
         import cv2
     except ImportError as exc:
@@ -429,7 +502,7 @@ def _video_stream(envelope: InputEnvelope, image_size: int | None = None, stop_e
             ok, frame = capture.read()
             if not ok:
                 break
-            tensor, meta = _cv2_frame_tensor(frame, image_size=image_size)
+            tensor, meta = _cv2_frame_tensor(frame, image_size=image_size, channels=image_channels)
             frame_index += 1
             meta.update({"frame": frame_index, "fps": envelope.fps})
             yield tensor, meta
@@ -441,7 +514,7 @@ def _video_stream(envelope: InputEnvelope, image_size: int | None = None, stop_e
         capture.release()
 
 
-def _image_sequence(envelope: InputEnvelope, image_size: int | None = None, stop_event=None) -> Iterator[tuple[Any, dict[str, Any]]]:
+def _image_sequence(envelope: InputEnvelope, image_size: int | None = None, image_channels: int | None = None, stop_event=None) -> Iterator[tuple[Any, dict[str, Any]]]:
     root = Path(envelope.source).expanduser()
     if not root.exists() or not root.is_dir():
         raise FileNotFoundError(f"Image sequence directory was not found: {root}")
@@ -452,7 +525,7 @@ def _image_sequence(envelope: InputEnvelope, image_size: int | None = None, stop
     for index, path in enumerate(paths, 1):
         if stop_event is not None and stop_event.is_set():
             break
-        tensor, meta = _image_tensor(str(path), image_size=image_size)
+        tensor, meta = _image_tensor(str(path), image_size=image_size, channels=image_channels)
         meta.update({"frame": index, "path": str(path)})
         yield tensor, meta
 
@@ -583,16 +656,16 @@ def _live_audio_stream(envelope: InputEnvelope, stop_event=None) -> Iterator[tup
             }
 
 
-def iter_input_stream(envelope: InputEnvelope, *, image_size: int | None = None, stop_event=None) -> Iterator[tuple[Any, dict[str, Any]]]:
+def iter_input_stream(envelope: InputEnvelope, *, image_size: int | None = None, image_channels: int | None = None, stop_event=None) -> Iterator[tuple[Any, dict[str, Any]]]:
     """Yield model-ready samples for finite sequences or continuous sources."""
     if envelope.kind == "image" and envelope.mode in {"sequence", "batch"}:
-        yield from _image_sequence(envelope, image_size=image_size, stop_event=stop_event)
+        yield from _image_sequence(envelope, image_size=image_size, image_channels=image_channels, stop_event=stop_event)
         return
     if envelope.kind == "image" and envelope.mode == "live":
-        yield from _video_stream(envelope, image_size=image_size, stop_event=stop_event)
+        yield from _video_stream(envelope, image_size=image_size, image_channels=image_channels, stop_event=stop_event)
         return
     if envelope.kind == "video":
-        yield from _video_stream(envelope, image_size=image_size, stop_event=stop_event)
+        yield from _video_stream(envelope, image_size=image_size, image_channels=image_channels, stop_event=stop_event)
         return
     if envelope.kind == "signal" and envelope.mode in _LIVE_MODES:
         source_type = envelope.source_type
@@ -609,5 +682,5 @@ def iter_input_stream(envelope: InputEnvelope, *, image_size: int | None = None,
     if envelope.kind == "audio" and envelope.mode in _LIVE_MODES:
         yield from _live_audio_stream(envelope, stop_event=stop_event)
         return
-    value, meta = load_single_input(envelope, image_size=image_size)
+    value, meta = load_single_input(envelope, image_size=image_size, image_channels=image_channels)
     yield value, meta

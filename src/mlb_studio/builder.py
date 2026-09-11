@@ -2434,16 +2434,115 @@ class Builder:
         return compiled, tokenizer
 
     @staticmethod
+    def _runtime_input_image_spec(entry):
+        """Return the image preprocessing contract encoded by the model graph.
+
+        Older Gallery CNN/Autoencoder builds inherited the generic Image Input
+        defaults (3x224) even though their downstream graph was trained on
+        1x16x16 images.  Prefer structural constraints from Conv/Flatten/heads
+        when those constraints prove that the saved input metadata is stale.
+        """
+        nodes = list((((entry or {}).get("architecture") or {}).get("nodes") or []))
+        input_node = next((n for n in nodes if str(n.get("type") or "") in {"image_input", "video_input", "stream_input"}), None)
+        if input_node is None:
+            return None, None
+        params = input_node.get("params") or {}
+        try:
+            declared_size = int(params.get("image_size") or 0)
+        except (TypeError, ValueError):
+            declared_size = 0
+        try:
+            declared_channels = int(params.get("channels") or 0)
+        except (TypeError, ValueError):
+            declared_channels = 0
+
+        first_conv = next((n for n in nodes if str(n.get("type") or "") == "conv2d"), None)
+        try:
+            conv_channels = int(((first_conv or {}).get("params") or {}).get("in_channels") or 0)
+        except (TypeError, ValueError):
+            conv_channels = 0
+
+        channel_candidates = []
+        for value in (conv_channels, declared_channels, 1, 3):
+            if value in {1, 3} and value not in channel_candidates:
+                channel_candidates.append(value)
+
+        # Find a sequential flatten->dense/classifier shape constraint.  This
+        # covers the educational CNN and Autoencoder while leaving branched
+        # detector graphs on their explicit Image Input contract.
+        def candidate_matches(channels, size):
+            c, h, w = int(channels), int(size), int(size)
+            saw_spatial = False
+            for node in nodes[nodes.index(input_node) + 1:]:
+                typ = str(node.get("type") or "")
+                p = node.get("params") or {}
+                if typ == "conv2d":
+                    try:
+                        inc = int(p.get("in_channels") or c)
+                        outc = int(p.get("out_channels") or c)
+                        k = int(p.get("kernel_size") or 1)
+                        stride = max(1, int(p.get("stride") or 1))
+                        pad = int(p.get("padding") or 0)
+                    except (TypeError, ValueError):
+                        return False
+                    if inc != c:
+                        return False
+                    h = (h + 2 * pad - k) // stride + 1
+                    w = (w + 2 * pad - k) // stride + 1
+                    c = outc
+                    saw_spatial = True
+                elif typ in {"maxpool2d", "avgpool2d"}:
+                    try:
+                        k = int(p.get("kernel_size") or 2)
+                        stride_raw = int(p.get("stride") or 0)
+                        stride = stride_raw if stride_raw > 0 else k
+                        pad = int(p.get("padding") or 0)
+                    except (TypeError, ValueError):
+                        return False
+                    h = (h + 2 * pad - k) // stride + 1
+                    w = (w + 2 * pad - k) // stride + 1
+                    saw_spatial = True
+                elif typ == "flatten":
+                    flat = c * h * w
+                    # Search forward for the first component that declares the
+                    # expected flattened width.
+                    idx = nodes.index(node)
+                    for downstream in nodes[idx + 1:]:
+                        dt = str(downstream.get("type") or "")
+                        dp = downstream.get("params") or {}
+                        expected = None
+                        if dt == "linear":
+                            expected = dp.get("in_features")
+                        elif dt == "classifier":
+                            expected = dp.get("dim")
+                        if expected not in (None, ""):
+                            try:
+                                return flat == int(expected)
+                            except (TypeError, ValueError):
+                                return False
+                    return False
+                elif typ in {"detection_head", "detection_pyramid_head", "detection_nms"}:
+                    return False
+                if h <= 0 or w <= 0:
+                    return False
+            return False if saw_spatial else False
+
+        size_candidates = []
+        for value in (declared_size, 8, 12, 16, 20, 24, 28, 32, 48, 64, 96, 128, 160, 192, 224, 256, 384, 512):
+            if value > 0 and value not in size_candidates:
+                size_candidates.append(value)
+        for channels in channel_candidates:
+            for size in size_candidates:
+                if candidate_matches(channels, size):
+                    return size, channels
+
+        channels = conv_channels if conv_channels in {1, 3} else (declared_channels if declared_channels in {1, 3} else None)
+        return (declared_size if declared_size > 0 else None, channels)
+
+    @staticmethod
     def _runtime_input_image_size(entry):
-        for node in ((entry or {}).get("architecture") or {}).get("nodes") or []:
-            if str(node.get("type") or "") in {"image_input", "video_input", "stream_input"}:
-                try:
-                    value = int((node.get("params") or {}).get("image_size") or 0)
-                except (TypeError, ValueError):
-                    value = 0
-                if value > 0:
-                    return value
-        return None
+        # Backward-compatible helper kept for callers/tests outside Studio.
+        return Builder._runtime_input_image_spec(entry)[0]
 
     def _run_universal_input_runtime(self, compiled, entry, envelope, emit):
         """Run finite or live non-text input through the current model runtime."""
@@ -2451,7 +2550,7 @@ class Builder:
         from .universal_io import iter_input_stream, load_single_input
 
         output_type = str((entry.get("requirements") or {}).get("output_type") or "unknown")
-        image_size = self._runtime_input_image_size(entry)
+        image_size, image_channels = self._runtime_input_image_spec(entry)
         stream_like = bool(
             envelope.continuous
             or envelope.kind == "video"
@@ -2470,10 +2569,10 @@ class Builder:
 
         if stream_like:
             samples = iter_input_stream(
-                envelope, image_size=image_size, stop_event=self._stop_event
+                envelope, image_size=image_size, image_channels=image_channels, stop_event=self._stop_event
             )
         else:
-            value, meta = load_single_input(envelope, image_size=image_size)
+            value, meta = load_single_input(envelope, image_size=image_size, image_channels=image_channels)
             samples = iter(((value, meta),))
 
         for value, input_meta in samples:
