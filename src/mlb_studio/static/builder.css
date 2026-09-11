@@ -4029,3 +4029,20 @@ body.mlb-local-app .mlb-root{
 .mlb-workspace-tab:hover{border-color:#51677d;background:#182631}
 .mlb-workspace-tab.active{border-color:#8063ee;background:#182331;box-shadow:inset 3px 0 0 #8063ee;color:#fff}
 .mlb-workspace-tab.busy:after{content:"";position:absolute;right:10px;width:7px;height:7px;border-radius:50%;background:#44d38b;box-shadow:0 0 0 2px rgba(68,211,139,.12)}
+
+/* ------------------------------------------------------------------
+   Step 10N — flattened Gallery navigation
+   Core / Models / My Models / Components / Data / Drafts are peers.
+   ------------------------------------------------------------------ */
+.mlb-gallery-head-tools{margin-left:auto;display:flex;align-items:center;gap:10px;min-width:0;flex:0 0 auto}
+.mlb-gallery-head-tools .mlb-gallery-page-actions{margin-left:0}
+.mlb-gallery-flat-tabs-row{padding:0 20px!important;gap:14px!important}
+.mlb-gallery-flat-tabs{display:flex!important;align-items:center!important;gap:18px!important;min-width:0!important;overflow-x:auto!important;scrollbar-width:none!important}
+.mlb-gallery-flat-tabs::-webkit-scrollbar{display:none}
+.mlb-gallery-flat-tabs .mlb-central-gallery-tab{height:43px!important;padding:0 2px!important;white-space:nowrap!important;font-size:11px!important;letter-spacing:.02em!important}
+.mlb-gallery-flat-tabs .mlb-central-gallery-tab.active:after{left:0!important;right:0!important}
+.mlb-gallery-flat-nav-tools{margin-left:auto;display:flex;align-items:center;gap:10px;min-width:0;flex:0 0 auto}
+.mlb-gallery-flat-nav-tools .mlb-model-gallery-filter-select{height:28px!important;min-width:150px!important;max-width:190px!important}
+.mlb-gallery-flat-nav-tools .mlb-model-gallery-count{font-size:9.5px!important}
+/* Legacy nested model navigation is intentionally retired in Step 10N. */
+.mlb-model-gallery-nav,.mlb-model-group-tabs{display:none!important}

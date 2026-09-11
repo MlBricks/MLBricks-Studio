@@ -873,9 +873,8 @@ function __MLB_STUDIO_FACTORY__(){
     const localDefaultRoot=localEnvironment.workspace_root||localEnvironment.default_root||(localEnvironment.roots||[])[0]||".";
     const localPaths=cp(localEnvironment.paths||{});
     let runtimePanel=null;
-    let galleryWorkspace={open:false,tab:"models"};
+    let galleryWorkspace={open:false,tab:"core"};
     let galleryDataCategory="All Data";
-    let galleryModelGroup="core";
     let galleryCoreCategory="All Core";
     let galleryModelCategory="All Models";
     let galleryPreviousBottomExpanded=true;
@@ -2083,7 +2082,9 @@ function __MLB_STUDIO_FACTORY__(){
       else if(cloudWorkspace.open)galleryPreviousBottomExpanded=cloudPreviousBottomExpanded;
       cloudWorkspace.open=false;
       bottomExpanded=false;
-      galleryWorkspace={open:true,tab:["models","components","data","drafts"].includes(tab)?tab:"models"};
+      const requested=(typeof tab==="string")?tab:(state.active_workspace==="data"?"data":"core");
+      const normalized=requested==="mine"?"mine":requested;
+      galleryWorkspace={open:true,tab:["core","models","mine","components","data","drafts"].includes(normalized)?normalized:(state.active_workspace==="data"?"data":"core")};
       outputDirectorySelection=null;
       selected=null;
       setStatus("Workshop opened.");
@@ -2324,7 +2325,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     function canvasScrollKey(){
-      if(galleryWorkspace.open)return "gallery:"+(galleryWorkspace.tab||"models");
+      if(galleryWorkspace.open)return "gallery:"+(galleryWorkspace.tab||"core");
       if(cloudWorkspace.open)return "cloud";
       if(runtimePanel){
         return ["runtime",runtimePanel.mode||"run",runtimePanel.modelId||"model",runtimePanel.tab||"setup"].join(":");
@@ -7105,14 +7106,7 @@ function studioChoice(title,message,actions,options={}){
       const close=btn("×","mlb-gallery-page-close");close.title="Close Workshop";close.addEventListener("click",closeGallery);
       head.append(copy,close);outer.appendChild(head);
 
-      const tabsRow=document.createElement("div");tabsRow.className="mlb-gallery-tabs-row";
-      const tabs=document.createElement("div");tabs.className="mlb-central-gallery-tabs";
-      [["models","Models"],["components","Components"],["data","Data"],["drafts","Drafts"]].forEach(([key,label])=>{
-        const b=btn(label,"mlb-central-gallery-tab"+(galleryWorkspace.tab===key?" active":""));
-        b.addEventListener("click",()=>{galleryWorkspace.tab=key;draw();});tabs.appendChild(b);
-      });
-      tabsRow.appendChild(tabs);
-
+      const headTools=document.createElement("div");headTools.className="mlb-gallery-head-tools";
       const galleryActions=document.createElement("div");galleryActions.className="mlb-gallery-page-actions";
       const galleryLoad=btn("⇧ Load","mlb-gallery-action mlb-gallery-file-action");
       galleryLoad.title="Load a model directly into Model Builder, data export into Data Builder, or open a full project bundle";galleryLoad.addEventListener("click",loadDesign);galleryActions.appendChild(galleryLoad);
@@ -7121,10 +7115,20 @@ function studioChoice(title,message,actions,options={}){
       const bundleExport=btn("Bundle","mlb-gallery-action mlb-gallery-file-action");bundleExport.title="Export model graph, data graph, recipes, custom components and experiments as one reproducible project bundle";bundleExport.addEventListener("click",exportProjectBundle);galleryActions.appendChild(bundleExport);
 
       let canSave=false,saveLabel="";
-      if(galleryWorkspace.tab==="models"&&state.active_workspace==="model"&&current(state)?.kind!=="custom_edit"){canSave=true;saveLabel="+ Save Current Model";}
+      if(["core","models","mine"].includes(galleryWorkspace.tab)&&state.active_workspace==="model"&&current(state)?.kind!=="custom_edit"){canSave=true;saveLabel="+ Save Current Model";}
       if(galleryWorkspace.tab==="data"&&state.active_workspace==="data"){canSave=true;saveLabel="+ Save Current Data";}
       if(canSave){const save=btn(saveLabel,"mlb-gallery-save mlb-gallery-page-save");save.addEventListener("click",saveCurrentToGallery);galleryActions.appendChild(save);}
-      tabsRow.appendChild(galleryActions);
+      headTools.append(galleryActions,close);
+      head.replaceChildren(copy,headTools);
+
+      const tabsRow=document.createElement("div");tabsRow.className="mlb-gallery-tabs-row mlb-gallery-flat-tabs-row";
+      const tabs=document.createElement("div");tabs.className="mlb-central-gallery-tabs mlb-gallery-flat-tabs";
+      [["core","Core"],["models","Models"],["mine","My Models"],["components","Components"],["data","Data"],["drafts","Drafts"]].forEach(([key,label])=>{
+        const b=btn(label,"mlb-central-gallery-tab"+(galleryWorkspace.tab===key?" active":""));
+        b.addEventListener("click",()=>{galleryWorkspace.tab=key;draw();});tabs.appendChild(b);
+      });
+      const navTools=document.createElement("div");navTools.className="mlb-gallery-flat-nav-tools";
+      tabsRow.append(tabs,navTools);
       outer.appendChild(tabsRow);
 
       // Only this content region scrolls. The banner and tabs never shrink.
@@ -7161,21 +7165,12 @@ function studioChoice(title,message,actions,options={}){
       };
       const openAndClose=(fn)=>()=>{galleryWorkspace.open=false;bottomExpanded=galleryPreviousBottomExpanded;fn();};
 
-      if(galleryWorkspace.tab==="models"){
+      if(["core","models","mine"].includes(galleryWorkspace.tab)){
         body.classList.add("models-tab");
 
-        // Step 10J — split the large model catalog into three concise views.
-        // Core is for foundational ML/DL/signal study; Models contains complete
-        // architecture families; My Models contains only user-saved designs.
-        const modelNav=document.createElement("div");modelNav.className="mlb-model-gallery-nav";
-        const groupBar=document.createElement("div");groupBar.className="mlb-model-group-tabs";
-        [["core","Core"],["models","Models"],["mine","My Models"]].forEach(([key,label])=>{
-          const b=btn(label,"mlb-model-group-tab"+(galleryModelGroup===key?" active":""));
-          b.addEventListener("click",()=>{galleryModelGroup=key;draw();});groupBar.appendChild(b);
-        });
-        const modelNavTools=document.createElement("div");modelNavTools.className="mlb-model-gallery-nav-tools";
-        modelNav.append(groupBar,modelNavTools);
-        body.appendChild(modelNav);
+        // Step 10N — Core, Models and My Models are first-class Gallery tabs.
+        // There is no nested Models -> Core/Models/My Models navigation.
+        const modelNavTools=navTools;
 
         const renderPresetSections=(categories,categorySelector,allLabel,headingSuffix)=>{
           let rendered=false;
@@ -7211,7 +7206,7 @@ function studioChoice(title,message,actions,options={}){
           return rendered;
         };
 
-        if(galleryModelGroup==="core"){
+        if(galleryWorkspace.tab==="core"){
           const filterSelect=document.createElement("select");filterSelect.className="mlb-model-gallery-filter-select";filterSelect.title="Filter Core models";
           mlbricksCoreCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryCoreCategory===name;filterSelect.appendChild(opt);});
           filterSelect.addEventListener("change",()=>{galleryCoreCategory=filterSelect.value;draw();});
@@ -7227,7 +7222,7 @@ function studioChoice(title,message,actions,options={}){
             "All Core",
             ""
           );
-        }else if(galleryModelGroup==="models"){
+        }else if(galleryWorkspace.tab==="models"){
           const filterSelect=document.createElement("select");filterSelect.className="mlb-model-gallery-filter-select";filterSelect.title="Filter model families";
           mlbricksModelCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryModelCategory===name;filterSelect.appendChild(opt);});
           filterSelect.addEventListener("change",()=>{galleryModelCategory=filterSelect.value;draw();});
@@ -12135,7 +12130,7 @@ function studioChoice(title,message,actions,options={}){
           galleryBtn.title="Open prebuilt Models, Components and Data";
           galleryBtn.addEventListener("click",()=>{
             if(galleryWorkspace.open){closeGallery();return;}
-            openGallery(state.active_workspace==="data"?"data":"models");
+            openGallery(state.active_workspace==="data"?"data":"core");
           });
           primary.appendChild(galleryBtn);
         }
@@ -12460,7 +12455,9 @@ function studioChoice(title,message,actions,options={}){
       toolbar.appendChild(workspaceBadge);
 
       if(galleryWorkspace.open){
-        const gname=document.createElement("div");gname.className="mlb-runtime-toolbar-name";gname.textContent=galleryWorkspace.tab==="models"?"Models":galleryWorkspace.tab==="components"?"Components":"Data";toolbar.appendChild(gname);
+        const gname=document.createElement("div");gname.className="mlb-runtime-toolbar-name";
+        const galleryNames={core:"Core",models:"Models",mine:"My Models",components:"Components",data:"Data",drafts:"Drafts"};
+        gname.textContent=galleryNames[galleryWorkspace.tab]||"Gallery";toolbar.appendChild(gname);
         const tsp=document.createElement("div");tsp.className="mlb-toolspacer";toolbar.appendChild(tsp);
         const close=btn("× Close","mlb-tool mlb-gallery-toolbar-close");close.addEventListener("click",closeGallery);toolbar.appendChild(close);
       }else if(cloudWorkspace.open){
@@ -12861,7 +12858,7 @@ function studioChoice(title,message,actions,options={}){
 
         if(state.active_workspace==="data"){
           p1.innerHTML='<div class="mlb-bottom-title">GALLERY</div><div class="mlb-preset-card"><strong>▦ Sample & Saved Data</strong>Open sample data pipelines or reuse pipelines saved by you.</div>';
-          p1.querySelector(".mlb-preset-card").addEventListener("click",openGallery);
+          p1.querySelector(".mlb-preset-card").addEventListener("click",()=>openGallery(state.active_workspace==="data"?"data":"core"));
           p2.innerHTML='<div class="mlb-bottom-title">PIPELINE INFO</div><div class="mlb-stat-row"><span>Steps</span><strong>'+current(state).nodes.length+'</strong></div><div class="mlb-stat-row"><span>Connections</span><strong>'+(current(state).edges||[]).length+'</strong></div><div class="mlb-stat-row"><span>Workspace</span><strong>Data</strong></div><div class="mlb-stat-row"><span>Status</span><strong class="mlb-good">✓ Designed</strong></div>';
           const latestData=latestPreparedDataset();
           p3.innerHTML=latestData
@@ -12874,7 +12871,7 @@ function studioChoice(title,message,actions,options={}){
           p4.innerHTML='<div class="mlb-bottom-title">FLOW</div><div class="mlb-stat-row"><span>Main</span><strong>Processing order</strong></div><div class="mlb-stat-row"><span>Skip</span><strong>Optional branch</strong></div><div class="mlb-stat-row"><span>Extra</span><strong>Aux data</strong></div>';
         }else{
           p1.innerHTML='<div class="mlb-bottom-title">GALLERY</div><div class="mlb-preset-card"><strong>▦ Sample & Saved Models</strong>Open sample architectures or reuse models saved by you.</div>';
-          p1.querySelector(".mlb-preset-card").addEventListener("click",openGallery);
+          p1.querySelector(".mlb-preset-card").addEventListener("click",()=>openGallery(state.active_workspace==="data"?"data":"core"));
           p2.innerHTML='<div class="mlb-bottom-title">GRAPH INFO</div><div class="mlb-stat-row"><span>Layers</span><strong>'+current(state).nodes.length+'</strong></div><div class="mlb-stat-row"><span>Connections</span><strong>'+(current(state).edges||[]).length+'</strong></div><div class="mlb-stat-row"><span>Context</span><strong>'+(state.project?.context_length||"—")+'</strong></div><div class="mlb-stat-row"><span>Batch Size</span><strong>'+(state.project?.batch_size||"—")+'</strong></div><div class="mlb-stat-row"><span>Status</span><strong class="mlb-good">Design Ready</strong></div>';
           p3.innerHTML='<div class="mlb-bottom-title">COMPUTE ESTIMATE</div><div class="mlb-stat-row"><span>Target Params</span><strong>'+(state.project?.estimated_parameters||"—")+'</strong></div><div class="mlb-stat-row"><span>Dataset</span><strong>'+(state.project?.dataset||"—")+'</strong></div><div class="mlb-stat-row"><span>Precision</span><strong>float16</strong></div><div class="mlb-stat-row"><span>Backend</span><strong>MLBricks</strong></div>';
           p4.innerHTML='<div class="mlb-bottom-title">CONNECTION LANES</div><div class="mlb-stat-row"><span>Skip</span><strong>Top Out → Top In</strong></div><div class="mlb-stat-row"><span>Main</span><strong>Middle Out → Middle In</strong></div><div class="mlb-stat-row"><span>Extra</span><strong>Bottom Out → Bottom In</strong></div><div class="mlb-stat-row"><span>Remove</span><strong>Inspector → Remove</strong></div>';

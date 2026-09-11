@@ -334,7 +334,7 @@ def test_full_window_invalidates_stale_frontend_source_snapshot():
     block = text[start:end]
     assert 'window.__MLB_STUDIO_GET_JS_SOURCE__?window.__MLB_STUDIO_GET_JS_SOURCE__()' in block
     assert 'window.__MLB_STUDIO_JS_SOURCE__||(window.__MLB_STUDIO_GET_JS_SOURCE__' not in block
-    assert 'mlb-model-gallery-nav' in text
+    assert 'mlb-gallery-flat-tabs' in text
     assert 'mlb-model-gallery-filter-select' in text
     assert 'category.toUpperCase()+headingSuffix' in text
     assert '"Language"' in text
@@ -402,7 +402,7 @@ def test_logo_is_centered_over_left_sidebar():
 
 def test_gallery_excludes_test_models_compositions_and_specialized_probes():
     js = _builder_js()
-    assert 'mlb-model-gallery-nav' in js
+    assert 'mlb-gallery-flat-tabs' in js
     assert 'mlb-model-gallery-filter-select' in js
     assert 'category.toUpperCase()+headingSuffix' in js
     assert '"Machine Learning","Deep Learning","Signal Processing"' in js

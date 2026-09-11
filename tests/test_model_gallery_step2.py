@@ -37,9 +37,9 @@ def test_step2_model_gallery_has_categories_data_links_and_language_reorg():
         assert 'const mlbricksCoreCategories=["All Core","Machine Learning","Deep Learning","Signal Processing"]' in text
         assert 'const mlbricksModelCategories=["All Models","Language","Vision","Audio","JEPA","Multimodal","State & Memory"]' in text
         assert 'mlb-model-gallery-filter-select' in text
-        assert 'mlb-model-gallery-nav-tools' in text
+        assert 'mlb-gallery-flat-nav-tools' in text
         assert 'btn("Open Data","mlb-gallery-action")' in text
-        assert '[["core","Core"],["models","Models"],["mine","My Models"]]' in text
+        assert '[["core","Core"],["models","Models"],["mine","My Models"],["components","Components"],["data","Data"],["drafts","Drafts"]]' in text
         assert 'name:"50M SLM",category:"Language"' in text
         assert 'name:"200M SLM · SOUP",category:"Language"' in text
 
