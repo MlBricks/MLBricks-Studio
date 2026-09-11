@@ -6457,12 +6457,15 @@ function studioChoice(title,message,actions,options={}){
         // Step 10J — split the large model catalog into three concise views.
         // Core is for foundational ML/DL/signal study; Models contains complete
         // architecture families; My Models contains only user-saved designs.
+        const modelNav=document.createElement("div");modelNav.className="mlb-model-gallery-nav";
         const groupBar=document.createElement("div");groupBar.className="mlb-model-group-tabs";
         [["core","Core"],["models","Models"],["mine","My Models"]].forEach(([key,label])=>{
           const b=btn(label,"mlb-model-group-tab"+(galleryModelGroup===key?" active":""));
           b.addEventListener("click",()=>{galleryModelGroup=key;draw();});groupBar.appendChild(b);
         });
-        body.appendChild(groupBar);
+        const modelNavTools=document.createElement("div");modelNavTools.className="mlb-model-gallery-nav-tools";
+        modelNav.append(groupBar,modelNavTools);
+        body.appendChild(modelNav);
 
         const renderPresetSections=(categories,categorySelector,allLabel,headingSuffix)=>{
           let rendered=false;
@@ -6499,42 +6502,38 @@ function studioChoice(title,message,actions,options={}){
         };
 
         if(galleryModelGroup==="core"){
-          const filterBar=document.createElement("div");filterBar.className="mlb-gallery-category-bar";
-          const filterLabel=document.createElement("label");filterLabel.textContent="CORE AREA";
-          const filterSelect=document.createElement("select");filterSelect.className="mlb-gallery-category-select";
+          const filterSelect=document.createElement("select");filterSelect.className="mlb-model-gallery-filter-select";filterSelect.title="Filter Core models";
           mlbricksCoreCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryCoreCategory===name;filterSelect.appendChild(opt);});
           filterSelect.addEventListener("change",()=>{galleryCoreCategory=filterSelect.value;draw();});
           const corePresets=mlbricksModelPresets.filter(mlbricksIsCorePreset);
           const visibleCore=galleryCoreCategory==="All Core"?corePresets:corePresets.filter(p=>mlbricksCorePresetCategory(p)===galleryCoreCategory);
-          const categoryCount=document.createElement("span");categoryCount.textContent=visibleCore.length+" learning models";
-          filterBar.append(filterLabel,filterSelect,categoryCount);body.appendChild(filterBar);
+          const categoryCount=document.createElement("span");categoryCount.className="mlb-model-gallery-count";categoryCount.textContent=visibleCore.length+" models";
+          modelNavTools.append(filterSelect,categoryCount);
 
           const categories=galleryCoreCategory==="All Core"?mlbricksCoreCategories.filter(x=>x!=="All Core"):[galleryCoreCategory];
           renderPresetSections(
             categories,
             category=>(preset)=>mlbricksIsCorePreset(preset)&&mlbricksCorePresetCategory(preset)===category,
             "All Core",
-            " · CORE"
+            ""
           );
         }else if(galleryModelGroup==="models"){
-          const filterBar=document.createElement("div");filterBar.className="mlb-gallery-category-bar";
-          const filterLabel=document.createElement("label");filterLabel.textContent="MODEL FAMILY";
-          const filterSelect=document.createElement("select");filterSelect.className="mlb-gallery-category-select";
+          const filterSelect=document.createElement("select");filterSelect.className="mlb-model-gallery-filter-select";filterSelect.title="Filter model families";
           mlbricksModelCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryModelCategory===name;filterSelect.appendChild(opt);});
           filterSelect.addEventListener("change",()=>{galleryModelCategory=filterSelect.value;draw();});
           const modelPresets=mlbricksModelPresets.filter(p=>!mlbricksIsCorePreset(p));
           const visibleModels=galleryModelCategory==="All Models"?modelPresets:modelPresets.filter(p=>p.category===galleryModelCategory);
           const readyCount=visibleModels.filter(p=>!p.planned).length;
           const plannedCount=visibleModels.filter(p=>p.planned).length;
-          const categoryCount=document.createElement("span");categoryCount.textContent=readyCount+" ready"+(plannedCount?(" · "+plannedCount+" staged"):"");
-          filterBar.append(filterLabel,filterSelect,categoryCount);body.appendChild(filterBar);
+          const categoryCount=document.createElement("span");categoryCount.className="mlb-model-gallery-count";categoryCount.textContent=readyCount+" models"+(plannedCount?(" · "+plannedCount+" staged"):"");
+          modelNavTools.append(filterSelect,categoryCount);
 
           const categories=galleryModelCategory==="All Models"?mlbricksModelCategories.filter(x=>x!=="All Models"):[galleryModelCategory];
           const rendered=renderPresetSections(
             categories,
             category=>(preset)=>!mlbricksIsCorePreset(preset)&&preset.category===category,
             "All Models",
-            " MODELS"
+            ""
           );
           if(!rendered){
             const pending=makeSection(galleryModelCategory.toUpperCase()+" MODELS","roadmap","featured full-width model-category-section");
@@ -6542,7 +6541,8 @@ function studioChoice(title,message,actions,options={}){
             body.appendChild(pending);
           }
         }else{
-          const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
+          const savedCount=document.createElement("span");savedCount.className="mlb-model-gallery-count";savedCount.textContent=(state.gallery.models||[]).length+" saved";modelNavTools.appendChild(savedCount);
+          const mine=makeSection("MY MODELS","","full-width saved-models");
           if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Workshop will appear here."));}
           else{
             const savedGrid=document.createElement("div");savedGrid.className="mlb-central-gallery-card-grid saved-model-grid";

@@ -9,8 +9,8 @@ def test_step10j_model_gallery_splits_core_models_and_saved_models():
         assert '[["core","Core"],["models","Models"],["mine","My Models"]]' in text
         assert 'const mlbricksCoreCategories=["All Core","Machine Learning","Deep Learning","Signal Processing"]' in text
         assert 'const mlbricksModelCategories=["All Models","Language","Vision","Audio","JEPA","Multimodal","State & Memory"]' in text
-        assert 'filterLabel.textContent="CORE AREA"' in text
-        assert 'filterLabel.textContent="MODEL FAMILY"' in text
+        assert 'mlb-model-gallery-filter-select' in text
+        assert 'mlb-model-gallery-nav-tools' in text
         assert 'mlbricksCorePresetCategory=(preset)=>preset?.category==="Signal"?"Signal Processing"' in text
 
 

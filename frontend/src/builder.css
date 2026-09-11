@@ -3992,11 +3992,17 @@ body.mlb-local-app .mlb-root{
 .mlb-central-gallery-section.data-category-section{margin-bottom:12px!important}
 .mlb-central-gallery-card-grid.data-preset-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 
-/* Step 10J — Core / Models / My Models gallery split */
-.mlb-model-group-tabs{display:flex;align-items:center;gap:5px;margin:0 0 12px;padding:4px;border:1px solid #2a3947;border-radius:10px;background:#0f1821;width:max-content;max-width:100%}
-.mlb-model-group-tab{height:30px;padding:0 14px;border:1px solid transparent;border-radius:7px;background:transparent;color:#8fa0b1;font-size:11px;font-weight:900;letter-spacing:.035em;cursor:pointer}
-.mlb-model-group-tab:hover{color:#e3eaf1;background:#14212c}
-.mlb-model-group-tab.active{color:#f5f8fb;background:#1b2935;border-color:#405568;box-shadow:inset 0 0 0 1px rgba(255,255,255,.025)}
+/* Step 10K — clean Core / Models / My Models navigation */
+.mlb-model-gallery-nav{display:flex;align-items:center;gap:16px;min-height:38px;margin:0 0 14px;border-bottom:1px solid #24313d}
+.mlb-model-group-tabs{display:flex;align-items:center;gap:18px;margin:0;padding:0;border:0;background:transparent;width:auto;max-width:100%}
+.mlb-model-group-tab{height:38px;padding:0 2px;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:#7f91a3;font-size:11px;font-weight:900;letter-spacing:.025em;cursor:pointer}
+.mlb-model-group-tab:hover{color:#dfe7ef;background:transparent}
+.mlb-model-group-tab.active{color:#f5f8fb;background:transparent;border-color:#8b6df6;box-shadow:none}
+.mlb-model-gallery-nav-tools{margin-left:auto;display:flex;align-items:center;gap:10px;min-width:0}
+.mlb-model-gallery-filter-select{height:28px;min-width:172px;max-width:220px;padding:0 28px 0 10px;border:1px solid #304252;border-radius:6px;background:#101922;color:#dce5ee;font-size:10.5px;font-weight:800;outline:none}
+.mlb-model-gallery-filter-select:hover{border-color:#465d70}
+.mlb-model-gallery-filter-select:focus{border-color:#7b65d9;box-shadow:0 0 0 2px rgba(123,101,217,.12)}
+.mlb-model-gallery-count{font-size:10px;font-weight:700;color:#718496;white-space:nowrap}
 
 /* Step 2 — categorized educational model gallery */
 .mlb-gallery-action.staged{opacity:.62;cursor:not-allowed;border-style:dashed;color:#8d9aa7;background:#121a22}
