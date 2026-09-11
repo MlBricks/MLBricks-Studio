@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type PUBLISH to release mlbricks-studio 1.0.0b2'
+        description: 'Type PUBLISH to release mlbricks-studio + mlb-studio 1.0.0b2'
         required: true
         default: ''
 
@@ -23,7 +23,7 @@ env:
 
 jobs:
   validate-build:
-    name: Validate exact release and build distributions
+    name: Validate exact release and build both distributions
     if: ${{ inputs.confirm == 'PUBLISH' }}
     runs-on: ubuntu-24.04
 
@@ -62,25 +62,6 @@ jobs:
           print("Studio source version:", version)
           assert version == "1.0.0b2", version
 
-      - name: Stop if this version already exists on PyPI
-        shell: python
-        run: |
-          import urllib.error
-          import urllib.request
-
-          url = "https://pypi.org/pypi/mlbricks-studio/1.0.0b2/json"
-
-          try:
-              urllib.request.urlopen(url, timeout=20)
-          except urllib.error.HTTPError as exc:
-              if exc.code == 404:
-                  print("PyPI version 1.0.0b2 is available.")
-              else:
-                  raise
-          else:
-              raise SystemExit(
-                  "STOP: mlbricks-studio 1.0.0b2 already exists on PyPI."
-              )
 
       - name: Install MLBricks Kit and release dependencies
         run: |
@@ -183,10 +164,101 @@ jobs:
 
           print("Artifact audit passed.")
 
-      - name: Show release distributions
-        run: ls -lh dist/
+      - name: Verify primary artifact names
+        shell: python
+        run: |
+          from pathlib import Path
+          names = sorted(p.name for p in Path("dist").iterdir())
+          print("\n".join(names))
+          assert any(n.startswith("mlbricks_studio-1.0.0b2") and n.endswith(".whl") for n in names)
+          assert any(n.startswith("mlbricks_studio-1.0.0b2") and n.endswith(".tar.gz") for n in names)
 
-      - name: Upload validated distributions
+      - name: Create mlb-studio alias project
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf alias-build alias-dist
+          mkdir -p alias-build/src/mlb_studio_alias
+
+          cat > alias-build/pyproject.toml <<'PYPROJECT'
+          [build-system]
+          requires = ["setuptools>=77", "wheel"]
+          build-backend = "setuptools.build_meta"
+
+          [project]
+          name = "mlb-studio"
+          version = "1.0.0b2"
+          description = "Compatibility alias for MLBricks Studio."
+          readme = "README.md"
+          requires-python = ">=3.9"
+          dependencies = ["mlbricks-studio==1.0.0b2"]
+
+          authors = [
+            {name = "Zameer Hussain"},
+            {name = "Akhtar Hussain"},
+          ]
+
+          [project.urls]
+          Homepage = "https://mlbricks.io"
+          Repository = "https://github.com/MlBricks/MLBricks-Studio"
+
+          [tool.setuptools.packages.find]
+          where = ["src"]
+          PYPROJECT
+
+          cat > alias-build/README.md <<'README'
+          # mlb-studio
+
+          Compatibility alias for MLBricks Studio.
+
+          Installing `mlb-studio==1.0.0b2` installs
+          `mlbricks-studio==1.0.0b2`.
+          README
+
+          cat > alias-build/src/mlb_studio_alias/__init__.py <<'PY'
+          """Compatibility metadata package for the mlb-studio PyPI alias."""
+          __version__ = "1.0.0b2"
+          PY
+
+      - name: Build mlb-studio alias
+        run: python -m build alias-build --outdir alias-dist
+
+      - name: Validate mlb-studio alias with Twine
+        run: python -m twine check alias-dist/*
+
+      - name: Verify alias dependency metadata
+        shell: python
+        run: |
+          from pathlib import Path
+          import zipfile
+
+          wheels = list(Path("alias-dist").glob("*.whl"))
+          sdists = list(Path("alias-dist").glob("*.tar.gz"))
+          assert len(wheels) == 1, wheels
+          assert len(sdists) == 1, sdists
+          assert wheels[0].name.startswith("mlb_studio-1.0.0b2-")
+          assert sdists[0].name.startswith("mlb_studio-1.0.0b2")
+
+          with zipfile.ZipFile(wheels[0]) as zf:
+              metadata_files = [n for n in zf.namelist() if n.endswith(".dist-info/METADATA")]
+              assert len(metadata_files) == 1
+              metadata = zf.read(metadata_files[0]).decode("utf-8", errors="replace")
+
+          print(metadata)
+          assert "Name: mlb-studio" in metadata
+          assert "Version: 1.0.0b2" in metadata
+          assert "Requires-Dist: mlbricks-studio==1.0.0b2" in metadata
+
+      - name: Show release distributions
+        shell: bash
+        run: |
+          echo "=== mlbricks-studio ==="
+          ls -lh dist/
+          echo
+          echo "=== mlb-studio alias ==="
+          ls -lh alias-dist/
+
+      - name: Upload primary distributions
         uses: actions/upload-artifact@v7
         with:
           name: mlbricks-studio-1.0.0b2
@@ -194,7 +266,15 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+      - name: Upload alias distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: mlb-studio-1.0.0b2
+          path: alias-dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-primary:
     name: Publish mlbricks-studio to PyPI
     needs: validate-build
     runs-on: ubuntu-24.04
@@ -208,16 +288,42 @@ jobs:
       contents: read
 
     steps:
-      - name: Download validated distributions
+      - name: Download validated primary distributions
         uses: actions/download-artifact@v7
         with:
           name: mlbricks-studio-1.0.0b2
           path: dist/
 
-      - name: Show distributions being published
-        run: ls -lh dist/
-
-      - name: Publish to PyPI
+      - name: Publish mlbricks-studio to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          skip-existing: true
+
+  publish-alias:
+    name: Publish mlb-studio alias to PyPI
+    needs:
+      - validate-build
+      - publish-primary
+    runs-on: ubuntu-24.04
+
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mlb-studio/
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download validated alias distributions
+        uses: actions/download-artifact@v7
+        with:
+          name: mlb-studio-1.0.0b2
+          path: alias-dist/
+
+      - name: Publish mlb-studio alias to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: alias-dist/
+          skip-existing: true
