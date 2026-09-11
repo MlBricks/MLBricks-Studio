@@ -179,6 +179,40 @@
     if(env.meta&&env.meta.size)info.push(String(env.meta.size));
     if(env.meta&&env.meta.dimensions)info.push(String(env.meta.dimensions));
     var header=h('div',null,h('strong',null,'OUTPUT'),h('span',null,info.join(' · ')||'Output preview'));
+    if(env.kind==='detection'){
+      var raw=Array.isArray(env.data)?env.data:[];
+      var detections=(raw.length&&Array.isArray(raw[0]))?raw[0]:raw;
+      var imageSrc=env.meta&&env.meta.input_image?String(env.meta.input_image):'';
+      var classNames=env.meta&&Array.isArray(env.meta.class_names)?env.meta.class_names:[];
+      var boxes=detections.filter(function(det){return det&&Array.isArray(det.box_xyxy)&&det.box_xyxy.length>=4;});
+      function clamp01(v){v=Number(v);return Number.isFinite(v)?Math.max(0,Math.min(1,v)):0;}
+      var overlay=boxes.map(function(det,i){
+        var b=det.box_xyxy||[];var x1=clamp01(b[0]),y1=clamp01(b[1]),x2=clamp01(b[2]),y2=clamp01(b[3]);
+        var cid=Number(det.class_id);var score=Number(det.score);
+        var name=classNames[cid]!=null?String(classNames[cid]):('Class '+cid);
+        var label=name+(Number.isFinite(score)?(' · '+(score*100).toFixed(1)+'%'):'');
+        return h('div',{className:'mlb-detection-box',key:i,style:{left:(x1*100)+'%',top:(y1*100)+'%',width:(Math.max(0,x2-x1)*100)+'%',height:(Math.max(0,y2-y1)*100)+'%'}},
+          h('span',{className:'mlb-detection-label'},label));
+      });
+      var rows=boxes.map(function(det,i){
+        var cid=Number(det.class_id),score=Number(det.score);
+        var name=classNames[cid]!=null?String(classNames[cid]):('Class '+cid);
+        return h('div',{className:'mlb-detection-result-row',key:i},
+          h('strong',null,name),h('span',null,Number.isFinite(score)?((score*100).toFixed(1)+'%'):'—'));
+      });
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
+        h('div',{className:'mlb-output-visual-card mlb-detection-card'},
+          imageSrc?h('div',{className:'mlb-detection-stage'},
+            h('img',{className:'mlb-output-image mlb-detection-image',src:imageSrc,alt:'Detection result'}),overlay
+          ):h('pre',null,'Image preview unavailable.'),
+          h('div',{className:'mlb-detection-summary'},
+            h('strong',null,boxes.length+' detection'+(boxes.length===1?'':'s')),
+            h('span',null,'Boxes are rendered on the model input image.')),
+          rows.length?h('div',{className:'mlb-detection-results'},rows):h('div',{className:'mlb-detection-empty'},'No detections above the score threshold.'),
+          h('details',{className:'mlb-detection-raw'},h('summary',null,'Raw detection data'),h('pre',null,JSON.stringify(env.data,null,2)))
+        )
+      );
+    }
     if(env.kind==='image'){
       return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
         h('div',{className:'mlb-output-visual-card'}, env.src||typeof env.data==='string'

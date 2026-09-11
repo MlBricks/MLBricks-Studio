@@ -5049,6 +5049,29 @@ function studioChoice(title,message,actions,options={}){
       meta.textContent=parts.join(" · ")||"Output preview";
       head.append(title,meta);card.appendChild(head);
       const addMeta=()=>{const text=outputMetaText(env.meta);if(text){const pre=document.createElement("pre");pre.className="mlb-output-meta";pre.textContent=text;card.appendChild(pre);}};
+      if(env.kind==="detection"){
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card mlb-detection-card";
+        const raw=Array.isArray(env.data)?env.data:[];
+        const detections=(raw.length&&Array.isArray(raw[0]))?raw[0]:raw;
+        const boxes=detections.filter(det=>det&&Array.isArray(det.box_xyxy)&&det.box_xyxy.length>=4);
+        const classNames=Array.isArray(env.meta?.class_names)?env.meta.class_names:[];
+        const imageSrc=env.meta?.input_image||"";
+        const clamp01=v=>Math.max(0,Math.min(1,Number.isFinite(Number(v))?Number(v):0));
+        if(imageSrc){
+          const stage=document.createElement("div");stage.className="mlb-detection-stage";
+          const img=document.createElement("img");img.className="mlb-output-image mlb-detection-image";img.alt="Detection result";img.src=imageSrc;stage.appendChild(img);
+          boxes.forEach(det=>{
+            const [a,b,c,d]=(det.box_xyxy||[]).map(clamp01);
+            const box=document.createElement("div");box.className="mlb-detection-box";box.style.left=(a*100)+"%";box.style.top=(b*100)+"%";box.style.width=(Math.max(0,c-a)*100)+"%";box.style.height=(Math.max(0,d-b)*100)+"%";
+            const label=document.createElement("span");label.className="mlb-detection-label";const cid=Number(det.class_id),score=Number(det.score);const name=classNames[cid]??("Class "+cid);label.textContent=name+(Number.isFinite(score)?(" · "+(score*100).toFixed(1)+"%"):"");box.appendChild(label);stage.appendChild(box);
+          });
+          wrap.appendChild(stage);
+        }else{const pre=document.createElement("pre");pre.textContent="Image preview unavailable.";wrap.appendChild(pre);}
+        const summary=document.createElement("div");summary.className="mlb-detection-summary";summary.innerHTML="<strong>"+boxes.length+" detection"+(boxes.length===1?"":"s")+"</strong><span>Boxes are rendered on the model input image.</span>";wrap.appendChild(summary);
+        if(boxes.length){const results=document.createElement("div");results.className="mlb-detection-results";boxes.forEach(det=>{const row=document.createElement("div");row.className="mlb-detection-result-row";const cid=Number(det.class_id),score=Number(det.score);const name=classNames[cid]??("Class "+cid);row.innerHTML="<strong>"+escapeRuntimeText(name)+"</strong><span>"+(Number.isFinite(score)?(score*100).toFixed(1)+"%":"—")+"</span>";results.appendChild(row);});wrap.appendChild(results);}else{const empty=document.createElement("div");empty.className="mlb-detection-empty";empty.textContent="No detections above the score threshold.";wrap.appendChild(empty);}
+        const details=document.createElement("details");details.className="mlb-detection-raw";const summaryRaw=document.createElement("summary");summaryRaw.textContent="Raw detection data";const preRaw=document.createElement("pre");preRaw.textContent=JSON.stringify(env.data,null,2);details.append(summaryRaw,preRaw);wrap.appendChild(details);
+        card.appendChild(wrap);section.appendChild(card);return;
+      }
       if(env.kind==="image"){
         const wrap=document.createElement("div");wrap.className="mlb-output-visual-card";
         if(env.src||typeof env.data==="string"){

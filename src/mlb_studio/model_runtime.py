@@ -3499,10 +3499,37 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
             iou_threshold=float((metadata or {}).get("nms_iou_threshold",0.5)),
             max_detections=int((metadata or {}).get("max_detections",100)),
         )
-        result=[[
+        payload=[[
             {"box_xyxy":[float(v) for v in row[:4].detach().cpu().tolist()],"score":float(row[4].item()),"class_id":int(row[5].item())}
             for row in det
         ] for det in detections]
+        # Object detection is a visual result.  Return the processed input image
+        # alongside normalized boxes so Studio can render the familiar annotated
+        # image instead of exposing raw JSON as the primary output.
+        detection_meta={
+            "coordinate_space":"normalized_xyxy",
+            "detections":sum(len(batch) for batch in payload),
+            "batches":len(payload),
+        }
+        if isinstance(sample,torch.Tensor):
+            preview=_tensor_image_data_uri(sample)
+            if preview is not None:
+                data_uri,image_meta=preview
+                detection_meta["input_image"]=data_uri
+                detection_meta.update({
+                    "image_width":image_meta.get("width"),
+                    "image_height":image_meta.get("height"),
+                    "image_format":image_meta.get("format","png"),
+                })
+        class_names=(metadata or {}).get("class_names")
+        if isinstance(class_names,(list,tuple)):
+            detection_meta["class_names"]=[str(v) for v in class_names]
+        return {
+            "kind":"detection",
+            "mime":"application/x-mlbricks-detection",
+            "data":payload,
+            "metadata":detection_meta,
+        }
     return universal_output_envelope(
         result,output_type=output_type,input_kind=input_kind,task=task
     )

@@ -836,6 +836,21 @@
 .mlb-output-viewer pre{white-space:pre-wrap}
 .mlb-output-visual-card{display:grid;gap:8px;padding:8px;background:#0a1117}
 .mlb-output-image,.mlb-output-video{display:block;max-width:100%;max-height:360px;border:1px solid #273541;border-radius:6px;background:#081016;object-fit:contain}
+
+.mlb-detection-card{align-items:start}
+.mlb-detection-stage{position:relative;display:inline-block;max-width:100%;line-height:0;justify-self:start}
+.mlb-detection-stage .mlb-detection-image{width:auto;height:auto;max-width:100%;max-height:480px}
+.mlb-detection-box{position:absolute;box-sizing:border-box;border:2px solid var(--orange);border-radius:3px;pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+.mlb-detection-label{position:absolute;left:-2px;top:-22px;display:block;max-width:220px;padding:3px 6px;border-radius:4px 4px 4px 0;background:var(--orange);color:#111820;font-size:10.5px;font-weight:900;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 2px 8px rgba(0,0,0,.28)}
+.mlb-detection-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:2px 0;color:#cbd4df;font-size:11px}
+.mlb-detection-summary span{color:var(--muted)}
+.mlb-detection-results{display:grid;gap:4px;max-width:520px}
+.mlb-detection-result-row{display:flex;justify-content:space-between;gap:18px;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:#0d151d;font-size:11px}
+.mlb-detection-result-row span{color:#aeb9c6}
+.mlb-detection-empty{color:var(--muted);font-size:11px;padding:6px 0}
+.mlb-detection-raw{max-width:720px;color:#aeb8c6;font-size:11px}
+.mlb-detection-raw summary{cursor:pointer;color:#8fa0b2;padding:4px 0}
+.mlb-detection-raw pre{max-height:180px;overflow:auto}
 .mlb-output-audio{width:100%}
 .mlb-output-file-link{display:inline-block;color:#8bbcff;text-decoration:none;word-break:break-all}
 .mlb-output-file-link:hover{text-decoration:underline}
