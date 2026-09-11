@@ -19,8 +19,9 @@ def test_build_workspace_uses_persistent_dual_builder_tabs():
     assert '.mlb-workspace-tab.active' in CSS
 
 
-def test_build_workspace_hidden_while_gallery_is_open():
-    assert 'current(state)?.kind!=="custom_edit" && !galleryWorkspace.open' in JS
+def test_build_workspace_remains_visible_while_gallery_is_open():
+    assert 'current(state)?.kind!=="custom_edit" && !galleryWorkspace.open' not in JS
+    assert 'if(current(state)?.kind!=="custom_edit"){' in JS
     assert 'function closeGallery(){' in JS
     assert 'galleryWorkspace.open=false;' in JS
 

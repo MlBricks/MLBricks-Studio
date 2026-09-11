@@ -11551,26 +11551,25 @@ function studioChoice(title,message,actions,options={}){
       }
 
       // Model Builder and Data Builder are persistent sibling workspaces.
-      // Switching never destroys the other canvas, so data can keep fetching while
-      // the user continues designing a model (and vice versa).
-      if(current(state)?.kind!=="custom_edit" && !galleryWorkspace.open){
-        const workspaceBox=document.createElement("div");workspaceBox.className="mlb-workspace-box";
+      // The switcher is always visible, including while Workshop/Gallery is open,
+      // so users can move between the two canvases without closing their browser surface.
+      if(current(state)?.kind!=="custom_edit"){
+        const workspaceBox=document.createElement("div");workspaceBox.className="mlb-workspace-box mlb-build-workspace-box";
         const workspaceLabel=document.createElement("label");workspaceLabel.textContent="BUILD WORKSPACE";
         const workspaceButtons=document.createElement("div");workspaceButtons.className="mlb-workspace-buttons";
         const dataBusy=execution.status==="running"&&execution.runtime_kind==="data";
-        const modelRoot=state.components?.[state.workspaces?.model?.root_component_id];
-        const modelCaption=String(state.project?.name||modelRoot?.name||"Model canvas");
-        const dataCaption=dataBusy
-          ?("Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%")
-          :((state.prepared_datasets||[]).length?((state.prepared_datasets||[]).length+" dataset"+((state.prepared_datasets||[]).length===1?"":"s")+" ready"):"Data canvas");
-        [["model","Model Builder",modelCaption],["data","Data Builder",dataCaption]].forEach(([value,label,caption])=>{
+        [["model","Model Builder"],["data","Data Builder"]].forEach(([value,label])=>{
           const option=document.createElement("button");
           option.type="button";
           option.className="mlb-workspace-tab"+(state.active_workspace===value?" active":"")+(value==="data"&&dataBusy?" busy":"");
           option.setAttribute("aria-pressed",String(state.active_workspace===value));
-          const strong=document.createElement("strong");strong.textContent=label;
-          const small=document.createElement("span");small.textContent=caption;
-          option.append(strong,small);
+          option.textContent=label;
+          if(value==="data"&&dataBusy){
+            option.title="Data Builder · Fetching "+Math.max(0,Math.min(100,Math.round(Number(execution.overall||0))))+"%";
+            option.setAttribute("data-busy","true");
+          }else{
+            option.title="Switch to "+label;
+          }
           option.addEventListener("click",()=>{if(state.active_workspace!==value)switchWorkspace(value);});
           workspaceButtons.appendChild(option);
         });

@@ -8,7 +8,7 @@ CSS_FILES = ("frontend/src/builder.css", "src/mlb_studio/static/builder.css")
 def test_step10l_exposes_two_persistent_builder_workspaces_and_removes_mode_switch():
     for rel in JS_FILES:
         text = (ROOT / rel).read_text(encoding="utf-8")
-        assert '[["model","Model Builder",modelCaption],["data","Data Builder",dataCaption]]' in text
+        assert '[["model","Model Builder"],["data","Data Builder"]]' in text
         assert 'workspaceButtons.className="mlb-workspace-buttons"' in text
         assert 'option.className="mlb-workspace-tab"' in text
         assert 'modeSwitch.className="mlb-studio-mode-switch"' not in text

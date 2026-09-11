@@ -4010,13 +4010,7 @@ body.mlb-local-app .mlb-root{
 .model-preset-grid .mlb-central-gallery-card{min-height:76px}
 
 
-/* Step 9 — Learn / Build / Research workbench */
-.mlb-studio-mode-switch{display:flex;gap:4px;padding:3px;border:1px solid var(--line,#2b3440);border-radius:8px;background:rgba(10,14,20,.5)}
-.mlb-studio-mode-btn{border:0;background:transparent;color:var(--muted,#98a2b3);font-size:11px;font-weight:700;padding:6px 9px;border-radius:6px;cursor:pointer}
-.mlb-studio-mode-btn:hover{color:var(--text,#f4f6f8);background:rgba(255,255,255,.05)}
-.mlb-studio-mode-btn.active{color:var(--text,#fff);background:rgba(99,102,241,.18);box-shadow:inset 0 0 0 1px rgba(129,140,248,.32)}
-.mlb-mode-learn .mlb-workspace-badge:after{content:" · LEARN";color:#7dd3fc}
-.mlb-mode-research .mlb-workspace-badge:after{content:" · RESEARCH";color:#c4b5fd}
+/* Step 9 — diagnostics and reproducibility */
 .mlb-step9-diagnostics{display:flex;flex-direction:column;gap:6px;padding:9px;border:1px solid var(--line,#2b3440);border-radius:8px;background:rgba(8,12,18,.5)}
 .mlb-step9-summary,.mlb-step9-check{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px}
 .mlb-step9-summary span,.mlb-step9-check small{color:var(--muted,#98a2b3)}
@@ -4027,15 +4021,11 @@ body.mlb-local-app .mlb-root{
 .mlb-step9-profile-grid span{font-size:9px;color:var(--muted,#98a2b3);text-transform:uppercase}.mlb-step9-profile-grid strong{font-size:12px}
 .mlb-step9-actions{margin-top:8px}.mlb-step9-learn-note{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:9px;border-left:3px solid #38bdf8;background:rgba(56,189,248,.07);font-size:11px}.mlb-step9-learn-note span{color:var(--muted,#98a2b3);line-height:1.45}
 .mlb-step9-history{display:flex;flex-direction:column;gap:5px}.mlb-step9-history>div{display:flex;flex-direction:column;gap:2px;padding:7px;border:1px solid var(--line,#2b3440);border-radius:6px}.mlb-step9-history span{font-size:10px;color:var(--muted,#98a2b3)}
-.mlb-mode-learn .mlb-code-preview{opacity:.72}.mlb-mode-research .mlb-inspector{min-width:320px}
 
-/* Step 10L — persistent Model/Data Builder workspace switcher */
+/* Step 10M — always-visible, minimal Model/Data workspace switcher */
+.mlb-build-workspace-box{margin-bottom:9px}
 .mlb-workspace-buttons{display:grid;grid-template-columns:1fr;gap:5px;width:100%}
-.mlb-workspace-tab{width:100%;min-height:44px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:3px;padding:7px 10px;border:1px solid #334556;border-radius:7px;background:#141f29;color:#dce6f0;text-align:left;cursor:pointer;transition:border-color .14s ease,background .14s ease,box-shadow .14s ease}
-.mlb-workspace-tab strong{font-size:12px;line-height:1.1;font-weight:850;color:#eef4fa}
-.mlb-workspace-tab span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9.5px;line-height:1.15;color:#7f91a4}
+.mlb-workspace-tab{position:relative;width:100%;min-height:36px;display:flex;align-items:center;justify-content:flex-start;padding:0 11px;border:1px solid #334556;border-radius:7px;background:#141f29;color:#dce6f0;font-size:11px;font-weight:850;text-align:left;cursor:pointer;transition:border-color .14s ease,background .14s ease,box-shadow .14s ease}
 .mlb-workspace-tab:hover{border-color:#51677d;background:#182631}
-.mlb-workspace-tab.active{border-color:#8063ee;background:#182331;box-shadow:inset 3px 0 0 #8063ee}
-.mlb-workspace-tab.active span{color:#9fadda}
-.mlb-workspace-tab.busy:not(.active){border-color:#2b7756}
-.mlb-workspace-tab.busy span{color:#63d79b}
+.mlb-workspace-tab.active{border-color:#8063ee;background:#182331;box-shadow:inset 3px 0 0 #8063ee;color:#fff}
+.mlb-workspace-tab.busy:after{content:"";position:absolute;right:10px;width:7px;height:7px;border-radius:50%;background:#44d38b;box-shadow:0 0 0 2px rgba(68,211,139,.12)}
