@@ -42,8 +42,10 @@ _STATIC = Path(__file__).parent / "static"
 # Notebook pages only need to parse/execute the large frontend bundle once per
 # live Python session.  Plain _repr_html_ remains standalone for compatibility.
 _FRONTEND_ASSETS_EMITTED = False
+_FRONTEND_ASSETS_EMITTED_SIGNATURE = None
 _FRONTEND_ASSETS_LOCK = threading.Lock()
 _FRONTEND_BUNDLE_CACHE = None
+_FRONTEND_BUNDLE_CACHE_SIGNATURE = None
 _WINDOWS_CUDA_PROBE_CACHE = None
 _MACOS_MPS_PROBE_CACHE = None
 
@@ -181,16 +183,45 @@ def _probe_macos_torch_mps():
     _MACOS_MPS_PROBE_CACHE = result
     return copy.deepcopy(result)
 
+def _frontend_asset_signature():
+    """Return a cheap signature for the packaged CSS/JS frontend assets.
+
+    Studio is often upgraded in-place while a notebook kernel is still alive.
+    A process-lifetime boolean/cache used to keep serving the old JavaScript in
+    that situation.  File metadata is enough to notice an installed asset
+    replacement without recompressing the bundle on every Builder display.
+    """
+    signature = []
+    for name in ("builder.css", "builder.js"):
+        path = _STATIC / name
+        stat = path.stat()
+        signature.append((name, stat.st_mtime_ns, stat.st_size))
+    return tuple(signature)
+
+
+def refresh_frontend_assets():
+    """Force the next Builder display to reload the packaged frontend assets."""
+    global _FRONTEND_ASSETS_EMITTED, _FRONTEND_ASSETS_EMITTED_SIGNATURE
+    global _FRONTEND_BUNDLE_CACHE, _FRONTEND_BUNDLE_CACHE_SIGNATURE
+    with _FRONTEND_ASSETS_LOCK:
+        _FRONTEND_ASSETS_EMITTED = False
+        _FRONTEND_ASSETS_EMITTED_SIGNATURE = None
+        _FRONTEND_BUNDLE_CACHE = None
+        _FRONTEND_BUNDLE_CACHE_SIGNATURE = None
+
+
 def _compressed_frontend_bundle():
-    """Return gzip+base64 frontend assets, cached for this Python process."""
-    global _FRONTEND_BUNDLE_CACHE
-    if _FRONTEND_BUNDLE_CACHE is None:
+    """Return gzip+base64 frontend assets, refreshing when installed files change."""
+    global _FRONTEND_BUNDLE_CACHE, _FRONTEND_BUNDLE_CACHE_SIGNATURE
+    signature = _frontend_asset_signature()
+    if _FRONTEND_BUNDLE_CACHE is None or _FRONTEND_BUNDLE_CACHE_SIGNATURE != signature:
         css = (_STATIC / "builder.css").read_bytes()
         js = (_STATIC / "builder.js").read_bytes()
         _FRONTEND_BUNDLE_CACHE = (
             base64.b64encode(gzip.compress(css, compresslevel=9)).decode("ascii"),
             base64.b64encode(gzip.compress(js, compresslevel=9)).decode("ascii"),
         )
+        _FRONTEND_BUNDLE_CACHE_SIGNATURE = signature
     return _FRONTEND_BUNDLE_CACHE
 
 
@@ -5670,11 +5701,16 @@ window.__MLB_STUDIO_ASSETS_READY__ = (async function() {{
             except Exception:
                 bridge_payload = None
 
-        global _FRONTEND_ASSETS_EMITTED
+        global _FRONTEND_ASSETS_EMITTED, _FRONTEND_ASSETS_EMITTED_SIGNATURE
+        current_asset_signature = _frontend_asset_signature()
         with _FRONTEND_ASSETS_LOCK:
-            include_assets = not _FRONTEND_ASSETS_EMITTED
+            include_assets = (
+                not _FRONTEND_ASSETS_EMITTED
+                or _FRONTEND_ASSETS_EMITTED_SIGNATURE != current_asset_signature
+            )
             if include_assets:
                 _FRONTEND_ASSETS_EMITTED = True
+                _FRONTEND_ASSETS_EMITTED_SIGNATURE = current_asset_signature
         display(HTML(self._html(bridge=bridge_payload, include_assets=include_assets)))
 
 
