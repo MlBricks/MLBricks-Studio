@@ -164,6 +164,8 @@ function __MLB_STUDIO_FACTORY__(){
     let runtimePanel=null;
     let galleryWorkspace={open:false,tab:"models"};
     let galleryDataCategory="All Data";
+    let galleryModelGroup="core";
+    let galleryCoreCategory="All Core";
     let galleryModelCategory="All Models";
     let galleryPreviousBottomExpanded=true;
     // Step 9 — Studio modes, diagnostics and reproducible experiment snapshots.
@@ -779,7 +781,10 @@ function __MLB_STUDIO_FACTORY__(){
     // graph templates composed from the same public primitives a user can drag
     // into a custom model. No special runtime-only architecture is hidden in
     // these cards.
-    const mlbricksModelCategories=["All Models","Machine Learning","Deep Learning","Language","JEPA","Vision","Audio","Signal","Multimodal"];
+    const mlbricksCoreCategories=["All Core","Machine Learning","Deep Learning","Signal Processing"];
+    const mlbricksModelCategories=["All Models","Language","Vision","Audio","JEPA","Multimodal","State & Memory"];
+    const mlbricksCorePresetCategory=(preset)=>preset?.category==="Signal"?"Signal Processing":String(preset?.category||"");
+    const mlbricksIsCorePreset=(preset)=>["Machine Learning","Deep Learning","Signal"].includes(String(preset?.category||""));
     const mlbricksModelPresets=[
       // Machine Learning — both gradient-based educational graphs and
       // classical fit-based models use visible public Studio components.
@@ -811,7 +816,7 @@ function __MLB_STUDIO_FACTORY__(){
       {id:"model_jepa_video",name:"Video JEPA",category:"JEPA",task:"Future/masked latent prediction",tag:"JEPA",data_id:"jepa_video",parameters:"~40K",description:"Spatiotemporal masking with frame encoder pooling, predictor, EMA target encoder, and latent loss.",template:"jepa_video"},
       {id:"model_jepa_text",name:"Text JEPA",category:"JEPA",task:"Semantic span prediction",tag:"JEPA",data_id:"jepa_text",parameters:"~50K",description:"Byte-token text JEPA that predicts an unmasked semantic target representation from masked context.",template:"jepa_text"},
       {id:"model_jepa_audio",name:"Audio JEPA",category:"JEPA",task:"Masked acoustic prediction",tag:"JEPA",data_id:"jepa_audio",parameters:"~35K",description:"Self-supervised acoustic JEPA over waveform windows with an EMA target branch.",template:"jepa_audio"},
-      {id:"model_jepa_signal",name:"Signal JEPA",category:"JEPA",also_categories:["Signal"],task:"Masked/future signal prediction",tag:"JEPA",data_id:"jepa_signal",parameters:"~35K",description:"Self-supervised JEPA for sensor/time-series windows using visible context masking and latent prediction.",template:"jepa_signal"},
+      {id:"model_jepa_signal",name:"Signal JEPA",category:"JEPA",task:"Masked/future signal prediction",tag:"JEPA",data_id:"jepa_signal",parameters:"~35K",description:"Self-supervised JEPA for sensor/time-series windows using visible context masking and latent prediction.",template:"jepa_signal"},
 
       // Vision — Step 4. These are editable graphs built from public Studio
       // vision/deep-learning components and train on Data Gallery presets.
@@ -837,7 +842,7 @@ function __MLB_STUDIO_FACTORY__(){
       {id:"model_sensor_fusion",name:"Sensor Fusion",category:"Signal",task:"Sensor fusion classification",tag:"SIGNAL",data_id:"signal_fusion",parameters:"~6K",description:"Multi-channel Conv1D model that fuses aligned sensor streams before classification.",template:"signal_fusion_model"},
       {id:"model_spectral",name:"Spectral Model",category:"Signal",task:"Spectral modeling",tag:"SIGNAL",data_id:"signal_spectral",parameters:"~1K",description:"Visible FFT Magnitude front-end followed by a small learnable spectral projection network.",template:"signal_spectral_model"},
       {id:"model_rf_iq",name:"RF/IQ Model",category:"Signal",task:"RF classification",tag:"RF",data_id:"signal_rf",parameters:"~6K",description:"Two-channel I/Q Conv1D classifier for modulation-style RF experiments.",template:"signal_rf_model"},
-      {id:"model_soup_signal",name:"SOUP Signal",category:"Signal",task:"Long-sequence forecasting",tag:"SOUP",data_id:"signal_long",parameters:"Research",description:"Long signal sequence projected into SOUP state processing and decoded into a future signal horizon.",template:"signal_soup"},
+      {id:"model_soup_signal",name:"SOUP Signal",category:"State & Memory",task:"Long-sequence forecasting",tag:"SOUP",data_id:"signal_long",parameters:"Research",description:"Long signal sequence projected into SOUP state processing and decoded into a future signal horizon.",template:"signal_soup"},
 
       // Multimodal — Step 8. Both models are ordinary editable graphs built
       // from public Studio inputs/encoders/math/JEPA components.
@@ -4023,6 +4028,12 @@ function studioChoice(title,message,actions,options={}){
       else if(types.has("signal_input"))modality="signal";
       else if(types.has("feature_input"))modality="tabular";
 
+      // Numeric feature inputs can represent either independent tabular rows or
+      // ordered sequences. RNN/LSTM/GRU consume [batch, sequence, features], so
+      // a recurrent graph is a sequence model even when the editable source is
+      // the generic Feature Input followed by an Unsqueeze node.
+      if(modality==="tabular" && (types.has("rnn")||types.has("lstm")||types.has("gru")))modality="sequence";
+
       const terminal=[...nodes].reverse().find(n=>
         ["text_output","audio_output","tensor_output","logits_output","classifier","detection_head","detection_pyramid_head","detection_nms","lm_head"].includes(n.type)
       );
@@ -4275,8 +4286,9 @@ function studioChoice(title,message,actions,options={}){
         "tabular_regression","neuron_regression","binary_classification","multiclass_classification",
         "tabular_classification","high_dimensional","clustering"
       ].includes(demo))return "tabular";
+      if(["sequence_classification"].includes(demo))return "sequence";
       if([
-        "sequence_classification","signal_jepa","signal_classification","anomaly_detection",
+        "signal_jepa","signal_classification","anomaly_detection",
         "long_signal","spectral_signal","timeseries_forecast","signal_denoise","sensor_fusion","rf_iq"
       ].includes(demo))return "signal";
       if(["multimodal_image_text","sensor_vision"].includes(demo))return "multimodal";
@@ -4289,7 +4301,7 @@ function studioChoice(title,message,actions,options={}){
       if(cols.some(c=>/^feature_\d+$/.test(String(c))))return "tabular";
 
       const declared=String(meta?.modality||meta?.data_modality||"").trim().toLowerCase();
-      if(["tabular","image","audio","video","signal","text","multimodal"].includes(declared))return declared;
+      if(["tabular","sequence","image","audio","video","signal","text","multimodal"].includes(declared))return declared;
 
       if(p.image_processing||p.detection_processing)return "image";
       if(p.audio_processing)return "audio";
@@ -4313,6 +4325,18 @@ function studioChoice(title,message,actions,options={}){
       };
     }
 
+    function modelCompatibilityModality(modelEntry){
+      const req=modelEntry?.requirements||{};
+      let modality=String(req.modality||"unknown").toLowerCase();
+      const types=new Set((modelEntry?.architecture?.nodes||[]).map(n=>String(n?.type||"").toLowerCase()));
+      // Auto-heal built RNN/LSTM/GRU entries saved before Step 10I. Their
+      // requirements were recorded as tabular because Sequence Input reused the
+      // generic feature_input component. The actual recurrent architecture is
+      // stronger evidence than that legacy requirement label.
+      if((modality==="tabular"||modality==="unknown") && (types.has("rnn")||types.has("lstm")||types.has("gru")))return "sequence";
+      return modality;
+    }
+
     function modelDatasetCompatibility(modelEntry,datasetMeta){
       const checks=[];
       const add=(label,ok,detail)=>checks.push({label,ok,detail});
@@ -4328,10 +4352,11 @@ function studioChoice(title,message,actions,options={}){
         modelEntry?.status==="needs_rebuild"?"Model settings changed · Build again":"Current build"
       );
       const modality=datasetModality(datasetMeta);
+      const modelModality=modelCompatibilityModality(modelEntry);
       add(
         "Modality",
-        req.modality==="unknown" || req.modality===modality,
-        "Model: "+(req.modality||"unknown")+" · Data: "+modality
+        modelModality==="unknown" || modelModality===modality,
+        "Model: "+modelModality+" · Data: "+modality
       );
 
       const trainRows=datasetMeta?.splits?.train?.rows;
@@ -6429,67 +6454,107 @@ function studioChoice(title,message,actions,options={}){
       if(galleryWorkspace.tab==="models"){
         body.classList.add("models-tab");
 
-        const filterBar=document.createElement("div");filterBar.className="mlb-gallery-category-bar";
-        const filterLabel=document.createElement("label");filterLabel.textContent="MODEL CATEGORY";
-        const filterSelect=document.createElement("select");filterSelect.className="mlb-gallery-category-select";
-        mlbricksModelCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryModelCategory===name;filterSelect.appendChild(opt);});
-        filterSelect.addEventListener("change",()=>{galleryModelCategory=filterSelect.value;draw();});
-        const categoryCount=document.createElement("span");
-        const visibleModels=galleryModelCategory==="All Models"?mlbricksModelPresets:mlbricksModelPresets.filter(p=>p.category===galleryModelCategory||(p.also_categories||[]).includes(galleryModelCategory));
-        const readyCount=visibleModels.filter(p=>!p.planned).length;
-        const plannedCount=visibleModels.filter(p=>p.planned).length;
-        categoryCount.textContent=readyCount+" ready"+(plannedCount?(" · "+plannedCount+" staged"):"");
-        filterBar.append(filterLabel,filterSelect,categoryCount);body.appendChild(filterBar);
-
-        const categories=galleryModelCategory==="All Models"?mlbricksModelCategories.filter(x=>x!=="All Models"):[galleryModelCategory];
-        let renderedModelCategory=false;
-        categories.forEach(category=>{
-          const presets=mlbricksModelPresets.filter(p=>p.category===category||(galleryModelCategory!=="All Models"&&(p.also_categories||[]).includes(category)));
-          if(!presets.length)return;
-          renderedModelCategory=true;
-          const ready=presets.filter(p=>!p.planned).length;
-          const planned=presets.length-ready;
-          const countText=ready+" ready"+(planned?(" · "+planned+" staged"):"");
-          const samples=makeSection(category.toUpperCase()+" MODELS",countText,"featured full-width model-category-section");
-          const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid model-preset-grid";
-          presets.forEach(preset=>{
-            const actions=[];
-            if(!preset.planned){
-              const load=btn("Open Model","mlb-gallery-action sample");
-              load.addEventListener("click",openAndClose(()=>loadModelPreset(preset)));actions.push(load);
-              const explain=btn("Explain","mlb-gallery-action");explain.addEventListener("click",()=>showModelPresetExplanation(preset));actions.push(explain);
-            }else{
-              const staged=btn("Fit Runtime Next","mlb-gallery-action staged");staged.disabled=true;actions.push(staged);
-            }
-            const data=modelPresetData(preset);
-            if(data){
-              const useData=btn("Open Data","mlb-gallery-action");
-              useData.title="Open "+data.name+" in the editable Data Processing workspace";
-              useData.addEventListener("click",openAndClose(()=>loadDataPreset(data)));actions.push(useData);
-            }
-            const meta=[preset.task,preset.parameters?("Parameters "+preset.parameters):"",preset.description,data?("Data: "+data.name):""].filter(Boolean).join(" · ");
-            sampleGrid.appendChild(card(preset.name,meta,preset.tag||"MODEL",actions));
-          });
-          samples.appendChild(sampleGrid);body.appendChild(samples);
+        // Step 10J — split the large model catalog into three concise views.
+        // Core is for foundational ML/DL/signal study; Models contains complete
+        // architecture families; My Models contains only user-saved designs.
+        const groupBar=document.createElement("div");groupBar.className="mlb-model-group-tabs";
+        [["core","Core"],["models","Models"],["mine","My Models"]].forEach(([key,label])=>{
+          const b=btn(label,"mlb-model-group-tab"+(galleryModelGroup===key?" active":""));
+          b.addEventListener("click",()=>{galleryModelGroup=key;draw();});groupBar.appendChild(b);
         });
-        if(!renderedModelCategory){
-          const pending=makeSection(galleryModelCategory.toUpperCase()+" MODELS","roadmap","featured full-width model-category-section");
-          pending.appendChild(empty("This model family is reserved in the Gallery and will be populated in a later roadmap step."));
-          body.appendChild(pending);
-        }
+        body.appendChild(groupBar);
 
-        const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
-        if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Workshop will appear here."));}
-        else{
-          const savedGrid=document.createElement("div");savedGrid.className="mlb-central-gallery-card-grid saved-model-grid";
-          (state.gallery.models||[]).forEach(entry=>{
-            const load=btn("Open","mlb-gallery-action");load.addEventListener("click",openAndClose(()=>loadGalleryModel(entry)));
-            const remove=btn("Remove","mlb-gallery-action danger");remove.addEventListener("click",()=>removeGalleryEntry("models",entry.id));
-            savedGrid.appendChild(card(entry.name,modelMeta(entry),"MODEL",[load,remove]));
+        const renderPresetSections=(categories,categorySelector,allLabel,headingSuffix)=>{
+          let rendered=false;
+          categories.forEach(category=>{
+            const presets=mlbricksModelPresets.filter(categorySelector(category));
+            if(!presets.length)return;
+            rendered=true;
+            const ready=presets.filter(p=>!p.planned).length;
+            const planned=presets.length-ready;
+            const countText=ready+" ready"+(planned?(" · "+planned+" staged"):"");
+            const samples=makeSection(category.toUpperCase()+headingSuffix,countText,"featured full-width model-category-section");
+            const sampleGrid=document.createElement("div");sampleGrid.className="mlb-central-gallery-card-grid prebuilt-grid model-preset-grid";
+            presets.forEach(preset=>{
+              const actions=[];
+              if(!preset.planned){
+                const load=btn("Open Model","mlb-gallery-action sample");
+                load.addEventListener("click",openAndClose(()=>loadModelPreset(preset)));actions.push(load);
+                const explain=btn("Explain","mlb-gallery-action");explain.addEventListener("click",()=>showModelPresetExplanation(preset));actions.push(explain);
+              }else{
+                const staged=btn("Fit Runtime Next","mlb-gallery-action staged");staged.disabled=true;actions.push(staged);
+              }
+              const data=modelPresetData(preset);
+              if(data){
+                const useData=btn("Open Data","mlb-gallery-action");
+                useData.title="Open "+data.name+" in the editable Data Processing workspace";
+                useData.addEventListener("click",openAndClose(()=>loadDataPreset(data)));actions.push(useData);
+              }
+              const meta=[preset.task,preset.parameters?("Parameters "+preset.parameters):"",preset.description,data?("Data: "+data.name):""].filter(Boolean).join(" · ");
+              sampleGrid.appendChild(card(preset.name,meta,preset.tag||"MODEL",actions));
+            });
+            samples.appendChild(sampleGrid);body.appendChild(samples);
           });
-          mine.appendChild(savedGrid);
+          return rendered;
+        };
+
+        if(galleryModelGroup==="core"){
+          const filterBar=document.createElement("div");filterBar.className="mlb-gallery-category-bar";
+          const filterLabel=document.createElement("label");filterLabel.textContent="CORE AREA";
+          const filterSelect=document.createElement("select");filterSelect.className="mlb-gallery-category-select";
+          mlbricksCoreCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryCoreCategory===name;filterSelect.appendChild(opt);});
+          filterSelect.addEventListener("change",()=>{galleryCoreCategory=filterSelect.value;draw();});
+          const corePresets=mlbricksModelPresets.filter(mlbricksIsCorePreset);
+          const visibleCore=galleryCoreCategory==="All Core"?corePresets:corePresets.filter(p=>mlbricksCorePresetCategory(p)===galleryCoreCategory);
+          const categoryCount=document.createElement("span");categoryCount.textContent=visibleCore.length+" learning models";
+          filterBar.append(filterLabel,filterSelect,categoryCount);body.appendChild(filterBar);
+
+          const categories=galleryCoreCategory==="All Core"?mlbricksCoreCategories.filter(x=>x!=="All Core"):[galleryCoreCategory];
+          renderPresetSections(
+            categories,
+            category=>(preset)=>mlbricksIsCorePreset(preset)&&mlbricksCorePresetCategory(preset)===category,
+            "All Core",
+            " · CORE"
+          );
+        }else if(galleryModelGroup==="models"){
+          const filterBar=document.createElement("div");filterBar.className="mlb-gallery-category-bar";
+          const filterLabel=document.createElement("label");filterLabel.textContent="MODEL FAMILY";
+          const filterSelect=document.createElement("select");filterSelect.className="mlb-gallery-category-select";
+          mlbricksModelCategories.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;opt.selected=galleryModelCategory===name;filterSelect.appendChild(opt);});
+          filterSelect.addEventListener("change",()=>{galleryModelCategory=filterSelect.value;draw();});
+          const modelPresets=mlbricksModelPresets.filter(p=>!mlbricksIsCorePreset(p));
+          const visibleModels=galleryModelCategory==="All Models"?modelPresets:modelPresets.filter(p=>p.category===galleryModelCategory);
+          const readyCount=visibleModels.filter(p=>!p.planned).length;
+          const plannedCount=visibleModels.filter(p=>p.planned).length;
+          const categoryCount=document.createElement("span");categoryCount.textContent=readyCount+" ready"+(plannedCount?(" · "+plannedCount+" staged"):"");
+          filterBar.append(filterLabel,filterSelect,categoryCount);body.appendChild(filterBar);
+
+          const categories=galleryModelCategory==="All Models"?mlbricksModelCategories.filter(x=>x!=="All Models"):[galleryModelCategory];
+          const rendered=renderPresetSections(
+            categories,
+            category=>(preset)=>!mlbricksIsCorePreset(preset)&&preset.category===category,
+            "All Models",
+            " MODELS"
+          );
+          if(!rendered){
+            const pending=makeSection(galleryModelCategory.toUpperCase()+" MODELS","roadmap","featured full-width model-category-section");
+            pending.appendChild(empty("This model family is reserved in the Gallery and will be populated in a later roadmap step."));
+            body.appendChild(pending);
+          }
+        }else{
+          const mine=makeSection("MY MODELS",(state.gallery.models||[]).length+" saved","full-width saved-models");
+          if(!(state.gallery.models||[]).length){mine.appendChild(empty("Models you save to Workshop will appear here."));}
+          else{
+            const savedGrid=document.createElement("div");savedGrid.className="mlb-central-gallery-card-grid saved-model-grid";
+            (state.gallery.models||[]).forEach(entry=>{
+              const load=btn("Open","mlb-gallery-action sample");load.addEventListener("click",openAndClose(()=>loadGalleryModel(entry)));
+              const remove=btn("Remove","mlb-gallery-action danger");remove.addEventListener("click",()=>removeGalleryEntry("models",entry.id));
+              savedGrid.appendChild(card(entry.name,modelMeta(entry),"MODEL",[load,remove]));
+            });
+            mine.appendChild(savedGrid);
+          }
+          body.appendChild(mine);
         }
-        body.appendChild(mine);
       }else if(galleryWorkspace.tab==="components"){
         body.classList.add("components-tab");
         const samples=makeSection("CREATE","Choose API Component or Module","featured full-width compact-create");

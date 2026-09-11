@@ -15,8 +15,9 @@ def test_tabular_demo_datasets_resolve_to_tabular_modality():
         assert '"tabular_regression","neuron_regression","binary_classification","multiclass_classification"' in block
         assert '"tabular_classification","high_dimensional","clustering"' in block
         assert '].includes(demo))return "tabular";' in block
-        # Sequence/signal demos must remain signal, not be folded into tabular.
-        assert '"sequence_classification","signal_jepa","signal_classification","anomaly_detection"' in block
+        # Recurrent sequence data is its own modality; scientific/sensor demos remain signal.
+        assert '["sequence_classification"].includes(demo))return "sequence";' in block
+        assert '"signal_jepa","signal_classification","anomaly_detection"' in block
         assert '].includes(demo))return "signal";' in block
 
 

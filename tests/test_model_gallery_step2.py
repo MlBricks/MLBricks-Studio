@@ -34,10 +34,12 @@ def test_step2_model_gallery_has_categories_data_links_and_language_reorg():
     built = (ROOT / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
 
     for text in (js, built):
-        assert 'const mlbricksModelCategories=["All Models","Machine Learning","Deep Learning","Language","JEPA","Vision","Audio","Signal","Multimodal"]' in text
-        assert 'filterLabel.textContent="MODEL CATEGORY"' in text
+        assert 'const mlbricksCoreCategories=["All Core","Machine Learning","Deep Learning","Signal Processing"]' in text
+        assert 'const mlbricksModelCategories=["All Models","Language","Vision","Audio","JEPA","Multimodal","State & Memory"]' in text
+        assert 'filterLabel.textContent="CORE AREA"' in text
+        assert 'filterLabel.textContent="MODEL FAMILY"' in text
         assert 'btn("Open Data","mlb-gallery-action")' in text
-        assert 'category.toUpperCase()+" MODELS"' in text
+        assert '[["core","Core"],["models","Models"],["mine","My Models"]]' in text
         assert 'name:"50M SLM",category:"Language"' in text
         assert 'name:"200M SLM · SOUP",category:"Language"' in text
 

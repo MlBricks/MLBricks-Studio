@@ -3992,6 +3992,12 @@ body.mlb-local-app .mlb-root{
 .mlb-central-gallery-section.data-category-section{margin-bottom:12px!important}
 .mlb-central-gallery-card-grid.data-preset-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 
+/* Step 10J — Core / Models / My Models gallery split */
+.mlb-model-group-tabs{display:flex;align-items:center;gap:5px;margin:0 0 12px;padding:4px;border:1px solid #2a3947;border-radius:10px;background:#0f1821;width:max-content;max-width:100%}
+.mlb-model-group-tab{height:30px;padding:0 14px;border:1px solid transparent;border-radius:7px;background:transparent;color:#8fa0b1;font-size:11px;font-weight:900;letter-spacing:.035em;cursor:pointer}
+.mlb-model-group-tab:hover{color:#e3eaf1;background:#14212c}
+.mlb-model-group-tab.active{color:#f5f8fb;background:#1b2935;border-color:#405568;box-shadow:inset 0 0 0 1px rgba(255,255,255,.025)}
+
 /* Step 2 — categorized educational model gallery */
 .mlb-gallery-action.staged{opacity:.62;cursor:not-allowed;border-style:dashed;color:#8d9aa7;background:#121a22}
 .model-category-section .mlb-central-gallery-section-head strong{letter-spacing:.075em}
