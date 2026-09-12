@@ -938,7 +938,7 @@ class _DetectionPyramidHead(nn.Module):
 
 class _DetectionNMS(nn.Module):
     """Inference-only class-aware NMS block for raw detector predictions."""
-    def __init__(self, score_threshold=0.25, iou_threshold=0.5, max_detections=100):
+    def __init__(self, score_threshold=0.40, iou_threshold=0.45, max_detections=20):
         super().__init__()
         self.score_threshold = float(score_threshold)
         self.iou_threshold = float(iou_threshold)
@@ -3493,12 +3493,38 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
             with _autocast_context(compiled.device,compiled.precision):
                 result=compiled.model(sample,graph_named=named) if named else compiled.model(sample)
     if str(output_type or "").lower() in {"detection_head","detection_pyramid_head"} or "detection" in str(task or "").lower():
+        detection_runtime_meta=metadata or {}
+        score_threshold=float(detection_runtime_meta.get("score_threshold",0.40))
+        nms_iou_threshold=float(detection_runtime_meta.get("nms_iou_threshold",0.45))
+        max_detections=max(1,int(detection_runtime_meta.get("max_detections",20)))
         detections=decode_detection_predictions(
             result,
-            score_threshold=float((metadata or {}).get("score_threshold",0.25)),
-            iou_threshold=float((metadata or {}).get("nms_iou_threshold",0.5)),
-            max_detections=int((metadata or {}).get("max_detections",100)),
+            score_threshold=score_threshold,
+            iou_threshold=nms_iou_threshold,
+            max_detections=max_detections,
         )
+
+        # The detector head can assign different classes to near-identical boxes.
+        # Class-aware NMS intentionally keeps those boxes, which is useful for
+        # metrics but produces a noisy visual preview (several rectangles around
+        # one object).  Apply a second, display-only class-agnostic pass.  This
+        # does not change training/evaluation semantics and can be disabled by
+        # advanced runtimes through metadata.
+        display_class_agnostic_nms=bool(detection_runtime_meta.get("display_class_agnostic_nms",True))
+        display_nms_iou_threshold=float(detection_runtime_meta.get("display_nms_iou_threshold",0.60))
+        if display_class_agnostic_nms:
+            cleaned=[]
+            for det in detections:
+                if det.numel()==0:
+                    cleaned.append(det)
+                    continue
+                keep=_nms_xyxy(
+                    det[:,:4],det[:,4],
+                    iou_threshold=display_nms_iou_threshold,
+                    max_detections=max_detections,
+                )
+                cleaned.append(det[keep])
+            detections=cleaned
         payload=[[
             {"box_xyxy":[float(v) for v in row[:4].detach().cpu().tolist()],"score":float(row[4].item()),"class_id":int(row[5].item())}
             for row in det
@@ -3510,6 +3536,11 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
             "coordinate_space":"normalized_xyxy",
             "detections":sum(len(batch) for batch in payload),
             "batches":len(payload),
+            "score_threshold":score_threshold,
+            "nms_iou_threshold":nms_iou_threshold,
+            "max_detections":max_detections,
+            "display_class_agnostic_nms":display_class_agnostic_nms,
+            "display_nms_iou_threshold":display_nms_iou_threshold,
         }
         # Prefer the pre-resize source preview supplied by Universal Input.
         # Detection models may operate on tiny educational tensors (for example

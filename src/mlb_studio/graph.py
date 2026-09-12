@@ -1002,9 +1002,9 @@ def primitive_catalog():
             "description": "Class-aware non-maximum suppression for raw single-scale or multi-scale detection predictions.",
             "accent": "orange",
             "api": [
-                {"key": "score_threshold", "label": "Score Threshold", "type": "number", "value": 0.25},
-                {"key": "iou_threshold", "label": "NMS IoU Threshold", "type": "number", "value": 0.5},
-                {"key": "max_detections", "label": "Max Detections", "type": "number", "value": 100}
+                {"key": "score_threshold", "label": "Score Threshold", "type": "number", "value": 0.40},
+                {"key": "iou_threshold", "label": "NMS IoU Threshold", "type": "number", "value": 0.45},
+                {"key": "max_detections", "label": "Max Detections", "type": "number", "value": 20}
             ],
         },
         {
