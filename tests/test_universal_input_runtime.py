@@ -78,7 +78,9 @@ def test_image_input_loads_and_resizes_for_model(tmp_path):
     )
     value, meta = load_single_input(env, image_size=16)
     assert value.shape == (1, 3, 16, 16)
-    assert meta == {"width": 16, "height": 16, "channels": 3}
+    assert {k: meta[k] for k in ("width", "height", "channels")} == {"width": 16, "height": 16, "channels": 3}
+    assert meta["display_image"].startswith("data:image/jpeg;base64,")
+    assert (meta["source_width"], meta["source_height"]) == (12, 8)
 
 
 class _PromptAwareVisionModel(nn.Module):

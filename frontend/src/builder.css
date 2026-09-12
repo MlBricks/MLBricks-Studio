@@ -838,8 +838,8 @@
 .mlb-output-image,.mlb-output-video{display:block;max-width:100%;max-height:360px;border:1px solid #273541;border-radius:6px;background:#081016;object-fit:contain}
 
 .mlb-detection-card{align-items:start}
-.mlb-detection-stage{position:relative;display:inline-block;max-width:100%;line-height:0;justify-self:start}
-.mlb-detection-stage .mlb-detection-image{width:auto;height:auto;max-width:100%;max-height:480px}
+.mlb-detection-stage{position:relative;display:block;width:min(640px,100%);max-width:100%;line-height:0;justify-self:start;overflow:visible}
+.mlb-detection-stage .mlb-detection-image{display:block;width:100%;height:100%;max-width:none;max-height:none;object-fit:fill}
 .mlb-detection-box{position:absolute;box-sizing:border-box;border:2px solid var(--orange);border-radius:3px;pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
 .mlb-detection-label{position:absolute;left:-2px;top:-22px;display:block;max-width:220px;padding:3px 6px;border-radius:4px 4px 4px 0;background:var(--orange);color:#111820;font-size:10.5px;font-weight:900;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 2px 8px rgba(0,0,0,.28)}
 .mlb-detection-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:2px 0;color:#cbd4df;font-size:11px}

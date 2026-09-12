@@ -53,7 +53,8 @@ def test_runtime_image_loader_honors_grayscale_model_contract(tmp_path):
     assert env.prompt == ""
     value, meta = load_single_input(env, image_size=16, image_channels=1)
     assert tuple(value.shape) == (1, 1, 16, 16)
-    assert meta == {"width": 16, "height": 16, "channels": 1}
+    assert {k: meta[k] for k in ("width", "height", "channels")} == {"width": 16, "height": 16, "channels": 1}
+    assert meta["display_image"].startswith("data:image/jpeg;base64,")
 
 
 def test_old_gallery_cnn_3x224_metadata_is_repaired_from_graph_shape():

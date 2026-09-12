@@ -342,6 +342,26 @@ def _tabular_tensor(envelope: InputEnvelope):
     return torch.from_numpy(np.ascontiguousarray(arr)), {"rows": int(arr.shape[0]), "features": int(arr.shape[1])}
 
 
+def _pil_preview_data_uri(image, *, max_side: int = 768):
+    """Encode a browser-friendly preview before model resize destroys detail."""
+    import base64
+
+    preview = image.copy()
+    limit = max(64, int(max_side or 768))
+    preview.thumbnail((limit, limit))
+    # JPEG keeps runtime messages compact while preserving enough detail for
+    # detection/classification previews.  Alpha is flattened through RGB.
+    if preview.mode != "RGB":
+        preview = preview.convert("RGB")
+    buff = io.BytesIO()
+    preview.save(buff, format="JPEG", quality=88, optimize=True)
+    payload = base64.b64encode(buff.getvalue()).decode("ascii")
+    return (
+        f"data:image/jpeg;base64,{payload}",
+        {"width": int(preview.width), "height": int(preview.height), "format": "jpeg"},
+    )
+
+
 def _image_tensor(source: str, *, image_size: int | None = None, channels: int | None = None):
     import numpy as np
     import torch
@@ -362,6 +382,10 @@ def _image_tensor(source: str, *, image_size: int | None = None, channels: int |
     else:
         requested_channels = 3
         image = image.convert("RGB")
+
+    source_width, source_height = int(image.width), int(image.height)
+    preview_uri, preview_meta = _pil_preview_data_uri(image)
+
     if image_size and image_size > 0:
         image = image.resize((int(image_size), int(image_size)))
     arr = np.asarray(image, dtype="float32") / 255.0
@@ -369,7 +393,17 @@ def _image_tensor(source: str, *, image_size: int | None = None, channels: int |
         tensor = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).contiguous()
     else:
         tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).contiguous()
-    return tensor, {"width": image.width, "height": image.height, "channels": requested_channels}
+    return tensor, {
+        "width": int(image.width),
+        "height": int(image.height),
+        "channels": requested_channels,
+        "source_width": source_width,
+        "source_height": source_height,
+        "display_image": preview_uri,
+        "display_width": preview_meta["width"],
+        "display_height": preview_meta["height"],
+        "display_format": preview_meta["format"],
+    }
 
 
 def _audio_tensor(envelope: InputEnvelope):

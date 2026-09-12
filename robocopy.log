@@ -1,0 +1,26 @@
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : 12 September 2026 11:44:17
+   Source : C:\Users\space\AppData\Local\Temp\mlbricks-step10u-20260912-114412\
+     Dest : E:\MLB-Studio\
+
+    Files : *.*
+	    
+Exc Files : Thumbs.db
+	    .DS_Store
+	    
+ Exc Dirs : .git
+	    .venv
+	    venv
+	    __pycache__
+	    node_modules
+	    .next
+	    dist
+	    build
+	    
+  Options : *.* /NDL /NFL /S /E /DCOPY:DA /COPY:DAT /NP /XO /R:2 /W:1 
+
+------------------------------------------------------------------------------

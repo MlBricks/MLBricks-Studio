@@ -5056,9 +5056,12 @@ function studioChoice(title,message,actions,options={}){
         const boxes=detections.filter(det=>det&&Array.isArray(det.box_xyxy)&&det.box_xyxy.length>=4);
         const classNames=Array.isArray(env.meta?.class_names)?env.meta.class_names:[];
         const imageSrc=env.meta?.input_image||"";
+        const imageWidth=Number(env.meta?.image_width)||0;
+        const imageHeight=Number(env.meta?.image_height)||0;
         const clamp01=v=>Math.max(0,Math.min(1,Number.isFinite(Number(v))?Number(v):0));
         if(imageSrc){
           const stage=document.createElement("div");stage.className="mlb-detection-stage";
+          if(imageWidth>0&&imageHeight>0)stage.style.aspectRatio=String(imageWidth)+" / "+String(imageHeight);
           const img=document.createElement("img");img.className="mlb-output-image mlb-detection-image";img.alt="Detection result";img.src=imageSrc;stage.appendChild(img);
           boxes.forEach(det=>{
             const [a,b,c,d]=(det.box_xyxy||[]).map(clamp01);

@@ -3511,7 +3511,21 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
             "detections":sum(len(batch) for batch in payload),
             "batches":len(payload),
         }
-        if isinstance(sample,torch.Tensor):
+        # Prefer the pre-resize source preview supplied by Universal Input.
+        # Detection models may operate on tiny educational tensors (for example
+        # 16x16), which made the visual result appear as a few pixels.  Boxes are
+        # normalized, so they can be overlaid safely on the higher-resolution
+        # source preview.
+        display_image=(metadata or {}).get("display_image")
+        if isinstance(display_image,str) and display_image.startswith("data:image/"):
+            detection_meta["input_image"]=display_image
+            detection_meta.update({
+                "image_width":int((metadata or {}).get("display_width") or (metadata or {}).get("source_width") or 0) or None,
+                "image_height":int((metadata or {}).get("display_height") or (metadata or {}).get("source_height") or 0) or None,
+                "image_format":str((metadata or {}).get("display_format") or "jpeg"),
+                "preview_source":"pre_resize",
+            })
+        elif isinstance(sample,torch.Tensor):
             preview=_tensor_image_data_uri(sample)
             if preview is not None:
                 data_uri,image_meta=preview
@@ -3520,6 +3534,7 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
                     "image_width":image_meta.get("width"),
                     "image_height":image_meta.get("height"),
                     "image_format":image_meta.get("format","png"),
+                    "preview_source":"model_tensor",
                 })
         class_names=(metadata or {}).get("class_names")
         if isinstance(class_names,(list,tuple)):
@@ -3568,16 +3583,27 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
                 "dtype":str(result.dtype).replace("torch.",""),
                 "classes":len(probabilities),
             }
-            if str(input_kind or "").lower()=="image" and isinstance(sample,torch.Tensor):
-                preview=_tensor_image_data_uri(sample)
-                if preview is not None:
-                    data_uri,image_meta=preview
-                    output_meta["input_image"]=data_uri
+            if str(input_kind or "").lower()=="image":
+                display_image=(metadata or {}).get("display_image")
+                if isinstance(display_image,str) and display_image.startswith("data:image/"):
+                    output_meta["input_image"]=display_image
                     output_meta.update({
-                        "image_width":image_meta.get("width"),
-                        "image_height":image_meta.get("height"),
-                        "image_format":image_meta.get("format","png"),
+                        "image_width":int((metadata or {}).get("display_width") or (metadata or {}).get("source_width") or 0) or None,
+                        "image_height":int((metadata or {}).get("display_height") or (metadata or {}).get("source_height") or 0) or None,
+                        "image_format":str((metadata or {}).get("display_format") or "jpeg"),
+                        "preview_source":"pre_resize",
                     })
+                elif isinstance(sample,torch.Tensor):
+                    preview=_tensor_image_data_uri(sample)
+                    if preview is not None:
+                        data_uri,image_meta=preview
+                        output_meta["input_image"]=data_uri
+                        output_meta.update({
+                            "image_width":image_meta.get("width"),
+                            "image_height":image_meta.get("height"),
+                            "image_format":image_meta.get("format","png"),
+                            "preview_source":"model_tensor",
+                        })
             if "class_names" in class_meta:
                 output_meta["class_names"]=class_meta["class_names"]
             return {
