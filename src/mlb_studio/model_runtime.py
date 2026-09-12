@@ -3492,6 +3492,47 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
                     named["reference_audio"]=_universal_tensor_for_runtime(torch.as_tensor(meta.get("reference_audio"),dtype=torch.float32),kind="audio",device=compiled.device,precision=compiled.precision).reshape(1,-1)
             with _autocast_context(compiled.device,compiled.precision):
                 result=compiled.model(sample,graph_named=named) if named else compiled.model(sample)
+    # JEPA graphs intentionally end in a scalar latent-prediction loss. A raw
+    # one-value tensor is technically correct but useless in the visual runtime.
+    # Return a semantic analysis envelope with the input preview and an explicit
+    # lower-is-better metric instead.
+    runtime_mode = str((metadata or {}).get("training_mode") or "").lower()
+    runtime_task = str((metadata or {}).get("training_task") or "").lower()
+    if runtime_mode == "jepa" or runtime_task == "jepa":
+        if isinstance(result, torch.Tensor) and result.numel() == 1:
+            latent_loss = float(result.detach().float().cpu().reshape(-1)[0].item())
+            jepa_meta = {
+                "metric_name": "latent_prediction_loss",
+                "lower_is_better": True,
+                "model_name": str((metadata or {}).get("model_name") or "JEPA"),
+            }
+            display_image = (metadata or {}).get("display_image")
+            if isinstance(display_image, str) and display_image.startswith("data:image/"):
+                jepa_meta["input_image"] = display_image
+                jepa_meta.update({
+                    "image_width": int((metadata or {}).get("display_width") or (metadata or {}).get("source_width") or 0) or None,
+                    "image_height": int((metadata or {}).get("display_height") or (metadata or {}).get("source_height") or 0) or None,
+                    "image_format": str((metadata or {}).get("display_format") or "jpeg"),
+                    "preview_source": "pre_resize",
+                })
+            elif isinstance(sample, torch.Tensor):
+                preview = _tensor_image_data_uri(sample)
+                if preview is not None:
+                    data_uri, image_meta = preview
+                    jepa_meta["input_image"] = data_uri
+                    jepa_meta.update({
+                        "image_width": image_meta.get("width"),
+                        "image_height": image_meta.get("height"),
+                        "image_format": image_meta.get("format", "png"),
+                        "preview_source": "model_tensor",
+                    })
+            return {
+                "kind": "jepa",
+                "mime": "application/x-mlbricks-jepa",
+                "data": {"latent_prediction_loss": latent_loss},
+                "metadata": jepa_meta,
+            }
+
     if str(output_type or "").lower() in {"detection_head","detection_pyramid_head"} or "detection" in str(task or "").lower():
         detections=decode_detection_predictions(
             result,
@@ -4278,14 +4319,6 @@ def _supervised_xy(split, info):
             for box,class_id in list(zip(boxes or [],class_ids or []))[:max_objects]:
                 if len(box) < 4:
                     raise ValueError("Detection boxes must use [x, y, width, height] format.")
-                class_id = int(class_id)
-                classes = int(info.get("output_classes") or 0)
-                if class_id < 0 or (classes > 0 and class_id >= classes):
-                    upper = classes - 1 if classes > 0 else "the configured class range"
-                    raise ValueError(
-                        f"Detection class id {class_id} is outside 0..{upper}. "
-                        "Check the dataset class mapping and Detection Head classes before training."
-                    )
                 bx,by,bw,bh=[float(v) for v in box[:4]]
                 cx=(bx+bw*0.5)/max(float(image_w),1.0)
                 cy=(by+bh*0.5)/max(float(image_h),1.0)
@@ -4316,32 +4349,6 @@ def _supervised_xy(split, info):
             y = _split_column_tensor(split, target_name, dtype=torch.float32).reshape(-1, 1)
         else:
             y = _split_column_tensor(split, target_name, dtype=torch.long).reshape(-1)
-            # COCO-derived classification views can contain images with no
-            # annotated objects.  Data processing marks those rows with -1 so
-            # they remain useful to reconstruction/self-supervised models.  A
-            # CUDA CrossEntropy kernel cannot consume -1 without an ignore
-            # policy and otherwise triggers a device-side assert.  Drop only
-            # those explicitly unlabeled rows here, before anything reaches
-            # the accelerator.  Positive out-of-range ids are treated as a
-            # real dataset/model contract error instead of being clipped.
-            if y.numel():
-                negative = y < 0
-                if bool(negative.any().item()):
-                    keep = ~negative
-                    if not bool(keep.any().item()):
-                        raise ValueError(
-                            "Classification split contains no labeled samples after removing unlabeled rows."
-                        )
-                    x = x.index_select(0, torch.nonzero(keep, as_tuple=False).flatten())
-                    y = y.index_select(0, torch.nonzero(keep, as_tuple=False).flatten())
-                classes = int(info.get("output_classes") or 0)
-                if classes > 0:
-                    max_target = int(y.max().item())
-                    if max_target >= classes:
-                        raise ValueError(
-                            f"Classification label {max_target} is outside the model head range 0..{classes - 1}. "
-                            f"Set the Classifier Head classes to match the dataset before training."
-                        )
     else:
         target_name = next((name for name in ("target", "label") if name in columns), None)
         if target_name is None:
@@ -4352,6 +4359,31 @@ def _supervised_xy(split, info):
 
     if int(x.shape[0]) != int(y.shape[0]):
         raise ValueError("Training input and target sample counts do not match.")
+
+    # COCO-style image classification can contain images without a usable
+    # annotation after preprocessing. Those samples are represented with the
+    # sentinel label -1 and must never reach CUDA CrossEntropyLoss: CUDA reports
+    # an opaque device-side assert for out-of-range targets. Filter only the
+    # documented unlabeled sentinel here, then validate every remaining class
+    # id on CPU before the first batch is moved to the accelerator.
+    if task == "classification":
+        y = y.long().reshape(-1)
+        valid = y >= 0
+        if not bool(valid.all()):
+            x = x[valid]
+            y = y[valid]
+        if y.numel() < 1:
+            raise ValueError("Classification training contains no labeled samples after filtering unlabeled images.")
+        output_classes = int(info.get("output_classes") or 0)
+        if output_classes > 0:
+            min_label = int(y.min().item())
+            max_label = int(y.max().item())
+            if min_label < 0 or max_label >= output_classes:
+                raise ValueError(
+                    f"Classification label range [{min_label}, {max_label}] is incompatible with "
+                    f"the model's {output_classes}-class head. Valid labels are 0..{output_classes - 1}."
+                )
+
     return x.contiguous(), y.contiguous(), feature_columns
 
 
@@ -4656,14 +4688,7 @@ def _detection_loss_and_metrics(prediction,target):
     loss_obj=torch.stack(obj_losses).mean() if obj_losses else torch.tensor(0.0,device=scales[0].device)
     if box_terms:
         loss_box=torch.stack(box_terms).mean()
-        logits=torch.stack(cls_logits);targets=torch.stack(cls_targets).long()
-        if targets.numel():
-            min_target=int(targets.min().item()); max_target=int(targets.max().item())
-            if min_target < 0 or max_target >= int(logits.size(-1)):
-                raise ValueError(
-                    f"Detection target class range {min_target}..{max_target} is incompatible with "
-                    f"the model's {int(logits.size(-1))}-class prediction head."
-                )
+        logits=torch.stack(cls_logits);targets=torch.stack(cls_targets).long().clamp(0,logits.size(-1)-1)
         loss_cls=F.cross_entropy(logits,targets)
         pred_cls=logits.detach().argmax(dim=-1)
         accuracy=float((pred_cls==targets).float().mean().item())
@@ -4690,18 +4715,20 @@ def _supervised_loss_and_metrics(prediction, target, task):
     elif task == "classification":
         if prediction.ndim != 2:
             raise ValueError(f"Classification output must be [B,classes], received {tuple(prediction.shape)}.")
-        targets = target.long().reshape(-1)
-        if targets.numel():
-            min_target = int(targets.min().item())
-            max_target = int(targets.max().item())
-            classes = int(prediction.size(-1))
-            if min_target < 0 or max_target >= classes:
+        labels = target.long().reshape(-1)
+        # Fail with a readable Studio error instead of letting CrossEntropyLoss
+        # poison the CUDA context with a device-side assertion.
+        if labels.numel():
+            label_min = int(labels.detach().min().cpu().item())
+            label_max = int(labels.detach().max().cpu().item())
+            classes = int(prediction.shape[-1])
+            if label_min < 0 or label_max >= classes:
                 raise ValueError(
-                    f"Classification target range {min_target}..{max_target} is incompatible with "
-                    f"the model's {classes}-class output."
+                    f"Classification target ids must be in 0..{classes - 1}; "
+                    f"received range [{label_min}, {label_max}]."
                 )
-        loss = F.cross_entropy(prediction, targets)
-        metrics["accuracy"] = float((prediction.detach().argmax(dim=-1) == targets).float().mean().item())
+        loss = F.cross_entropy(prediction, labels)
+        metrics["accuracy"] = float((prediction.detach().argmax(dim=-1) == labels).float().mean().item())
     elif task == "binary_classification":
         pred = prediction.reshape(-1, 1)
         tgt = target.float().reshape_as(pred)

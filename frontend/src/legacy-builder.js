@@ -5246,6 +5246,20 @@ function studioChoice(title,message,actions,options={}){
         const details=document.createElement("details");details.className="mlb-detection-raw";const summaryRaw=document.createElement("summary");summaryRaw.textContent="Raw detection data";const preRaw=document.createElement("pre");preRaw.textContent=JSON.stringify(env.data,null,2);details.append(summaryRaw,preRaw);wrap.appendChild(details);
         card.appendChild(wrap);section.appendChild(card);return;
       }
+      if(env.kind==="jepa"){
+        const payload=env.data&&typeof env.data==="object"&&!Array.isArray(env.data)?env.data:{};
+        const loss=Number(payload.latent_prediction_loss);
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card mlb-classification-card mlb-jepa-card";
+        const imageSrc=env.meta?.input_image||"";
+        if(imageSrc){const imageWrap=document.createElement("div");imageWrap.className="mlb-classification-image-wrap";const img=document.createElement("img");img.className="mlb-output-image mlb-classification-image";img.alt="JEPA input";img.src=imageSrc;imageWrap.appendChild(img);wrap.appendChild(imageWrap);}
+        const result=document.createElement("div");result.className="mlb-classification-result";
+        const label=document.createElement("span");label.textContent="LATENT PREDICTION LOSS";
+        const value=document.createElement("strong");value.textContent=Number.isFinite(loss)?loss.toFixed(6):"—";
+        const hint=document.createElement("b");hint.textContent="Lower is better · predicted latent vs target latent";
+        result.append(label,value,hint);wrap.appendChild(result);
+        const details=document.createElement("details");details.className="mlb-classification-raw";const summaryRaw=document.createElement("summary");summaryRaw.textContent="JEPA analysis details";const pre=document.createElement("pre");pre.textContent=JSON.stringify({metric:"latent_prediction_loss",value:Number.isFinite(loss)?loss:null,lower_is_better:true},null,2);details.append(summaryRaw,pre);wrap.appendChild(details);
+        card.appendChild(wrap);section.appendChild(card);return;
+      }
       if(env.kind==="image"){
         const wrap=document.createElement("div");wrap.className="mlb-output-visual-card";
         if(env.src||typeof env.data==="string"){

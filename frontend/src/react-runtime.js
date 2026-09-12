@@ -216,6 +216,21 @@
         )
       );
     }
+    if(env.kind==='jepa'){
+      var jp=maybeObject(env.data)||{};
+      var loss=Number(jp.latent_prediction_loss);
+      var imageSrc=env.meta&&env.meta.input_image?String(env.meta.input_image):'';
+      return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
+        h('div',{className:'mlb-output-visual-card mlb-classification-card mlb-jepa-card'},
+          imageSrc?h('div',{className:'mlb-classification-image-wrap'},h('img',{className:'mlb-output-image mlb-classification-image',src:imageSrc,alt:'JEPA input'})):null,
+          h('div',{className:'mlb-classification-result'},
+            h('span',null,'LATENT PREDICTION LOSS'),
+            h('strong',null,Number.isFinite(loss)?loss.toFixed(6):'—'),
+            h('b',null,'Lower is better · predicted latent vs target latent')),
+          h('details',{className:'mlb-classification-raw'},h('summary',null,'JEPA analysis details'),h('pre',null,JSON.stringify({metric:'latent_prediction_loss',value:Number.isFinite(loss)?loss:null,lower_is_better:true},null,2)))
+        )
+      );
+    }
     if(env.kind==='image'){
       return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
         h('div',{className:'mlb-output-visual-card'}, env.src||typeof env.data==='string'
