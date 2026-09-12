@@ -138,6 +138,20 @@ def primitive_catalog():
             ],
         },
         {
+            "type": "coco128_cloud",
+            "builder_utility": True,
+            "builder_python_api": True,
+            "name": "COCO128 Cloud",
+            "icon": "COCO",
+            "category": "Data Source",
+            "description": "Fetch the 128-image COCO detection subset from the cloud into temporary session storage; nothing is bundled or persistently cached.",
+            "accent": "cyan",
+            "api": [
+                {"key": "download_url", "label": "Cloud URL", "type": "text", "value": "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip"},
+                {"key": "max_images", "label": "Max Images (0 = All 128)", "type": "number", "value": 0},
+            ],
+        },
+        {
             "type": "hf_dataset",
             "builder_utility": True,
             "builder_python_api": True,

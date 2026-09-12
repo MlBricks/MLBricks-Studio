@@ -20,7 +20,7 @@ MODEL_OUTPUT_TYPES = {
     "lm_head", "classifier", "detection_head", "detection_pyramid_head", "detection_nms", "regression_head",
 }
 DATA_SOURCE_TYPES = {
-    "demo_dataset", "manual_dataset", "hf_dataset", "kaggle_dataset",
+    "demo_dataset", "coco128_cloud", "manual_dataset", "hf_dataset", "kaggle_dataset",
     "url_dataset", "local_dataset",
 }
 

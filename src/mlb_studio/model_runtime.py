@@ -4191,6 +4191,14 @@ def _supervised_graph_info(model_entry, state):
         except (TypeError, ValueError):
             expected_feature_dim = None
 
+    output_classes = None
+    if output_type in {"classifier", "detection_head", "detection_pyramid_head"}:
+        try:
+            value = int((output.get("params") or {}).get("classes") or 0)
+            output_classes = value if value > 0 else None
+        except (TypeError, ValueError):
+            output_classes = None
+
     return {
         "graph": graph,
         "nodes": nodes,
@@ -4199,6 +4207,7 @@ def _supervised_graph_info(model_entry, state):
         "expected_feature_dim": expected_feature_dim,
         "output": output,
         "output_type": output_type,
+        "output_classes": output_classes,
         "task": task,
     }
 
@@ -4693,6 +4702,16 @@ def _train_supervised_builder_model(*, state, model_entry, dataset, dataset_meta
     if info is None:
         raise ModelCompileError("No supported supervised Feature, Signal, or Image graph was found.")
     task=info["task"]
+    dataset_class_names=[str(v) for v in ((dataset_meta or {}).get("class_names") or [])]
+    dataset_num_classes=int((dataset_meta or {}).get("num_classes") or len(dataset_class_names) or 0)
+    if task=="object_detection" and dataset_num_classes>0 and info.get("output_classes"):
+        model_classes=int(info["output_classes"])
+        if model_classes!=dataset_num_classes:
+            raise ValueError(
+                f"Detection-class mismatch: model head has {model_classes} classes, "
+                f"but the selected dataset provides {dataset_num_classes}. "
+                f"Set the Detection Head classes to {dataset_num_classes} before training."
+            )
     seed=runtime_int(config.get("seed"),42,"Seed")
     random.seed(seed); torch.manual_seed(seed)
     if torch.cuda.is_available(): torch.cuda.manual_seed_all(seed)
@@ -4849,7 +4868,8 @@ def _train_supervised_builder_model(*, state, model_entry, dataset, dataset_meta
             custom_components=copy.deepcopy(state.get("custom_components") or {})
             custom_components.update(copy.deepcopy(model_entry.get("custom_components_snapshot") or {}))
             metadata={"kind":"training_checkpoint","step":step,"samples_seen":samples_seen,"training_mode":"supervised","training_task":task,
-                      "feature_columns":feature_columns,"training_config":copy.deepcopy(config or {}),
+                      "feature_columns":feature_columns,"class_names":dataset_class_names or None,"num_classes":dataset_num_classes or None,
+                      "training_config":copy.deepcopy(config or {}),
                       "builder_package":{"format":"mlb-studio-model-v2","builder_version":__version__,"project":copy.deepcopy(state.get("project") or {}),
                                          "model_component":architecture,"custom_components":custom_components,"model_entry":copy.deepcopy(model_entry),"dataset_meta":copy.deepcopy(dataset_meta or {})}}
             IMPORT_POOL.resolve_api("lifecycle.save")(raw,cp_path,metadata=metadata)
@@ -4866,7 +4886,9 @@ def _train_supervised_builder_model(*, state, model_entry, dataset, dataset_meta
     builder_package={"format":"mlb-studio-model-v2","builder_version":__version__,"project":copy.deepcopy(state.get("project") or {}),
                      "model_component":architecture,"custom_components":custom_components,"model_entry":copy.deepcopy(model_entry),"dataset_meta":copy.deepcopy(dataset_meta or {})}
     metadata={"kind":"trained_model","step":step,"samples_seen":samples_seen,"training_mode":"supervised","training_task":task,
-              "supervised_metrics":metrics,"feature_columns":feature_columns,"training_config":copy.deepcopy(config or {}),"builder_package":builder_package}
+              "supervised_metrics":metrics,"feature_columns":feature_columns,
+              "class_names":dataset_class_names or None,"num_classes":dataset_num_classes or None,
+              "training_config":copy.deepcopy(config or {}),"builder_package":builder_package}
     progress({"status":"running","runtime_kind":"train","phase":"final_save","overall":99,"step":step,"max_steps":max_steps,
               "samples_seen":samples_seen,"loss":last_loss,"val_loss":last_val.get("loss") if last_val else None,
               "training_mode":"supervised","training_task":task,"message":"Training complete · saving final MLBricks model artifact…"})
@@ -4875,7 +4897,8 @@ def _train_supervised_builder_model(*, state, model_entry, dataset, dataset_meta
     update={"training_status":"trained","weights_ready":True,"path":str(final),"checkpoint_path":str(final),"trained_steps":step,
             "samples_seen":samples_seen,"tokens_seen":0,"last_loss":last_loss,"last_val_loss":last_val.get("loss") if last_val else None,
             "parameter_count":compiled.parameter_count,"training_mode":"supervised","training_task":task,"supervised_metrics":metrics,
-            "feature_columns":feature_columns,"avg_samples_per_sec":run_samples/max(train_seconds,1e-9) if run_samples else None,
+            "feature_columns":feature_columns,"class_names":dataset_class_names or None,"num_classes":dataset_num_classes or None,
+            "avg_samples_per_sec":run_samples/max(train_seconds,1e-9) if run_samples else None,
             "memory_peak_gb":final_mem.get("memory_peak_gb"),"execution_mode_used":"compiled" if compiled.compile_used else "eager",
             "trained_at":time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),"format":"MLBricks model artifact","artifact_format":"mlbricks.model",
             "retrained_from":str(resume_path) if resume_path is not None and resume_kind!="checkpoint" else None,

@@ -718,7 +718,7 @@ function __MLB_STUDIO_FACTORY__(){
     }
 
     const dataNodeTypes=new Set([
-      "demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset",
+      "demo_dataset","coco128_cloud","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset",
       "text_process","train_test_split","tokenize_text","image_process","detection_process","audio_process","signal_process","jepa_prepare",
       "batch_data","prepared_dataset"
     ]);
@@ -760,6 +760,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Vision
       {id:"vision_classification",name:"Vision Classification Demo",category:"Vision",modality:"Image",task:"Image classification",source_kind:"demo",demo_type:"image_classification",samples:256,classes:3,width:16,height:16,image_mode:"L",license:"Generated",focus:"16×16 images with labels",edition:"Offline Studio demo",compatible_models:["Image Classifier"]},
       {id:"vision_detection",name:"Object Detection Demo",category:"Vision",modality:"Image",task:"Object detection",source_kind:"demo",demo_type:"object_detection",samples:192,classes:3,width:16,height:16,image_mode:"L",license:"Generated",focus:"16×16 images · 1–3 xywh objects + class ids",edition:"Offline Studio demo",compatible_models:["YOLO-style Detector","VESA-YOLO experimental"]},
+      {id:"vision_coco128",name:"COCO128 Cloud",category:"Vision",modality:"Image",task:"Object detection",source_kind:"coco128",samples:128,classes:80,width:128,height:128,image_mode:"RGB",license:"COCO / Ultralytics dataset terms",focus:"128 real COCO images · 80 detection classes · fetched on demand",edition:"Cloud source · temporary session storage",compatible_models:["YOLO-style Detector","VESA-YOLO experimental","Custom vision detectors"]},
 
       // Audio
       {id:"audio_tts",name:"Speech + Transcript Demo",category:"Audio",modality:"Audio + Text",task:"Text to speech",source_kind:"demo",demo_type:"speech_transcript",samples:256,license:"Generated",focus:"Waveform + transcript pairs",edition:"Offline Studio demo",compatible_models:["Neural TTS"]},
@@ -876,6 +877,10 @@ function __MLB_STUDIO_FACTORY__(){
         source.params.sequence_length=preset.sequence_length||32;
         source.params.feature_count=preset.feature_count||8;
         source.params.classes=preset.classes||3;
+      }else if(sourceKind==="coco128"){
+        source=makeNode(cat(catalog,"coco128_cloud"));
+        source.name="COCO128 Cloud Source";
+        source.params.max_images=0;
       }else{
         source=makeNode(cat(catalog,"hf_dataset"));
         source.name=preset.name+" Source";
@@ -894,7 +899,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Classification uses the generic Image Processing component; detection
       // uses the box-aware Detection Processing component so image resize and
       // annotations always stay aligned.
-      if(preset.category==="Vision" && preset.demo_type==="object_detection"){
+      if(preset.category==="Vision" && (preset.demo_type==="object_detection" || String(preset.task||"").toLowerCase()==="object detection")){
         const det=makeNode(cat(catalog,"detection_process"));
         det.params.image_column="image";det.params.boxes_column="boxes";det.params.classes_column="class_ids";
         det.params.width=preset.width||16;det.params.height=preset.height||16;det.params.mode=preset.image_mode||"L";
@@ -1976,7 +1981,7 @@ function __MLB_STUDIO_FACTORY__(){
       const comp=current(state);
       const nodes=comp.nodes||[];
       const edges=(comp.edges||[]).filter(e=>(e.kind||"main")==="main");
-      const sources=new Set(["demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
+      const sources=new Set(["demo_dataset","coco128_cloud","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
       const sourceNodes=nodes.filter(n=>sources.has(n.type));
       const outputs=nodes.filter(n=>n.type==="prepared_dataset");
       const outgoing={};nodes.forEach(n=>outgoing[n.id]=[]);
@@ -4376,6 +4381,26 @@ function studioChoice(title,message,actions,options={}){
       if(req.training_task==="object_detection"){
         add("Bounding boxes",caps.columns.includes("boxes"),caps.columns.includes("boxes")?"boxes available":"boxes field missing");
         add("Class ids",caps.columns.includes("class_ids"),caps.columns.includes("class_ids")?"class_ids available":"class_ids field missing");
+        const datasetClasses=Number(datasetMeta?.num_classes||0);
+        const detectorNode=(modelEntry?.architecture?.nodes||[]).find(n=>["detection_head","detection_pyramid_head"].includes(String(n?.type||"")));
+        const modelClasses=Number(detectorNode?.params?.classes||0);
+        if(datasetClasses>0 && modelClasses>0){
+          add(
+            "Detection classes",
+            datasetClasses===modelClasses,
+            "Model head: "+modelClasses+" · Data: "+datasetClasses+(datasetClasses===modelClasses?"":" · Set the Detection Head classes to "+datasetClasses)
+          );
+        }
+        const imageInput=(modelEntry?.architecture?.nodes||[]).find(n=>String(n?.type||"")==="image_input");
+        const imagePrep=datasetMeta?.pipeline?.detection_processing||datasetMeta?.pipeline?.image_processing||null;
+        if(imageInput && imagePrep){
+          const expectedChannels=Number(imageInput?.params?.channels||0);
+          const dataChannels=String(imagePrep?.mode||"RGB").toUpperCase()==="L"?1:3;
+          if(expectedChannels>0)add("Image channels",expectedChannels===dataChannels,"Model: "+expectedChannels+" · Data: "+dataChannels);
+          const expectedSize=Number(imageInput?.params?.image_size||0);
+          const dataW=Number(imagePrep?.width||0),dataH=Number(imagePrep?.height||0);
+          if(expectedSize>0 && dataW>0 && dataH>0)add("Image size",expectedSize===dataW&&expectedSize===dataH,"Model: "+expectedSize+"×"+expectedSize+" · Data: "+dataW+"×"+dataH);
+        }
       }
       if(req.modality==="text" && req.requires_tokenizer){
         add("Tokenizer",!!caps.tokenizer,caps.tokenizer?.tokenizer_name||"Tokenizer missing");
@@ -6259,7 +6284,7 @@ function studioChoice(title,message,actions,options={}){
     // ------------------------------------------------------------------
     const step9ModelInputTypes=new Set(["text_input","image_input","video_input","audio_input","signal_input","feature_input","abstract_input"]);
     const step9ModelOutputTypes=new Set(["text_output","audio_output","tensor_output","abstract_output","lm_head","classifier","detection_head","detection_pyramid_head","detection_nms","regression_head"]);
-    const step9DataSourceTypes=new Set(["demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
+    const step9DataSourceTypes=new Set(["demo_dataset","coco128_cloud","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
     function step9Num(v,fallback=0){const n=Number(v);return Number.isFinite(n)?n:fallback;}
     function step9ShapeProduct(value){const vals=String(value||"").replace(/x/gi,",").split(",").map(x=>Number(String(x).trim())).filter(Number.isFinite);return vals.length?vals.reduce((a,b)=>a*b,1):0;}
     function estimateNodeParameters(node){
@@ -6319,7 +6344,7 @@ function studioChoice(title,message,actions,options={}){
     function dataPresetFields(preset){
       const t=String(preset?.demo_type||"");
       const map={tabular_regression:["features: float[]","target: float"],binary_classification:["features: float[]","label: 0|1"],multiclass_classification:["features: float[]","label: class"],clustering:["features: float[]"],high_dimensional:["features: float[16]"],image_classification:["image: H×W","label: class"],image_reconstruction:["image: H×W","target: image"],sequence_classification:["sequence: float[T]","label: class"],object_detection:["image: H×W","boxes: xywh[]","classes: int[]"],audio_tts:["text: string","audio: waveform"],audio_multispeaker:["text: string","audio: waveform","speaker_id: int","reference_audio: waveform"],audio_music:["caption: string","audio: waveform"],audio_sound:["caption: string","audio: waveform"],rf_iq:["i: float[T]","q: float[T]","label: class"],sensor_vision:["image: H×W","sensor: float[T]","label: class"],multimodal_image_text:["image: H×W","text: string"]};
-      if(map[t])return map[t];if(String(preset?.modality||"").toLowerCase()==="text")return ["text: string"];if(String(preset?.modality||"").toLowerCase()==="signal")return ["signal: float[T]","target/label: task dependent"];if(String(preset?.modality||"").toLowerCase()==="video")return ["video: frames[T,H,W]"];if(String(preset?.modality||"").toLowerCase()==="audio")return ["audio: waveform"];return ["input: "+String(preset?.modality||"data")];
+      if(map[t])return map[t];if(String(preset?.task||"").toLowerCase()==="object detection")return ["image: H×W×3","boxes: xywh[]","class_ids: COCO class ids","class_names: 80-class metadata"];if(String(preset?.modality||"").toLowerCase()==="text")return ["text: string"];if(String(preset?.modality||"").toLowerCase()==="signal")return ["signal: float[T]","target/label: task dependent"];if(String(preset?.modality||"").toLowerCase()==="video")return ["video: frames[T,H,W]"];if(String(preset?.modality||"").toLowerCase()==="audio")return ["audio: waveform"];return ["input: "+String(preset?.modality||"data")];
     }
     function showDataPresetInspector(preset){
       const fields=dataPresetFields(preset),models=preset.compatible_models||[];const text=[preset.name,"",preset.task+" · "+preset.modality,"Source: "+(preset.source_kind==="demo"?"Deterministic offline Studio demo":preset.dataset_id||preset.source_kind||"External"),"License: "+String(preset.license||"—"),preset.samples?("Samples: "+preset.samples):"","","DATA CONTRACT",...fields.map(x=>"• "+x),"","PIPELINE", "• Source", ...(preset.category==="JEPA"?["• JEPA Preparation"]:[]), ...(preset.modality==="Image"?["• Image processing"]:[]), ...(preset.modality==="Signal"?["• Signal schema mapping"]:[]),"• Train / validation / test split",...(preset.tokenize?["• Tokenization"]:[]),"• Prepared Dataset","","COMPATIBLE MODELS",...(models.length?models.map(x=>"• "+x):["• Any model matching the data contract"])].filter(x=>x!=="").join("\n");
@@ -7403,7 +7428,7 @@ function studioChoice(title,message,actions,options={}){
       const comp=state.components?.[ws?.root_component_id];
       const snap={source:null,text_processing:null,split:null,tokenizer:null,image_processing:null,detection_processing:null,audio_processing:null,signal_processing:null,batch:null,output:null,steps:[]};
       if(!comp)return snap;
-      const sourceTypes=new Set(["demo_dataset","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
+      const sourceTypes=new Set(["demo_dataset","coco128_cloud","manual_dataset","hf_dataset","kaggle_dataset","url_dataset","local_dataset"]);
       (comp.nodes||[]).forEach(node=>{
         const value={type:node.type,name:node.name,...cp(node.params||{})};
         snap.steps.push({id:node.id,type:node.type,name:node.name,params:cp(node.params||{})});
@@ -7422,7 +7447,7 @@ function studioChoice(title,message,actions,options={}){
     }
     function datasetPipeline(meta){return meta?.pipeline||currentDataPipelineSnapshot();}
     function prettyBool(value){if(value===undefined||value===null||value==="")return "—";const v=String(value).toLowerCase();return v==="true"?"Yes":v==="false"?"No":String(value);}
-    function sourceDisplay(source){if(!source)return "—";if(source.type==="hf_dataset")return source.dataset_id||"Hugging Face";if(source.type==="kaggle_dataset")return source.dataset_handle||"Kaggle";if(source.type==="url_dataset")return source.url||"URL";if(source.type==="local_dataset")return source.path||"Local File";if(source.type==="demo_dataset")return source.name||source.demo_type||"Studio Demo Data";if(source.type==="manual_dataset")return "Manual Text Data";return source.name||source.type||"—";}
+    function sourceDisplay(source){if(!source)return "—";if(source.type==="coco128_cloud")return "COCO128 Cloud";if(source.type==="hf_dataset")return source.dataset_id||"Hugging Face";if(source.type==="kaggle_dataset")return source.dataset_handle||"Kaggle";if(source.type==="url_dataset")return source.url||"URL";if(source.type==="local_dataset")return source.path||"Local File";if(source.type==="demo_dataset")return source.name||source.demo_type||"Studio Demo Data";if(source.type==="manual_dataset")return "Manual Text Data";return source.name||source.type||"—";}
     function detailSection(body,title,rows){const st=document.createElement("div");st.className="mlb-section-title";st.textContent=title;body.appendChild(st);const box=document.createElement("div");box.className="mlb-dataset-detail-box";rows.filter(row=>row&&row[1]!==undefined&&row[1]!==null&&row[1]!=="").forEach(([label,value])=>{const r=document.createElement("div");r.className="mlb-dataset-detail-row";const a=document.createElement("span");a.textContent=label;const v=document.createElement("strong");v.textContent=String(value);v.title=String(value);r.append(a,v);box.appendChild(r);});body.appendChild(box);}
     function renderPreparedDatasetInspector(body,meta){
       const p=datasetPipeline(meta),source=p.source||{},process=p.text_processing||{},split=p.split||{},tok=p.tokenizer||{},img=p.image_processing||{},det=p.detection_processing||{},sig=p.signal_processing||{},output=p.output||{};
@@ -7504,6 +7529,13 @@ function studioChoice(title,message,actions,options={}){
           varname+" = load_manual_text_dataset(\n"+
           "    "+arg("text","Once upon a time")+", text_column="+arg("text_column","text")+",\n"+
           "    one_line_per_sample="+arg("one_line_per_sample","true")+",\n)";
+      }
+      if(node.type==="coco128_cloud"){
+        return "from mlb_studio.data import load_coco128_cloud_dataset\n\n"+
+          varname+" = load_coco128_cloud_dataset(\n"+
+          "    download_url="+py(node.params?.download_url||"https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip")+",\n"+
+          "    max_images="+(Number(node.params?.max_images||0)>0?String(Number(node.params.max_images)):"None")+",\n"+
+          ")";
       }
       if(node.type==="hf_dataset"){
         return "from mlb_studio.data import load_huggingface_dataset\n\n"+
@@ -10621,7 +10653,7 @@ function studioChoice(title,message,actions,options={}){
       selected=null;pendingPort=null;
       execution={status:"idle",overall:0,message:"Ready",nodes:{}};
       collapseArtifactWorkspace();
-      const sourceLabel=preset.source_kind==="demo"?"offline Studio demo":(preset.dataset_id+" · 10k-row quickstart");
+      const sourceLabel=preset.source_kind==="demo"?"offline Studio demo":preset.source_kind==="coco128"?"COCO128 cloud · temporary session storage":(preset.dataset_id+" · 10k-row quickstart");
       setStatus(preset.name+" loaded from "+sourceLabel+". Data category: "+(preset.category||"Data")+".");
       switchingWorkspace=true;
       draw();

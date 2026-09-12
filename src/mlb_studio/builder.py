@@ -924,7 +924,22 @@ class Builder:
         except Exception:
             rows = None
         columns = list(getattr(target, "column_names", []) or [])
-        return {"rows": rows, "columns": columns}
+        summary = {"rows": rows, "columns": columns}
+        # Hugging Face Sequence(ClassLabel) keeps semantic class names without
+        # duplicating them in every row.  Surface that metadata to Studio so any
+        # compatible detector can validate its output head against COCO128 (or a
+        # future class-aware dataset) before training.
+        try:
+            features = getattr(target, "features", None) or {}
+            class_feature = features.get("class_ids") if hasattr(features, "get") else None
+            class_feature = getattr(class_feature, "feature", None)
+            names = list(getattr(class_feature, "names", []) or [])
+            if names:
+                summary["class_names"] = [str(name) for name in names]
+                summary["num_classes"] = len(names)
+        except Exception:
+            pass
+        return summary
 
     def _summarize_prepared_result(self, result):
         # DatasetDict is mapping-like and also exposes column_names. Detecting
@@ -949,7 +964,9 @@ class Builder:
         default_split = "train" if "train" in splits else next(iter(splits), None)
         default_columns = list((splits.get(default_split) or {}).get("columns") or []) if default_split else []
         has_input_ids = "input_ids" in default_columns
-        return {
+        default_info = splits.get(default_split) or {} if default_split else {}
+        class_names = list(default_info.get("class_names") or [])
+        payload = {
             "splits": splits,
             "total_rows": total_rows if known_total else None,
             "default_split": default_split,
@@ -958,6 +975,10 @@ class Builder:
                 "runtime_context_repack": has_input_ids,
             },
         }
+        if class_names:
+            payload["class_names"] = class_names
+            payload["num_classes"] = int(default_info.get("num_classes") or len(class_names))
+        return payload
 
     def _data_pipeline_snapshot(self):
         """Snapshot source, processing, split and tokenizer settings."""
@@ -971,7 +992,7 @@ class Builder:
             "split": None, "tokenizer": None, "image_processing": None,
             "audio_processing": None, "signal_processing": None, "batch": None, "output": None,
         }
-        source_types = {"demo_dataset", "manual_dataset", "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset"}
+        source_types = {"demo_dataset", "coco128_cloud", "manual_dataset", "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset"}
         for node in component.get("nodes") or []:
             params = json.loads(json.dumps(node.get("params") or {}))
             snapshot["steps"].append({"id":node.get("id"),"type":node.get("type"),"name":node.get("name"),"params":params})

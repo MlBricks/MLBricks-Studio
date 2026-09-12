@@ -33,6 +33,7 @@ def _state_for(types):
 
 
 SOURCE_DISPATCH = {
+    "coco128_cloud": "load_coco128_cloud_dataset",
     "manual_dataset": "load_manual_text_dataset",
     "hf_dataset": "load_huggingface_dataset",
     "kaggle_dataset": "load_kaggle_dataset",

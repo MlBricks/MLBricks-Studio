@@ -10,6 +10,7 @@ from . import data as data_api
 
 SOURCE_TYPES = {
     "demo_dataset",
+    "coco128_cloud",
     "manual_dataset",
     "hf_dataset",
     "kaggle_dataset",
@@ -289,7 +290,7 @@ def execute_data_pipeline(
                 "message": message,
                 "nodes": statuses,
             }
-            for key in ("rows_loaded", "rows_total", "dataset_id", "fallback"):
+            for key in ("rows_loaded", "rows_total", "bytes_loaded", "bytes_total", "dataset_id", "storage", "fallback"):
                 if key in update:
                     payload[key] = update[key]
             _emit(progress_callback, payload)
@@ -297,7 +298,14 @@ def execute_data_pipeline(
         try:
             typ = node["type"]
 
-            if typ == "demo_dataset":
+            if typ == "coco128_cloud":
+                result = data_api.load_coco128_cloud_dataset(
+                    download_url=p.get("download_url") or data_api.COCO128_DOWNLOAD_URL,
+                    max_images=_optional_positive(p.get("max_images")),
+                    progress_callback=node_progress,
+                )
+
+            elif typ == "demo_dataset":
                 result = data_api.generate_demo_dataset(
                     p.get("demo_type", "tabular_regression"),
                     samples=int(p.get("samples", 512)),

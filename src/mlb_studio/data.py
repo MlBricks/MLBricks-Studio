@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import io
+import os
 import re
+import tempfile
+import zipfile
 import unicodedata
 from urllib.parse import urlparse, quote
 from urllib.request import Request, urlopen
@@ -701,6 +705,156 @@ def prepare_text_input(
         "tokenizer_name": tokenizer_name if tokenize else None,
     }
 
+
+
+COCO128_DOWNLOAD_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip"
+COCO80_CLASS_NAMES = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
+    "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+    "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed",
+    "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
+    "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, target: Path) -> None:
+    """Extract a trusted dataset zip while still preventing path traversal."""
+    target = target.resolve()
+    for member in zf.infolist():
+        candidate = (target / member.filename).resolve()
+        if os.path.commonpath([str(target), str(candidate)]) != str(target):
+            raise ValueError(f"Unsafe path in dataset archive: {member.filename!r}")
+    zf.extractall(target)
+
+
+def load_coco128_cloud_dataset(
+    *,
+    download_url: str = COCO128_DOWNLOAD_URL,
+    max_images: int | None = None,
+    progress_callback=None,
+):
+    """Download COCO128 into a temporary directory and return an in-memory Dataset.
+
+    Nothing is cached or installed into the Studio repository/data directory.  The
+    source ZIP and extracted files live only inside ``TemporaryDirectory`` while
+    they are parsed.  Image bytes are copied into the returned Arrow dataset, so
+    the temporary directory can be deleted before this function returns.
+
+    The returned schema is the normal Studio detection contract:
+    ``image`` (decoded by ``datasets.Image``), ``boxes`` (pixel xywh), and
+    ``class_ids`` (a sequence of COCO ``ClassLabel`` values).
+    """
+    ds = _datasets()
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ImportError("COCO128 loading needs Pillow: pip install pillow") from exc
+
+    url = str(download_url or COCO128_DOWNLOAD_URL).strip()
+    if not url.lower().startswith(("https://", "http://")):
+        raise ValueError("COCO128 download URL must use http:// or https://")
+    limit = int(max_images or 0)
+    if limit < 0:
+        raise ValueError("max_images must be 0 (all) or a positive integer.")
+
+    headers = {"User-Agent": "MLBricks-Studio/1.0", "Accept": "application/zip,application/octet-stream,*/*"}
+    with tempfile.TemporaryDirectory(prefix="mlbricks-coco128-") as td:
+        root = Path(td)
+        archive = root / "coco128.zip"
+        _emit_load_progress(progress_callback, 1, "Connecting to COCO128 cloud source…", dataset_id="COCO128", storage="temporary")
+        request = Request(url, headers=headers)
+        with urlopen(request, timeout=60) as response, archive.open("wb") as fh:
+            total = int(response.headers.get("Content-Length") or 0)
+            loaded = 0
+            while True:
+                chunk = response.read(1024 * 256)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                loaded += len(chunk)
+                if total:
+                    pct = 2 + (loaded / total) * 48
+                    _emit_load_progress(
+                        progress_callback, pct,
+                        f"Downloading COCO128… {loaded / (1024*1024):.1f} / {total / (1024*1024):.1f} MB",
+                        bytes_loaded=loaded, bytes_total=total, dataset_id="COCO128", storage="temporary",
+                    )
+                else:
+                    _emit_load_progress(progress_callback, 20, f"Downloading COCO128… {loaded / (1024*1024):.1f} MB", bytes_loaded=loaded, dataset_id="COCO128", storage="temporary")
+
+        _emit_load_progress(progress_callback, 52, "Extracting COCO128 in temporary session storage…", dataset_id="COCO128", storage="temporary")
+        with zipfile.ZipFile(archive, "r") as zf:
+            _safe_extract_zip(zf, root)
+
+        dataset_root = root / "coco128"
+        if not dataset_root.is_dir():
+            candidates = [x for x in root.rglob("coco128") if x.is_dir()]
+            if candidates:
+                dataset_root = candidates[0]
+        image_dir = dataset_root / "images" / "train2017"
+        label_dir = dataset_root / "labels" / "train2017"
+        if not image_dir.is_dir() or not label_dir.is_dir():
+            raise RuntimeError("COCO128 archive did not contain images/train2017 and labels/train2017.")
+
+        image_paths = sorted([p for p in image_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"}])
+        if limit > 0:
+            image_paths = image_paths[:limit]
+        if not image_paths:
+            raise RuntimeError("COCO128 did not contain any supported images.")
+
+        images, boxes, class_ids, image_ids = [], [], [], []
+        total_images = len(image_paths)
+        for index, image_path in enumerate(image_paths, start=1):
+            raw = image_path.read_bytes()
+            with Image.open(io.BytesIO(raw)) as image:
+                width, height = image.size
+            sample_boxes, sample_classes = [], []
+            label_path = label_dir / f"{image_path.stem}.txt"
+            if label_path.is_file():
+                for line in label_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    parts = line.strip().split()
+                    if len(parts) < 5:
+                        continue
+                    class_id = int(float(parts[0]))
+                    if class_id < 0 or class_id >= len(COCO80_CLASS_NAMES):
+                        raise ValueError(f"COCO128 class id {class_id} is outside the expected 0..79 range.")
+                    cx, cy, nw, nh = [float(v) for v in parts[1:5]]
+                    bw, bh = nw * width, nh * height
+                    x = (cx - nw * 0.5) * width
+                    y = (cy - nh * 0.5) * height
+                    sample_boxes.append([float(x), float(y), float(bw), float(bh)])
+                    sample_classes.append(class_id)
+            images.append({"bytes": raw, "path": None})
+            boxes.append(sample_boxes)
+            class_ids.append(sample_classes)
+            image_ids.append(image_path.stem)
+            if index == 1 or index == total_images or index % 16 == 0:
+                pct = 56 + (index / total_images) * 42
+                _emit_load_progress(
+                    progress_callback, pct,
+                    f"Preparing COCO128 images {index} / {total_images}…",
+                    rows_loaded=index, rows_total=total_images, dataset_id="COCO128", storage="memory",
+                )
+
+        features = ds.Features({
+            "image": ds.Image(),
+            "boxes": ds.Sequence(ds.Sequence(ds.Value("float32"), length=4)),
+            "class_ids": ds.Sequence(ds.ClassLabel(names=list(COCO80_CLASS_NAMES))),
+            "image_id": ds.Value("string"),
+        })
+        dataset = ds.Dataset.from_dict(
+            {"image": images, "boxes": boxes, "class_ids": class_ids, "image_id": image_ids},
+            features=features,
+        )
+        _emit_load_progress(
+            progress_callback, 100,
+            f"COCO128 ready in memory · {len(dataset)} images · {len(COCO80_CLASS_NAMES)} classes.",
+            rows_loaded=len(dataset), rows_total=len(dataset), dataset_id="COCO128", storage="memory",
+        )
+        return dataset
 
 
 
@@ -1466,6 +1620,9 @@ __all__ = [
     "load_huggingface_dataset",
     "load_kaggle_dataset",
     "load_url_dataset",
+    "load_coco128_cloud_dataset",
+    "COCO128_DOWNLOAD_URL",
+    "COCO80_CLASS_NAMES",
     "load_local_dataset",
     "process_text_dataset",
     "train_test_split",
