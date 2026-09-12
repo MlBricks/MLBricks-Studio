@@ -108,7 +108,7 @@ def test_step10_gallery_uses_three_scale_head_and_reports_map():
     root=Path(__file__).resolve().parents[1]
     for rel in ["frontend/src/legacy-builder.js","src/mlb_studio/static/builder.js"]:
         text=(root/rel).read_text(encoding="utf-8")
-        assert 'add("detection_pyramid_head","P3/P4/P5 Detection Head"' in text
+        assert 'add("detection_pyramid_head","P3/P4/P5 Detection Head · COCO80"' in text
         assert 'named(fpn3,det,"p3")' in text
         assert 'CIoU training' in text
         assert 'mAP@.50 evaluation' in text

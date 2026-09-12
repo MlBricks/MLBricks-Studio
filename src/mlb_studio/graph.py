@@ -144,7 +144,7 @@ def primitive_catalog():
             "name": "COCO128 Cloud",
             "icon": "COCO",
             "category": "Data Source",
-            "description": "Fetch the 128-image COCO detection subset from the cloud into temporary session storage; nothing is bundled or persistently cached.",
+            "description": "Fetch COCO128 once from the cloud as a reusable vision source for detection, primary-object classification, reconstruction and image JEPA; nothing is bundled or persistently cached; files use temporary session storage.",
             "accent": "cyan",
             "api": [
                 {"key": "download_url", "label": "Cloud URL", "type": "text", "value": "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip"},
@@ -320,7 +320,7 @@ def primitive_catalog():
             "name": "Detection Processing",
             "icon": "BOX",
             "category": "Vision",
-            "description": "Resize images and bounding boxes together for object-detection training.",
+            "description": "Resize images and boxes together, preserve all detection labels, and expose the largest-object class as an image-level label for shared vision training.",
             "accent": "orange",
             "api": [
                 {"key": "image_column", "label": "Image Column", "type": "text", "value": "image"},

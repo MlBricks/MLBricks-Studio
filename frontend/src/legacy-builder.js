@@ -737,9 +737,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Deep Learning
       {id:"dl_neuron",name:"Neuron Regression Demo",category:"Deep Learning",modality:"Tabular",task:"Regression",source_kind:"demo",demo_type:"neuron_regression",samples:384,license:"Generated",focus:"Single feature → continuous target",edition:"Offline Studio demo",compatible_models:["Single Neuron"]},
       {id:"dl_ann",name:"Tabular Classification Demo",category:"Deep Learning",modality:"Tabular",task:"Classification",source_kind:"demo",demo_type:"tabular_classification",samples:768,license:"Generated",focus:"8 features → 3 classes",edition:"Offline Studio demo",compatible_models:["ANN"]},
-      {id:"dl_image",name:"Image Classification Demo",category:"Deep Learning",modality:"Image",task:"Classification",source_kind:"demo",demo_type:"image_classification",samples:256,license:"Generated",focus:"16×16 grayscale images → class",edition:"Offline Studio demo",compatible_models:["CNN"]},
       {id:"dl_sequence",name:"Sequence Classification Demo",category:"Deep Learning",modality:"Sequence",task:"Sequence classification",source_kind:"demo",demo_type:"sequence_classification",samples:512,license:"Generated",focus:"Numeric sequences → binary class",edition:"Offline Studio demo",compatible_models:["RNN","LSTM","GRU"]},
-      {id:"dl_autoencoder",name:"Image Reconstruction Demo",category:"Deep Learning",modality:"Image",task:"Reconstruction",source_kind:"demo",demo_type:"image_reconstruction",samples:256,license:"Generated",focus:"Image → reconstructed image",edition:"Offline Studio demo",compatible_models:["Autoencoder"]},
 
       // Language
       {id:"language_demo",name:"Tiny Text Corpus",category:"Language",modality:"Text",task:"Language modeling",source_kind:"demo",demo_type:"text_corpus",samples:512,license:"Generated",focus:"Small offline text corpus",edition:"Offline Studio demo",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP","Text JEPA"]},
@@ -751,23 +749,19 @@ function __MLB_STUDIO_FACTORY__(){
       {id:"ultrachat_200k",name:"UltraChat 200K",category:"Language",modality:"Text",task:"Instruction tuning",source_kind:"hf",dataset_id:"HuggingFaceH4/ultrachat_200k",config:"",split:"train_sft",text_column:"prompt",mirror_dataset_id:"MlBricks/ultrachat-200k",license:"MIT",focus:"Chat · Instruction/SFT",edition:"Official upstream quickstart",tokenize:true,compatible_models:["50M SLM","50M SLM · SOUP","200M SLM","200M SLM · SOUP"]},
 
       // JEPA
-      {id:"jepa_image",name:"Image JEPA Demo",category:"JEPA",modality:"Image",task:"Masked latent prediction",source_kind:"demo",demo_type:"image_jepa",samples:256,license:"Generated",focus:"Image patches for context/target masking",edition:"Offline Studio demo",compatible_models:["Image JEPA"]},
       {id:"jepa_video",name:"Video JEPA Demo",category:"JEPA",modality:"Video",task:"Future/masked latent prediction",source_kind:"demo",demo_type:"video_jepa",samples:128,license:"Generated",focus:"Short frame clips for spatiotemporal masking",edition:"Offline Studio demo",compatible_models:["Video JEPA"]},
       {id:"jepa_text",name:"Text JEPA Demo",category:"JEPA",modality:"Text",task:"Semantic span prediction",source_kind:"demo",demo_type:"text_jepa",samples:512,license:"Generated",focus:"Text spans for context/target prediction",edition:"Offline Studio demo",compatible_models:["Text JEPA"]},
       {id:"jepa_audio",name:"Audio JEPA Demo",category:"JEPA",modality:"Audio",task:"Masked acoustic prediction",source_kind:"demo",demo_type:"audio_jepa",samples:256,license:"Generated",focus:"Waveform windows for acoustic masking",edition:"Offline Studio demo",compatible_models:["Audio JEPA"]},
       {id:"jepa_signal",name:"Signal JEPA Demo",category:"JEPA",modality:"Signal",task:"Masked/future signal prediction",source_kind:"demo",demo_type:"signal_jepa",samples:384,license:"Generated",focus:"Signal windows for context/target prediction",edition:"Offline Studio demo",compatible_models:["Signal JEPA"]},
 
       // Vision
-      {id:"vision_classification",name:"Vision Classification Demo",category:"Vision",modality:"Image",task:"Image classification",source_kind:"demo",demo_type:"image_classification",samples:256,classes:3,width:16,height:16,image_mode:"L",license:"Generated",focus:"16×16 images with labels",edition:"Offline Studio demo",compatible_models:["Image Classifier"]},
-      {id:"vision_detection",name:"Object Detection Demo",category:"Vision",modality:"Image",task:"Object detection",source_kind:"demo",demo_type:"object_detection",samples:192,classes:3,width:16,height:16,image_mode:"L",license:"Generated",focus:"16×16 images · 1–3 xywh objects + class ids",edition:"Offline Studio demo",compatible_models:["YOLO-style Detector","VESA-YOLO experimental"]},
-      {id:"vision_coco128",name:"COCO128 Cloud",category:"Vision",modality:"Image",task:"Object detection",source_kind:"coco128",samples:128,classes:80,width:128,height:128,image_mode:"RGB",license:"COCO / Ultralytics dataset terms",focus:"128 real COCO images · 80 detection classes · fetched on demand",edition:"Cloud source · temporary session storage",compatible_models:["YOLO-style Detector","VESA-YOLO experimental","Custom vision detectors"]},
+      {id:"vision_coco128",name:"COCO128 Cloud",category:"Vision",modality:"Image",task:"Reusable vision training",source_kind:"coco128",samples:128,classes:80,width:128,height:128,image_mode:"RGB",license:"COCO / Ultralytics dataset terms",focus:"One cloud source for detection, primary-object classification, reconstruction and image JEPA",edition:"Cloud source · temporary session storage",compatible_models:["CNN","Autoencoder","Image JEPA","Image Classifier","YOLO-style Detector","VESA-YOLO experimental","Custom vision models"]},
 
       // Audio
       {id:"audio_tts",name:"Speech + Transcript Demo",category:"Audio",modality:"Audio + Text",task:"Text to speech",source_kind:"demo",demo_type:"speech_transcript",samples:256,license:"Generated",focus:"Waveform + transcript pairs",edition:"Offline Studio demo",compatible_models:["Neural TTS"]},
       {id:"audio_multispeaker",name:"Multi-Speaker Speech Demo",category:"Audio",modality:"Audio + Text",task:"Speaker-conditioned TTS",source_kind:"demo",demo_type:"multispeaker_speech",samples:320,license:"Generated",focus:"Waveform + transcript + speaker ID",edition:"Offline Studio demo",compatible_models:["Voice-conditioned TTS","Voice Clone educational template"]},
       {id:"audio_music",name:"Music + Caption Demo",category:"Audio",modality:"Audio + Text",task:"Music generation",source_kind:"demo",demo_type:"music_caption",samples:192,license:"Generated",focus:"Synthetic audio tokens/waveforms + descriptions",edition:"Offline Studio demo",compatible_models:["Music Generator"]},
       {id:"audio_sound",name:"Sound + Caption Demo",category:"Audio",modality:"Audio + Text",task:"Sound generation",source_kind:"demo",demo_type:"sound_caption",samples:192,license:"Generated",focus:"Synthetic sound waveforms + descriptions",edition:"Offline Studio demo",compatible_models:["Sound Generator"]},
-      {id:"audio_unlabeled",name:"Unlabeled Audio Demo",category:"Audio",modality:"Audio",task:"Self-supervised audio",source_kind:"demo",demo_type:"audio_jepa",samples:256,license:"Generated",focus:"Unlabeled waveform windows",edition:"Offline Studio demo",compatible_models:["Audio JEPA"]},
 
       // Signal
       {id:"signal_forecast",name:"Time-Series Forecast Demo",category:"Signal",modality:"Signal",task:"Forecasting",source_kind:"demo",demo_type:"timeseries_forecast",samples:512,license:"Generated",focus:"Past window → future window",edition:"Offline Studio demo",compatible_models:["Time-Series Predictor"]},
@@ -777,7 +771,6 @@ function __MLB_STUDIO_FACTORY__(){
       {id:"signal_fusion",name:"Multi-Sensor Demo",category:"Signal",modality:"Multi-Signal",task:"Sensor fusion",source_kind:"demo",demo_type:"sensor_fusion",samples:384,license:"Generated",focus:"Three aligned sensor channels + target",edition:"Offline Studio demo",compatible_models:["Sensor Fusion"]},
       {id:"signal_spectral",name:"Spectral Signal Demo",category:"Signal",modality:"Signal",task:"Spectral modeling",source_kind:"demo",demo_type:"spectral_signal",samples:384,license:"Generated",focus:"Waveform + frequency-domain representation",edition:"Offline Studio demo",compatible_models:["Spectral Model"]},
       {id:"signal_rf",name:"RF / IQ Demo",category:"Signal",modality:"I/Q Signal",task:"RF classification",source_kind:"demo",demo_type:"rf_iq",samples:384,license:"Generated",focus:"I and Q sample streams + modulation class",edition:"Offline Studio demo",compatible_models:["RF/IQ Model"]},
-      {id:"signal_unlabeled",name:"Unlabeled Signal Demo",category:"Signal",modality:"Signal",task:"Self-supervised signal",source_kind:"demo",demo_type:"signal_jepa",samples:384,license:"Generated",focus:"Unlabeled windows for Signal JEPA",edition:"Offline Studio demo",compatible_models:["Signal JEPA"]},
       {id:"signal_long",name:"Long Sequential Signal Demo",category:"Signal",modality:"Signal",task:"Long-sequence modeling",source_kind:"demo",demo_type:"long_signal",samples:256,license:"Generated",focus:"Long waveform windows",edition:"Offline Studio demo",compatible_models:["SOUP Signal"]},
 
       // Multimodal
@@ -808,11 +801,11 @@ function __MLB_STUDIO_FACTORY__(){
       // Deep Learning
       {id:"model_single_neuron",name:"Single Neuron",category:"Deep Learning",task:"Regression",tag:"DL",data_id:"dl_neuron",parameters:"2",description:"One trainable Dense neuron for learning weights, bias and forward propagation.",template:"single_neuron"},
       {id:"model_ann",name:"ANN",category:"Deep Learning",task:"Tabular classification",tag:"DL",data_id:"dl_ann",parameters:"867",description:"Editable multilayer perceptron: Dense → ReLU → Dense → ReLU → Classifier.",template:"ann"},
-      {id:"model_cnn",name:"CNN",category:"Deep Learning",task:"Image classification",tag:"DL",data_id:"dl_image",parameters:"2,019",description:"Small editable Conv2D network for the 16×16 Studio image demo.",template:"cnn"},
+      {id:"model_cnn",name:"CNN",category:"Deep Learning",task:"Image classification",tag:"DL",data_id:"vision_coco128",parameters:"2,752",description:"Small editable Conv2D classifier configured for the shared COCO128 Cloud vision pipeline.",template:"cnn"},
       {id:"model_rnn",name:"RNN",category:"Deep Learning",task:"Sequence classification",tag:"DL",data_id:"dl_sequence",parameters:"338",description:"Vanilla recurrent sequence classifier with visible sequence shaping and output head.",template:"rnn"},
       {id:"model_lstm",name:"LSTM",category:"Deep Learning",task:"Sequence classification",tag:"DL",data_id:"dl_sequence",parameters:"1,250",description:"LSTM sequence classifier using the public LSTM component and classifier head.",template:"lstm"},
       {id:"model_gru",name:"GRU",category:"Deep Learning",task:"Sequence classification",tag:"DL",data_id:"dl_sequence",parameters:"946",description:"GRU sequence classifier using the public GRU component and classifier head.",template:"gru"},
-      {id:"model_autoencoder",name:"Autoencoder",category:"Deep Learning",task:"Image reconstruction",tag:"DL",data_id:"dl_autoencoder",parameters:"35,216",description:"Flatten → encoder → latent bottleneck → decoder → reshape, all editable.",template:"autoencoder"},
+      {id:"model_autoencoder",name:"Autoencoder",category:"Deep Learning",task:"Image reconstruction",tag:"DL",data_id:"vision_coco128",parameters:"~6.34M",description:"Editable image autoencoder configured to reconstruct RGB samples from the shared COCO128 Cloud pipeline.",template:"autoencoder"},
 
       // Existing language models are now organized under their own family.
       {id:"model_slm_50",name:"50M SLM",category:"Language",task:"Language modeling",tag:"LM",data_id:"tinystories",parameters:"~50M",description:"10-layer ESA language model · Context 512 · Batch 16.",loader:"tiny"},
@@ -822,7 +815,7 @@ function __MLB_STUDIO_FACTORY__(){
 
       // JEPA — Step 5. One universal glass-box predictive objective across
       // image, video, text, audio, and signal modalities.
-      {id:"model_jepa_image",name:"Image JEPA",category:"JEPA",task:"Masked latent prediction",tag:"JEPA",data_id:"jepa_image",parameters:"~40K",description:"Image context/target masking with twin encoders, predictor, EMA target updates, and latent loss.",template:"jepa_image"},
+      {id:"model_jepa_image",name:"Image JEPA",category:"JEPA",task:"Masked latent prediction",tag:"JEPA",data_id:"vision_coco128",parameters:"~40K",description:"Image context/target masking over COCO128 RGB images with twin encoders, predictor, EMA target updates, and latent loss.",template:"jepa_image"},
       {id:"model_jepa_video",name:"Video JEPA",category:"JEPA",task:"Future/masked latent prediction",tag:"JEPA",data_id:"jepa_video",parameters:"~40K",description:"Spatiotemporal masking with frame encoder pooling, predictor, EMA target encoder, and latent loss.",template:"jepa_video"},
       {id:"model_jepa_text",name:"Text JEPA",category:"JEPA",task:"Semantic span prediction",tag:"JEPA",data_id:"jepa_text",parameters:"~50K",description:"Byte-token text JEPA that predicts an unmasked semantic target representation from masked context.",template:"jepa_text"},
       {id:"model_jepa_audio",name:"Audio JEPA",category:"JEPA",task:"Masked acoustic prediction",tag:"JEPA",data_id:"jepa_audio",parameters:"~35K",description:"Self-supervised acoustic JEPA over waveform windows with an EMA target branch.",template:"jepa_audio"},
@@ -830,9 +823,9 @@ function __MLB_STUDIO_FACTORY__(){
 
       // Vision — Step 4. These are editable graphs built from public Studio
       // vision/deep-learning components and train on Data Gallery presets.
-      {id:"model_image_classifier",name:"Image Classifier",category:"Vision",task:"Image classification",tag:"VISION",data_id:"vision_classification",parameters:"~5K",description:"Educational CNN classifier with Conv2D, BatchNorm, SiLU, pooling and a visible classifier head.",template:"image_classifier"},
-      {id:"model_yolo_detector",name:"YOLO-style Detector",category:"Vision",task:"Object detection",tag:"VISION",data_id:"vision_detection",parameters:"~405K",description:"Three-scale anchor-free detector with FPN/PAN, multi-object assignment, CIoU training, class-aware NMS and mAP@.50 evaluation.",template:"yolo_detector"},
-      {id:"model_vesa_yolo",name:"VESA-YOLO experimental",category:"Vision",task:"Object detection",tag:"EXPERIMENT",data_id:"vision_detection",parameters:"Experimental",description:"Experimental VESA + CNN detector with three-scale pyramid prediction, CIoU loss, NMS and mAP@.50 evaluation.",template:"vesa_yolo"},
+      {id:"model_image_classifier",name:"Image Classifier",category:"Vision",task:"Image classification",tag:"VISION",data_id:"vision_coco128",parameters:"~7.8K",description:"Educational CNN classifier configured for COCO128 primary-object labels with a visible 80-class head.",template:"image_classifier"},
+      {id:"model_yolo_detector",name:"YOLO-style Detector",category:"Vision",task:"Object detection",tag:"VISION",data_id:"vision_coco128",parameters:"~450K",description:"Three-scale RGB COCO128 detector with FPN/PAN, 80-class prediction, CIoU training, class-aware NMS and mAP@.50 evaluation.",template:"yolo_detector"},
+      {id:"model_vesa_yolo",name:"VESA-YOLO experimental",category:"Vision",task:"Object detection",tag:"EXPERIMENT",data_id:"vision_coco128",parameters:"Experimental",description:"Experimental RGB VESA + CNN COCO128 detector with 80-class pyramid prediction, CIoU loss, NMS and mAP@.50 evaluation.",template:"vesa_yolo"},
 
       // Audio — Step 7 educational glass-box generators. These compact
       // fixed-window models are for learning/research and are not production
@@ -899,7 +892,7 @@ function __MLB_STUDIO_FACTORY__(){
       // Classification uses the generic Image Processing component; detection
       // uses the box-aware Detection Processing component so image resize and
       // annotations always stay aligned.
-      if(preset.category==="Vision" && (preset.demo_type==="object_detection" || String(preset.task||"").toLowerCase()==="object detection")){
+      if(sourceKind==="coco128" || (preset.category==="Vision" && (preset.demo_type==="object_detection" || String(preset.task||"").toLowerCase()==="object detection"))){
         const det=makeNode(cat(catalog,"detection_process"));
         det.params.image_column="image";det.params.boxes_column="boxes";det.params.classes_column="class_ids";
         det.params.width=preset.width||16;det.params.height=preset.height||16;det.params.mode=preset.image_mode||"L";
@@ -4345,7 +4338,7 @@ function studioChoice(title,message,actions,options={}){
       return modality;
     }
 
-    function detectionDatasetContract(datasetMeta){
+    function visionDatasetContract(datasetMeta){
       const pipeline=datasetMeta?.pipeline||{};
       const prep=pipeline.detection_processing||pipeline.image_processing||{};
       const classes=Number(datasetMeta?.num_classes||0);
@@ -4356,27 +4349,38 @@ function studioChoice(title,message,actions,options={}){
       return {classes,channels,width,height,classNames:Array.isArray(datasetMeta?.class_names)?datasetMeta.class_names:[]};
     }
 
+    function detectionDatasetContract(datasetMeta){
+      return visionDatasetContract(datasetMeta);
+    }
+
     function detectorDatasetAutoConfig(entry,datasetMeta){
       if(!entry||!datasetMeta)return {available:false,reason:"Select a prepared detection dataset first."};
-      const contract=detectionDatasetContract(datasetMeta);
+      const contract=visionDatasetContract(datasetMeta);
       const model=modelRootComponent();
       const nodes=model?.nodes||[];
       const hasDetector=nodes.some(n=>["detection_head","detection_pyramid_head"].includes(String(n?.type||"")));
       if(!hasDetector)return {available:false,reason:"The current model does not expose a Detection Head."};
-      if(nodes.some(n=>String(n?.type||"")==="vesa"))return {available:false,reason:"VESA detector geometry is editable but is not auto-resized yet; configure its image geometry manually."};
       if(!contract.classes||!contract.width||!contract.height)return {available:false,reason:"The selected dataset does not expose a complete detection contract."};
-      if(contract.width!==contract.height)return {available:false,reason:"Auto-configuration currently requires a square detection processing size."};
+      if(contract.width!==contract.height)return {available:false,reason:"Auto-configuration currently requires a square image processing size."};
       return {available:true,contract};
     }
 
-    function configureDetectorForDataset(entry,datasetMeta){
-      const plan=detectorDatasetAutoConfig(entry,datasetMeta);
-      if(!plan.available){setStatus(plan.reason||"Detector cannot be auto-configured for this dataset.");return;}
-      const contract=plan.contract;
+    function visionDatasetAutoConfig(entry,datasetMeta){
+      if(!entry||!datasetMeta)return {available:false,reason:"Select a prepared image dataset first."};
+      const contract=visionDatasetContract(datasetMeta);
       const model=modelRootComponent();
-      if(!model)return;
-      checkpoint("Configure detector for "+String(datasetMeta.name||"dataset"));
-      const nodes=model.nodes||[];
+      const nodes=model?.nodes||[];
+      const req=entry?.requirements||inferModelRequirements(model);
+      if(String(req?.modality||"")!=="image")return {available:false,reason:"The current model is not an image model."};
+      if(!contract.width||!contract.height)return {available:false,reason:"The selected dataset does not expose image geometry."};
+      if(contract.width!==contract.height)return {available:false,reason:"Auto-configuration currently requires a square image processing size."};
+      if(["classification","object_detection"].includes(String(req?.training_task||"")) && !contract.classes){
+        return {available:false,reason:"The selected image dataset does not expose class metadata."};
+      }
+      return {available:true,contract,task:String(req?.training_task||"")};
+    }
+
+    function _syncImageGeometry(nodes,model,contract){
       const imageInputs=nodes.filter(n=>String(n?.type||"")==="image_input");
       const inputIds=new Set(imageInputs.map(n=>n.id));
       imageInputs.forEach(n=>{n.params=n.params||{};n.params.channels=contract.channels;n.params.image_size=contract.width;});
@@ -4391,18 +4395,90 @@ function studioChoice(title,message,actions,options={}){
           target.name=String(target.name||"Conv2D").replace(/\d+\s*→\s*\d+/,contract.channels+" → "+Number(target.params.out_channels));
         }
       });
-      nodes.forEach(n=>{
-        if(["detection_head","detection_pyramid_head"].includes(String(n?.type||""))){n.params=n.params||{};n.params.classes=contract.classes;}
+      nodes.filter(n=>String(n?.type||"")==="vesa").forEach(n=>{
+        n.params=n.params||{};
+        n.params.in_channels=contract.channels;
+        n.params.image_size=contract.width;
       });
-      state.project={...(state.project||{}),task:"Object detection",dataset:datasetMeta.name||state.project?.dataset};
+      nodes.filter(n=>String(n?.type||"")==="jepa_encoder" && String(n?.params?.modality||"").toLowerCase()==="image").forEach(n=>{
+        n.params=n.params||{};
+        n.params.in_channels=contract.channels;
+      });
+    }
+
+    function _estimateSequentialImageFlatten(nodes,contract){
+      let spatial=Number(contract.width||0),channels=Number(contract.channels||0);
+      for(const n of nodes){
+        const t=String(n?.type||"");
+        const p=n?.params||{};
+        if(t==="flatten")break;
+        if(t==="conv2d"){
+          channels=Number(p.out_channels||channels)||channels;
+          const stride=Math.max(1,Number(p.stride||1));
+          spatial=Math.max(1,Math.ceil(spatial/stride));
+        }else if(t==="maxpool2d"){
+          const stride=Math.max(1,Number(p.stride||p.kernel_size||2));
+          spatial=Math.max(1,Math.floor(spatial/stride));
+        }else if(t==="adaptive_avgpool2d"){
+          spatial=Math.max(1,Number(p.output_size||1));
+        }
+      }
+      return Math.max(1,channels*spatial*spatial);
+    }
+
+    function configureVisionModelForDataset(entry,datasetMeta){
+      const plan=visionDatasetAutoConfig(entry,datasetMeta);
+      if(!plan.available){setStatus(plan.reason||"Image model cannot be auto-configured for this dataset.");return;}
+      const contract=plan.contract;
+      const model=modelRootComponent();
+      if(!model)return;
+      checkpoint("Configure image model for "+String(datasetMeta.name||"dataset"));
+      const nodes=model.nodes||[];
+      _syncImageGeometry(nodes,model,contract);
+
+      if(plan.task==="object_detection"){
+        nodes.forEach(n=>{
+          if(["detection_head","detection_pyramid_head"].includes(String(n?.type||""))){n.params=n.params||{};n.params.classes=contract.classes;}
+        });
+      }else if(plan.task==="classification"){
+        const flatDim=_estimateSequentialImageFlatten(nodes,contract);
+        nodes.forEach(n=>{
+          if(String(n?.type||"")==="classifier"){
+            n.params=n.params||{};
+            n.params.classes=contract.classes;
+            if(nodes.some(x=>String(x?.type||"")==="flatten"))n.params.dim=flatDim;
+            n.name="COCO "+contract.classes+"-Class Head";
+          }
+        });
+      }else if(plan.task==="reconstruction"){
+        const flatDim=Math.max(1,contract.channels*contract.width*contract.height);
+        const linearNodes=nodes.filter(n=>String(n?.type||"")==="linear");
+        if(linearNodes.length){
+          linearNodes[0].params=linearNodes[0].params||{};
+          linearNodes[0].params.in_features=flatDim;
+          linearNodes[0].name="Encoder "+flatDim+" → "+Number(linearNodes[0].params.out_features||64);
+          const last=linearNodes[linearNodes.length-1];
+          last.params=last.params||{};
+          last.params.out_features=flatDim;
+          last.name="Reconstruction "+Number(last.params.in_features||64)+" → "+flatDim;
+        }
+        const reshape=nodes.find(n=>String(n?.type||"")==="reshape");
+        if(reshape){reshape.params=reshape.params||{};reshape.params.shape="0,"+contract.channels+","+contract.width+","+contract.height;}
+      }
+
+      state.project={...(state.project||{}),dataset:datasetMeta.name||state.project?.dataset};
       entry.architecture=cp(model);
       entry.requirements=inferModelRequirements(model);
       entry.nodes=nodes.length;entry.connections=(model.edges||[]).length;
       entry.status="needs_rebuild";entry.training_status="untrained";entry.weights_ready=false;
       entry.selected_dataset_id=datasetMeta.id||entry.selected_dataset_id||null;
       entry.class_names=cp(contract.classNames);
-      setStatus("Detector configured for "+String(datasetMeta.name||"dataset")+": "+contract.channels+" channels · "+contract.width+"×"+contract.height+" · "+contract.classes+" classes. Click Build to compile the updated graph.");
+      setStatus(String(entry.name||"Image model")+" configured for "+String(datasetMeta.name||"dataset")+": "+contract.channels+" channels · "+contract.width+"×"+contract.height+(contract.classes?" · "+contract.classes+" classes":"")+". Click Build to compile the updated graph.");
       draw();
+    }
+
+    function configureDetectorForDataset(entry,datasetMeta){
+      return configureVisionModelForDataset(entry,datasetMeta);
     }
 
     function modelDatasetCompatibility(modelEntry,datasetMeta){
@@ -4431,6 +4507,15 @@ function studioChoice(title,message,actions,options={}){
       add("Train split",Number(trainRows)>0,"Train rows: "+(trainRows??0));
 
       const caps=datasetTrainingCapabilities(datasetMeta);
+      if(modelModality==="image"){
+        if(req.training_task==="classification"){
+          add("Image label",caps.columns.includes("label"),caps.columns.includes("label")?"primary-object label available":"label field missing");
+          const datasetClasses=Number(datasetMeta?.num_classes||0);
+          const classifier=(modelEntry?.architecture?.nodes||[]).find(n=>String(n?.type||"")==="classifier");
+          const modelClasses=Number(classifier?.params?.classes||0);
+          if(datasetClasses>0 && modelClasses>0)add("Classification classes",datasetClasses===modelClasses,"Model head: "+modelClasses+" · Data: "+datasetClasses);
+        }
+      }
       const scalarFeatureColumns=caps.columns.filter(c=>/^feature_\d+$/.test(String(c))).sort((a,b)=>Number(String(a).split("_").pop())-Number(String(b).split("_").pop()));
       if(req.feature_dim && scalarFeatureColumns.length){
         add(
@@ -6034,12 +6119,12 @@ function studioChoice(title,message,actions,options={}){
       const compTitle=document.createElement("div");compTitle.className="mlb-section-title";compTitle.textContent="COMPATIBILITY";
       body.appendChild(compTitle);
       body.appendChild(compatibilityCard(compat));
-      if(dataset && req.training_task==="object_detection" && !compat.ok){
-        const auto=detectorDatasetAutoConfig(entry,dataset);
+      if(dataset && req.modality==="image" && !compat.ok){
+        const auto=visionDatasetAutoConfig(entry,dataset);
         if(auto.available){
           const configure=btn("Configure Model for "+String(dataset.name||"Dataset"),"mlb-dark-btn");
-          configure.title="Update the visible Image Input, first image-consuming layer and Detection Head to match the selected dataset contract";
-          configure.addEventListener("click",()=>configureDetectorForDataset(entry,dataset));
+          configure.title="Update the visible image geometry and task head to match the selected reusable vision dataset";
+          configure.addEventListener("click",()=>configureVisionModelForDataset(entry,dataset));
           body.appendChild(configure);
         }else if(auto.reason){
           const note=document.createElement("div");note.className="mlb-api-path";note.textContent=auto.reason;body.appendChild(note);
@@ -10804,16 +10889,17 @@ function studioChoice(title,message,actions,options={}){
         const head=add("classifier","3-Class Head",{dim:16,hidden_size:16,classes:3});
         link(x,l1);link(l1,a1);link(a1,l2);link(l2,a2);link(a2,head);
       }else if(preset.template==="cnn"){
-        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
-        const c1=add("conv2d","Conv2D 1 → 8",{in_channels:1,out_channels:8,kernel_size:3,stride:1,padding:1,bias:true});
+        const x=add("image_input","Image Input · COCO128",{channels:3,image_size:128,input_mode:"single"});
+        const c1=add("conv2d","Conv2D 3 → 8",{in_channels:3,out_channels:8,kernel_size:3,stride:1,padding:1,bias:true});
         const a1=add("relu","ReLU 1");
         const p1=add("maxpool2d","MaxPool 2×2",{kernel_size:2,stride:2,padding:0});
         const c2=add("conv2d","Conv2D 8 → 16",{in_channels:8,out_channels:16,kernel_size:3,stride:1,padding:1,bias:true});
         const a2=add("relu","ReLU 2");
         const p2=add("maxpool2d","MaxPool 2×2 · 2",{kernel_size:2,stride:2,padding:0});
+        const pool=add("adaptive_avgpool2d","Global AvgPool",{output_size:1});
         const flat=add("flatten","Flatten",{start_dim:1,end_dim:-1});
-        const head=add("classifier","3-Class Head",{dim:256,hidden_size:256,classes:3});
-        [x,c1,a1,p1,c2,a2,p2,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
+        const head=add("classifier","COCO 80-Class Head",{dim:16,hidden_size:16,classes:80});
+        [x,c1,a1,p1,c2,a2,p2,pool,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
       }else if(["rnn","lstm","gru"].includes(preset.template)){
         const x=add("feature_input","Sequence Input",{feature_dim:32});
         const shape=add("unsqueeze","Add Feature Dimension",{dim:-1});
@@ -10821,24 +10907,24 @@ function studioChoice(title,message,actions,options={}){
         const head=add("classifier","Binary Classifier",{dim:16,hidden_size:16,classes:2});
         link(x,shape);link(shape,rec);link(rec,head);
       }else if(preset.template==="autoencoder"){
-        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
-        const flat=add("flatten","Flatten 16×16",{start_dim:1,end_dim:-1});
-        const e1=add("linear","Encoder 256 → 64",{in_features:256,out_features:64,bias:true});
+        const x=add("image_input","Image Input · COCO128",{channels:3,image_size:128,input_mode:"single"});
+        const flat=add("flatten","Flatten 3×128×128",{start_dim:1,end_dim:-1});
+        const e1=add("linear","Encoder 49152 → 64",{in_features:49152,out_features:64,bias:true});
         const a1=add("relu","ReLU Encoder");
         const latent=add("linear","Latent 64 → 16",{in_features:64,out_features:16,bias:true});
         const a2=add("relu","Latent ReLU");
         const d1=add("linear","Decoder 16 → 64",{in_features:16,out_features:64,bias:true});
         const a3=add("relu","ReLU Decoder");
-        const d2=add("linear","Reconstruction 64 → 256",{in_features:64,out_features:256,bias:true});
-        const shape=add("reshape","Restore Image",{shape:"0,1,16,16"});
+        const d2=add("linear","Reconstruction 64 → 49152",{in_features:64,out_features:49152,bias:true});
+        const shape=add("reshape","Restore RGB Image",{shape:"0,3,128,128"});
         const out=add("tensor_output","Reconstructed Image");
         [x,flat,e1,a1,latent,a2,d1,a3,d2,shape,out].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
       }else if(["jepa_image","jepa_video","jepa_text","jepa_audio","jepa_signal"].includes(preset.template)){
         const modality=preset.template.replace("jepa_","");
         const inputType={image:"image_input",video:"video_input",text:"text_input",audio:"audio_input",signal:"signal_input"}[modality];
-        const input=add(inputType,preset.name.replace(" JEPA","")+" Input",modality==="image"?{channels:1,image_size:16}:{});
+        const input=add(inputType,preset.name.replace(" JEPA","")+" Input",modality==="image"?{channels:3,image_size:128}:{});
         const mask=add("jepa_mask","JEPA Context / Target Mask",{mask_ratio:0.35,mask_value:0.0,mode:modality==="video"?"spatiotemporal":"auto"});
-        const encoderParams={modality,latent_dim:64,hidden_dim:64,vocab_size:257,in_channels:1};
+        const encoderParams={modality,latent_dim:64,hidden_dim:64,vocab_size:257,in_channels:modality==="image"?3:1};
         const context=add("jepa_encoder","Context Encoder",{...encoderParams,role:"context"});
         const target=add("jepa_encoder","Target Encoder · EMA",{...encoderParams,role:"target"});
         const predictor=add("jepa_predictor","JEPA Predictor",{latent_dim:64,hidden_dim:128,dropout:0.0});
@@ -11002,8 +11088,8 @@ function studioChoice(title,message,actions,options={}){
         state.project.context_length=32;
         state.project.model_settings={...(state.project.model_settings||{}),embedding_size:32,heads:1,block:32,default_batch:16,precision:"fp32"};
       }else if(preset.template==="image_classifier"){
-        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
-        const c1=add("conv2d","Conv Stem 1 → 16",{in_channels:1,out_channels:16,kernel_size:3,stride:1,padding:1,bias:false});
+        const x=add("image_input","Image Input · COCO128",{channels:3,image_size:128,input_mode:"single"});
+        const c1=add("conv2d","Conv Stem 3 → 16",{in_channels:3,out_channels:16,kernel_size:3,stride:1,padding:1,bias:false});
         const b1=add("batchnorm2d","BatchNorm 16",{num_features:16});
         const a1=add("silu","SiLU 1");
         const p1=add("maxpool2d","MaxPool 2×2",{kernel_size:2,stride:2,padding:0});
@@ -11012,27 +11098,27 @@ function studioChoice(title,message,actions,options={}){
         const a2=add("silu","SiLU 2");
         const pool=add("adaptive_avgpool2d","Global AvgPool",{output_size:1});
         const flat=add("flatten","Flatten Features",{start_dim:1,end_dim:-1});
-        const head=add("classifier","3-Class Head",{dim:32,hidden_size:32,classes:3});
+        const head=add("classifier","COCO 80-Class Head",{dim:32,hidden_size:32,classes:80});
         [x,c1,b1,a1,p1,c2,b2,a2,pool,flat,head].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
       }else if(preset.template==="yolo_detector"){
-        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
-        const stem=add("conv2d","Stem Conv 1 → 16",{in_channels:1,out_channels:16,kernel_size:3,stride:1,padding:1,bias:false});
+        const x=add("image_input","Image Input · COCO128",{channels:3,image_size:128,input_mode:"single"});
+        const stem=add("conv2d","Stem Conv 3 → 16",{in_channels:3,out_channels:16,kernel_size:3,stride:1,padding:1,bias:false});
         const sbn=add("batchnorm2d","Stem BatchNorm",{num_features:16});
         const sact=add("silu","Stem SiLU");
         const p3c=add("conv2d","P3 Downsample 16 → 32",{in_channels:16,out_channels:32,kernel_size:3,stride:2,padding:1,bias:false});
         const p3b=add("batchnorm2d","P3 BatchNorm",{num_features:32});
-        const p3=add("silu","P3 Backbone · 8×8");
+        const p3=add("silu","P3 Backbone · 64×64");
         const p4c=add("conv2d","P4 Downsample 32 → 64",{in_channels:32,out_channels:64,kernel_size:3,stride:2,padding:1,bias:false});
         const p4b=add("batchnorm2d","P4 BatchNorm",{num_features:64});
-        const p4=add("silu","P4 Backbone · 4×4");
+        const p4=add("silu","P4 Backbone · 32×32");
         const p5c=add("conv2d","P5 Downsample 64 → 96",{in_channels:64,out_channels:96,kernel_size:3,stride:2,padding:1,bias:false});
         const p5b=add("batchnorm2d","P5 BatchNorm",{num_features:96});
-        const p5=add("silu","P5 Backbone · 2×2");
+        const p5=add("silu","P5 Backbone · 16×16");
         const fpn4=add("fpn_fusion","FPN P5 → P4",{high_channels:96,lateral_channels:64,out_channels:64,fusion:"add"});
         const fpn3=add("fpn_fusion","FPN P4 → P3",{high_channels:64,lateral_channels:32,out_channels:32,fusion:"add"});
         const pan4=add("pan_fusion","PAN P3 → P4",{fine_channels:32,coarse_channels:64,out_channels:64,fusion:"concat"});
         const pan5=add("pan_fusion","PAN P4 → P5",{fine_channels:64,coarse_channels:96,out_channels:96,fusion:"concat"});
-        const det=add("detection_pyramid_head","P3/P4/P5 Detection Head",{p3_channels:32,p4_channels:64,p5_channels:96,classes:3,slots:3});
+        const det=add("detection_pyramid_head","P3/P4/P5 Detection Head · COCO80",{p3_channels:32,p4_channels:64,p5_channels:96,classes:80,slots:3});
         [x,stem,sbn,sact,p3c,p3b,p3,p4c,p4b,p4,p5c,p5b,p5].forEach((n,i,arr)=>{if(i)link(arr[i-1],n);});
         named(p5,fpn4,"high");named(p4,fpn4,"lateral");
         named(fpn4,fpn3,"high");named(p3,fpn3,"lateral");
@@ -11040,20 +11126,20 @@ function studioChoice(title,message,actions,options={}){
         named(pan4,pan5,"fine");named(p5,pan5,"coarse");
         named(fpn3,det,"p3");named(pan4,det,"p4");named(pan5,det,"p5");
       }else if(preset.template==="vesa_yolo"){
-        const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});
-        const p3c=add("conv2d","CNN P3 1 → 32",{in_channels:1,out_channels:32,kernel_size:3,stride:2,padding:1,bias:false});
+        const x=add("image_input","Image Input · COCO128",{channels:3,image_size:128,input_mode:"single"});
+        const p3c=add("conv2d","CNN P3 3 → 32",{in_channels:3,out_channels:32,kernel_size:3,stride:2,padding:1,bias:false});
         const p3b=add("batchnorm2d","CNN P3 BatchNorm",{num_features:32});
-        const p3=add("silu","CNN P3 · 8×8");link(x,p3c);link(p3c,p3b);link(p3b,p3);
+        const p3=add("silu","CNN P3 · 64×64");link(x,p3c);link(p3c,p3b);link(p3b,p3);
         const p4c=add("conv2d","CNN P4 32 → 64",{in_channels:32,out_channels:64,kernel_size:3,stride:2,padding:1,bias:false});
         const p4b=add("batchnorm2d","CNN P4 BatchNorm",{num_features:64});
-        const p4=add("silu","CNN P4 · 4×4");link(p3,p4c);link(p4c,p4b);link(p4b,p4);
-        const vesa=add("vesa","VESA P5 Projection",{image_size:16,patch_size:4,in_channels:1,num_classes:384,dim:96,depth:2,heads:4,engine:"Serpentine",kernel:"auto",backend:"pytorch"});
+        const p4=add("silu","CNN P4 · 32×32");link(p3,p4c);link(p4c,p4b);link(p4b,p4);
+        const vesa=add("vesa","VESA P5 Projection · COCO128",{image_size:128,patch_size:4,in_channels:3,num_classes:384,dim:96,depth:2,heads:4,engine:"Serpentine",kernel:"auto",backend:"pytorch"});
         const p5=add("reshape","VESA P5 · 96×2×2",{shape:"0,96,2,2"});link(x,vesa);link(vesa,p5);
         const fpn4=add("fpn_fusion","FPN VESA P5 → P4",{high_channels:96,lateral_channels:64,out_channels:64,fusion:"add"});
         const fpn3=add("fpn_fusion","FPN P4 → P3",{high_channels:64,lateral_channels:32,out_channels:32,fusion:"add"});
         const pan4=add("pan_fusion","PAN P3 → P4",{fine_channels:32,coarse_channels:64,out_channels:64,fusion:"concat"});
         const pan5=add("pan_fusion","PAN P4 → VESA P5",{fine_channels:64,coarse_channels:96,out_channels:96,fusion:"concat"});
-        const det=add("detection_pyramid_head","VESA Multi-Scale Detection Head",{p3_channels:32,p4_channels:64,p5_channels:96,classes:3,slots:3});
+        const det=add("detection_pyramid_head","VESA Multi-Scale Detection Head · COCO80",{p3_channels:32,p4_channels:64,p5_channels:96,classes:80,slots:3});
         named(p5,fpn4,"high");named(p4,fpn4,"lateral");named(fpn4,fpn3,"high");named(p3,fpn3,"lateral");
         named(fpn3,pan4,"fine");named(fpn4,pan4,"coarse");named(pan4,pan5,"fine");named(p5,pan5,"coarse");
         named(fpn3,det,"p3");named(pan4,det,"p4");named(pan5,det,"p5");

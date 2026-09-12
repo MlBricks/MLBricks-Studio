@@ -4712,6 +4712,14 @@ def _train_supervised_builder_model(*, state, model_entry, dataset, dataset_meta
                 f"but the selected dataset provides {dataset_num_classes}. "
                 f"Set the Detection Head classes to {dataset_num_classes} before training."
             )
+    if task=="classification" and dataset_num_classes>0 and info.get("output_classes"):
+        model_classes=int(info["output_classes"])
+        if model_classes!=dataset_num_classes:
+            raise ValueError(
+                f"Classification-class mismatch: model head has {model_classes} classes, "
+                f"but the selected dataset provides {dataset_num_classes}. "
+                f"Set the Classifier Head classes to {dataset_num_classes} before training."
+            )
     seed=runtime_int(config.get("seed"),42,"Seed")
     random.seed(seed); torch.manual_seed(seed)
     if torch.cuda.is_available(): torch.cuda.manual_seed_all(seed)

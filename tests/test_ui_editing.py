@@ -449,12 +449,14 @@ def test_data_gallery_is_categorized_and_keeps_language_quickstarts():
         assert repo_id in js
     for label in (
         'Tabular Regression Demo', 'Binary Classification Demo',
-        'Image Classification Demo', 'Sequence Classification Demo',
-        'TinyStories', 'Wikipedia EN 1B', 'Image JEPA Demo', 'Video JEPA Demo',
-        'Object Detection Demo', 'Speech + Transcript Demo', 'RF / IQ Demo',
+        'Sequence Classification Demo', 'COCO128 Cloud',
+        'TinyStories', 'Wikipedia EN 1B', 'Video JEPA Demo',
+        'Speech + Transcript Demo', 'RF / IQ Demo',
         'Aligned Image + Text Demo', 'Sensor + Vision Demo',
     ):
         assert label in js
+    for removed in ('Image Classification Demo', 'Image JEPA Demo', 'Object Detection Demo'):
+        assert removed not in js
     assert '10k-row quickstart' in js
     assert 'function loadDataPreset(preset)' in js
     assert 'source=makeNode(cat(catalog,"demo_dataset"))' in js

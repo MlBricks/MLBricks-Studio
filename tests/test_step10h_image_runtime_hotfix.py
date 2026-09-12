@@ -83,7 +83,7 @@ def test_frontend_cnn_contract_and_prompt_gating_are_published():
     react = (root / "frontend" / "src" / "react-runtime.js").read_text(encoding="utf-8")
     static = (root / "src" / "mlb_studio" / "static" / "builder.js").read_text(encoding="utf-8")
 
-    expected = 'const x=add("image_input","Image Input",{channels:1,image_size:16,input_mode:"single"});'
+    expected = 'const x=add("image_input","Image Input · COCO128",{channels:3,image_size:128,input_mode:"single"});'
     assert expected in legacy
     assert expected in static
     assert "function runtimeTaskUsesPrompt(kind,task)" in legacy

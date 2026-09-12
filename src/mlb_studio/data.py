@@ -1395,9 +1395,11 @@ def process_detection_dataset(
     """Prepare image + bounding-box datasets for the educational detector.
 
     Boxes stay in pixel coordinates after resizing so the model trainer can
-    normalize them against the actual tensor shape. The current public
-    educational detection contract uses ``xywh`` boxes and supports one or more
-    boxes per sample; the first object is used by the single-head demo trainer.
+    normalize them against the actual tensor shape. The public detection
+    contract uses ``xywh`` boxes and supports one or more boxes per sample.
+    A deterministic ``label`` field (largest annotated object) is also emitted
+    so the same prepared cloud dataset can train image classifiers while
+    detectors retain the complete multi-object annotations.
     """
     try:
         from PIL import Image
@@ -1427,7 +1429,20 @@ def process_detection_dataset(
         example[image_column] = _tensor_ready_image(resized, normalize=normalize_images)
         example[boxes_column] = scaled
         # Keep class ids explicit and numeric even when a source uses tuples.
-        example[classes_column] = [int(v) for v in (example.get(classes_column) or [])]
+        classes = [int(v) for v in (example.get(classes_column) or [])]
+        example[classes_column] = classes
+
+        # A detection dataset can also train ordinary image classifiers without
+        # creating a second copy of the source data.  Expose one deterministic
+        # image-level target using the class of the largest annotated object.
+        # Detection models continue to use the complete boxes/class_ids arrays;
+        # reconstruction and self-supervised models simply ignore this field.
+        paired = [(box, cls) for box, cls in zip(scaled, classes) if len(box) >= 4]
+        if paired:
+            _, primary_class = max(paired, key=lambda item: max(float(item[0][2]), 0.0) * max(float(item[0][3]), 0.0))
+            example["label"] = int(primary_class)
+        else:
+            example["label"] = -1
         return example
 
     if hasattr(dataset, "items") and not hasattr(dataset, "column_names"):
