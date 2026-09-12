@@ -4105,3 +4105,14 @@ body.mlb-local-app .mlb-root{
 .mlb-classification-prob-track>i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#6d5dfc,#8f7cff)}
 .mlb-classification-raw{grid-column:1/-1;margin-top:4px;border-top:1px solid var(--border,#26394a);padding-top:10px}
 .mlb-classification-raw summary{cursor:pointer;color:var(--muted,#8da7bd);font-size:12px}
+
+/* Step 10Y: semantic autoencoder reconstruction output */
+.mlb-reconstruction-card{display:grid;gap:14px}
+.mlb-reconstruction-images{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+.mlb-reconstruction-pane{display:grid;gap:8px;min-width:0}
+.mlb-reconstruction-pane>strong{font-size:11px;letter-spacing:.08em;color:var(--muted,#8da7bd)}
+.mlb-reconstruction-image{display:block;width:100%;max-height:360px;object-fit:contain;border:1px solid var(--border,#294052);border-radius:10px;background:#09131c}
+.mlb-reconstruction-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.mlb-reconstruction-metrics>div{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--border,#294052);border-radius:9px;background:#0c1720}
+.mlb-reconstruction-metrics span{font-size:10px;letter-spacing:.08em;color:var(--muted,#7f9ab3);font-weight:700}
+.mlb-reconstruction-metrics strong{font-size:14px;color:var(--text,#edf7ff)}

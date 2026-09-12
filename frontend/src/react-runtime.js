@@ -216,18 +216,26 @@
         )
       );
     }
-    if(env.kind==='jepa'){
-      var jp=maybeObject(env.data)||{};
-      var loss=Number(jp.latent_prediction_loss);
-      var imageSrc=env.meta&&env.meta.input_image?String(env.meta.input_image):'';
+    if(env.kind==='reconstruction'){
+      var reconstruction=maybeObject(env.data)||{};
+      var reconstructedSrc=pickText(reconstruction.reconstructed_image||env.src);
+      var reconstructionInput=env.meta&&env.meta.input_image?String(env.meta.input_image):'';
+      var mse=Number(reconstruction.mse!=null?reconstruction.mse:(env.meta&&env.meta.mse));
+      var mae=Number(reconstruction.mae!=null?reconstruction.mae:(env.meta&&env.meta.mae));
+      var psnr=Number(reconstruction.psnr_db!=null?reconstruction.psnr_db:(env.meta&&env.meta.psnr_db));
       return h('div',{className:'mlb-status-sample generation mlb-output-viewer'},header,
-        h('div',{className:'mlb-output-visual-card mlb-classification-card mlb-jepa-card'},
-          imageSrc?h('div',{className:'mlb-classification-image-wrap'},h('img',{className:'mlb-output-image mlb-classification-image',src:imageSrc,alt:'JEPA input'})):null,
-          h('div',{className:'mlb-classification-result'},
-            h('span',null,'LATENT PREDICTION LOSS'),
-            h('strong',null,Number.isFinite(loss)?loss.toFixed(6):'—'),
-            h('b',null,'Lower is better · predicted latent vs target latent')),
-          h('details',{className:'mlb-classification-raw'},h('summary',null,'JEPA analysis details'),h('pre',null,JSON.stringify({metric:'latent_prediction_loss',value:Number.isFinite(loss)?loss:null,lower_is_better:true},null,2)))
+        h('div',{className:'mlb-output-visual-card mlb-reconstruction-card'},
+          h('div',{className:'mlb-reconstruction-images'},
+            h('div',{className:'mlb-reconstruction-pane'},h('strong',null,'MODEL INPUT'),
+              reconstructionInput?h('img',{className:'mlb-output-image mlb-reconstruction-image',src:reconstructionInput,alt:'Autoencoder model input'}):h('pre',null,'Input preview unavailable.')),
+            h('div',{className:'mlb-reconstruction-pane'},h('strong',null,'RECONSTRUCTION'),
+              reconstructedSrc?h('img',{className:'mlb-output-image mlb-reconstruction-image',src:reconstructedSrc,alt:'Autoencoder reconstruction'}):h('pre',null,'Reconstruction preview unavailable.'))
+          ),
+          h('div',{className:'mlb-reconstruction-metrics'},
+            h('div',null,h('span',null,'MSE'),h('strong',null,Number.isFinite(mse)?mse.toFixed(6):'—')),
+            h('div',null,h('span',null,'MAE'),h('strong',null,Number.isFinite(mae)?mae.toFixed(6):'—')),
+            h('div',null,h('span',null,'PSNR'),h('strong',null,Number.isFinite(psnr)?psnr.toFixed(2)+' dB':'—'))
+          )
         )
       );
     }

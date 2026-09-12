@@ -3492,47 +3492,6 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
                     named["reference_audio"]=_universal_tensor_for_runtime(torch.as_tensor(meta.get("reference_audio"),dtype=torch.float32),kind="audio",device=compiled.device,precision=compiled.precision).reshape(1,-1)
             with _autocast_context(compiled.device,compiled.precision):
                 result=compiled.model(sample,graph_named=named) if named else compiled.model(sample)
-    # JEPA graphs intentionally end in a scalar latent-prediction loss. A raw
-    # one-value tensor is technically correct but useless in the visual runtime.
-    # Return a semantic analysis envelope with the input preview and an explicit
-    # lower-is-better metric instead.
-    runtime_mode = str((metadata or {}).get("training_mode") or "").lower()
-    runtime_task = str((metadata or {}).get("training_task") or "").lower()
-    if runtime_mode == "jepa" or runtime_task == "jepa":
-        if isinstance(result, torch.Tensor) and result.numel() == 1:
-            latent_loss = float(result.detach().float().cpu().reshape(-1)[0].item())
-            jepa_meta = {
-                "metric_name": "latent_prediction_loss",
-                "lower_is_better": True,
-                "model_name": str((metadata or {}).get("model_name") or "JEPA"),
-            }
-            display_image = (metadata or {}).get("display_image")
-            if isinstance(display_image, str) and display_image.startswith("data:image/"):
-                jepa_meta["input_image"] = display_image
-                jepa_meta.update({
-                    "image_width": int((metadata or {}).get("display_width") or (metadata or {}).get("source_width") or 0) or None,
-                    "image_height": int((metadata or {}).get("display_height") or (metadata or {}).get("source_height") or 0) or None,
-                    "image_format": str((metadata or {}).get("display_format") or "jpeg"),
-                    "preview_source": "pre_resize",
-                })
-            elif isinstance(sample, torch.Tensor):
-                preview = _tensor_image_data_uri(sample)
-                if preview is not None:
-                    data_uri, image_meta = preview
-                    jepa_meta["input_image"] = data_uri
-                    jepa_meta.update({
-                        "image_width": image_meta.get("width"),
-                        "image_height": image_meta.get("height"),
-                        "image_format": image_meta.get("format", "png"),
-                        "preview_source": "model_tensor",
-                    })
-            return {
-                "kind": "jepa",
-                "mime": "application/x-mlbricks-jepa",
-                "data": {"latent_prediction_loss": latent_loss},
-                "metadata": jepa_meta,
-            }
-
     if str(output_type or "").lower() in {"detection_head","detection_pyramid_head"} or "detection" in str(task or "").lower():
         detections=decode_detection_predictions(
             result,
@@ -3653,6 +3612,68 @@ def run_universal_inference(compiled, value, *, input_kind, output_type="unknown
                 "data":class_meta,
                 "metadata":output_meta,
             }
+
+    # Image reconstruction models (for example the Studio Autoencoder) return
+    # an image-shaped tensor through a generic Tensor Output node.  Treat an
+    # output that exactly matches the image input shape as a semantic
+    # reconstruction result instead of dumping tens of thousands of scalar
+    # values into the runtime panel.
+    if (
+        str(input_kind or "").lower()=="image"
+        and normalized_output_type in {"tensor_output","image_output","reconstruction"}
+        and isinstance(result,torch.Tensor)
+        and isinstance(sample,torch.Tensor)
+    ):
+        reconstructed=result.detach().float().cpu()
+        model_input=sample.detach().float().cpu()
+        image_like=False
+        if reconstructed.ndim==4 and reconstructed.shape[0]==1 and reconstructed.shape[1] in {1,3,4}:
+            image_like=True
+        elif reconstructed.ndim==3 and reconstructed.shape[0] in {1,3,4}:
+            image_like=True
+        same_shape=tuple(reconstructed.shape)==tuple(model_input.shape)
+        if image_like and same_shape:
+            output_preview=_tensor_image_data_uri(reconstructed)
+            input_preview=_tensor_image_data_uri(model_input)
+            if output_preview is not None:
+                output_uri,output_image_meta=output_preview
+                input_uri=None
+                input_image_meta={}
+                if input_preview is not None:
+                    input_uri,input_image_meta=input_preview
+                delta=torch.nan_to_num(reconstructed-model_input,nan=0.0,posinf=0.0,neginf=0.0)
+                mse=float(delta.pow(2).mean().item())
+                mae=float(delta.abs().mean().item())
+                psnr=None
+                if mse>0.0:
+                    psnr=float(10.0*math.log10(1.0/max(mse,1e-12)))
+                reconstruction_meta={
+                    "shape":list(reconstructed.shape),
+                    "dtype":str(result.dtype).replace("torch.",""),
+                    "input_image":input_uri,
+                    "output_width":output_image_meta.get("width"),
+                    "output_height":output_image_meta.get("height"),
+                    "input_width":input_image_meta.get("width"),
+                    "input_height":input_image_meta.get("height"),
+                    "mse":mse,
+                    "mae":mae,
+                    "psnr_db":psnr,
+                }
+                source_image=(metadata or {}).get("display_image")
+                if isinstance(source_image,str) and source_image.startswith("data:image/"):
+                    reconstruction_meta["source_image"]=source_image
+                return {
+                    "kind":"reconstruction",
+                    "mime":"application/x-mlbricks-reconstruction",
+                    "data":{
+                        "reconstructed_image":output_uri,
+                        "mse":mse,
+                        "mae":mae,
+                        "psnr_db":psnr,
+                    },
+                    "metadata":reconstruction_meta,
+                }
+
     return universal_output_envelope(
         result,output_type=output_type,input_kind=input_kind,task=task
     )
@@ -4359,31 +4380,6 @@ def _supervised_xy(split, info):
 
     if int(x.shape[0]) != int(y.shape[0]):
         raise ValueError("Training input and target sample counts do not match.")
-
-    # COCO-style image classification can contain images without a usable
-    # annotation after preprocessing. Those samples are represented with the
-    # sentinel label -1 and must never reach CUDA CrossEntropyLoss: CUDA reports
-    # an opaque device-side assert for out-of-range targets. Filter only the
-    # documented unlabeled sentinel here, then validate every remaining class
-    # id on CPU before the first batch is moved to the accelerator.
-    if task == "classification":
-        y = y.long().reshape(-1)
-        valid = y >= 0
-        if not bool(valid.all()):
-            x = x[valid]
-            y = y[valid]
-        if y.numel() < 1:
-            raise ValueError("Classification training contains no labeled samples after filtering unlabeled images.")
-        output_classes = int(info.get("output_classes") or 0)
-        if output_classes > 0:
-            min_label = int(y.min().item())
-            max_label = int(y.max().item())
-            if min_label < 0 or max_label >= output_classes:
-                raise ValueError(
-                    f"Classification label range [{min_label}, {max_label}] is incompatible with "
-                    f"the model's {output_classes}-class head. Valid labels are 0..{output_classes - 1}."
-                )
-
     return x.contiguous(), y.contiguous(), feature_columns
 
 
@@ -4715,20 +4711,8 @@ def _supervised_loss_and_metrics(prediction, target, task):
     elif task == "classification":
         if prediction.ndim != 2:
             raise ValueError(f"Classification output must be [B,classes], received {tuple(prediction.shape)}.")
-        labels = target.long().reshape(-1)
-        # Fail with a readable Studio error instead of letting CrossEntropyLoss
-        # poison the CUDA context with a device-side assertion.
-        if labels.numel():
-            label_min = int(labels.detach().min().cpu().item())
-            label_max = int(labels.detach().max().cpu().item())
-            classes = int(prediction.shape[-1])
-            if label_min < 0 or label_max >= classes:
-                raise ValueError(
-                    f"Classification target ids must be in 0..{classes - 1}; "
-                    f"received range [{label_min}, {label_max}]."
-                )
-        loss = F.cross_entropy(prediction, labels)
-        metrics["accuracy"] = float((prediction.detach().argmax(dim=-1) == labels).float().mean().item())
+        loss = F.cross_entropy(prediction, target.long().reshape(-1))
+        metrics["accuracy"] = float((prediction.detach().argmax(dim=-1) == target.reshape(-1)).float().mean().item())
     elif task == "binary_classification":
         pred = prediction.reshape(-1, 1)
         tgt = target.float().reshape_as(pred)

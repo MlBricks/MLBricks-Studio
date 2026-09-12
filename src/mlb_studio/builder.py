@@ -2609,18 +2609,10 @@ class Builder:
             if self._stop_event.is_set():
                 raise TrainingStopped("Universal input runtime stopped.")
             started = time.perf_counter()
-            runtime_meta = dict(input_meta or {})
-            class_names = entry.get("class_names")
-            if isinstance(class_names, (list, tuple)):
-                runtime_meta["class_names"] = [str(v) for v in class_names]
-            requirements = entry.get("requirements") or {}
-            runtime_meta["training_mode"] = str(entry.get("training_mode") or requirements.get("training_mode") or "")
-            runtime_meta["training_task"] = str(entry.get("training_task") or requirements.get("training_task") or "")
-            runtime_meta["model_name"] = str(entry.get("name") or "Model")
             output = run_universal_inference(
                 compiled, value, input_kind=envelope.kind,
                 output_type=output_type, task=envelope.task,
-                prompt=envelope.prompt, metadata=runtime_meta,
+                prompt=envelope.prompt, metadata=input_meta,
             )
             processed += 1
             elapsed = max(time.perf_counter() - started, 1e-9)
@@ -3681,15 +3673,6 @@ class Builder:
             source_entry["tokens_seen"] = metadata.get("tokens_seen", source_entry.get("tokens_seen"))
             source_entry["effective_vocab_size"] = metadata.get("vocab_size", source_entry.get("effective_vocab_size"))
             source_entry["parameter_count"] = (artifact_info or {}).get("parameters", source_entry.get("parameter_count"))
-            class_names = metadata.get("class_names")
-            if isinstance(class_names, (list, tuple)):
-                source_entry["class_names"] = [str(v) for v in class_names]
-            if metadata.get("num_classes") is not None:
-                source_entry["num_classes"] = int(metadata.get("num_classes"))
-            if metadata.get("training_mode") is not None:
-                source_entry["training_mode"] = str(metadata.get("training_mode"))
-            if metadata.get("training_task") is not None:
-                source_entry["training_task"] = str(metadata.get("training_task"))
         else:
             source_entry["trained_steps"] = payload.get("step", source_entry.get("trained_steps"))
             source_entry["tokens_seen"] = payload.get("tokens_seen", source_entry.get("tokens_seen"))
@@ -3702,10 +3685,6 @@ class Builder:
             source_entry["tokenizer_path"] = str(tokenizer_dir)
         if dataset_meta:
             source_entry["hub_dataset_meta"] = dataset_meta
-            if not source_entry.get("class_names") and isinstance(dataset_meta.get("class_names"), (list, tuple)):
-                source_entry["class_names"] = [str(v) for v in dataset_meta.get("class_names")]
-            if source_entry.get("num_classes") is None and dataset_meta.get("num_classes") is not None:
-                source_entry["num_classes"] = int(dataset_meta.get("num_classes"))
 
         self.state.setdefault("model_outputs", []).append(source_entry)
         return source_entry

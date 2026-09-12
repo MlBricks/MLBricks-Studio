@@ -5246,19 +5246,19 @@ function studioChoice(title,message,actions,options={}){
         const details=document.createElement("details");details.className="mlb-detection-raw";const summaryRaw=document.createElement("summary");summaryRaw.textContent="Raw detection data";const preRaw=document.createElement("pre");preRaw.textContent=JSON.stringify(env.data,null,2);details.append(summaryRaw,preRaw);wrap.appendChild(details);
         card.appendChild(wrap);section.appendChild(card);return;
       }
-      if(env.kind==="jepa"){
-        const payload=env.data&&typeof env.data==="object"&&!Array.isArray(env.data)?env.data:{};
-        const loss=Number(payload.latent_prediction_loss);
-        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card mlb-classification-card mlb-jepa-card";
-        const imageSrc=env.meta?.input_image||"";
-        if(imageSrc){const imageWrap=document.createElement("div");imageWrap.className="mlb-classification-image-wrap";const img=document.createElement("img");img.className="mlb-output-image mlb-classification-image";img.alt="JEPA input";img.src=imageSrc;imageWrap.appendChild(img);wrap.appendChild(imageWrap);}
-        const result=document.createElement("div");result.className="mlb-classification-result";
-        const label=document.createElement("span");label.textContent="LATENT PREDICTION LOSS";
-        const value=document.createElement("strong");value.textContent=Number.isFinite(loss)?loss.toFixed(6):"—";
-        const hint=document.createElement("b");hint.textContent="Lower is better · predicted latent vs target latent";
-        result.append(label,value,hint);wrap.appendChild(result);
-        const details=document.createElement("details");details.className="mlb-classification-raw";const summaryRaw=document.createElement("summary");summaryRaw.textContent="JEPA analysis details";const pre=document.createElement("pre");pre.textContent=JSON.stringify({metric:"latent_prediction_loss",value:Number.isFinite(loss)?loss:null,lower_is_better:true},null,2);details.append(summaryRaw,pre);wrap.appendChild(details);
-        card.appendChild(wrap);section.appendChild(card);return;
+      if(env.kind==="reconstruction"){
+        const payload=(env.data&&typeof env.data==="object"&&!Array.isArray(env.data))?env.data:{};
+        const reconstructedSrc=String(payload.reconstructed_image||env.src||"");
+        const inputSrc=String(env.meta?.input_image||"");
+        const metric=(key)=>{const v=Number(payload[key]??env.meta?.[key]);return Number.isFinite(v)?v:null;};
+        const wrap=document.createElement("div");wrap.className="mlb-output-visual-card mlb-reconstruction-card";
+        const images=document.createElement("div");images.className="mlb-reconstruction-images";
+        const pane=(title,src,alt)=>{const box=document.createElement("div");box.className="mlb-reconstruction-pane";const label=document.createElement("strong");label.textContent=title;box.appendChild(label);if(src){const img=document.createElement("img");img.className="mlb-output-image mlb-reconstruction-image";img.src=src;img.alt=alt;box.appendChild(img);}else{const pre=document.createElement("pre");pre.textContent="Preview unavailable.";box.appendChild(pre);}return box;};
+        images.append(pane("MODEL INPUT",inputSrc,"Autoencoder model input"),pane("RECONSTRUCTION",reconstructedSrc,"Autoencoder reconstruction"));
+        wrap.appendChild(images);
+        const metrics=document.createElement("div");metrics.className="mlb-reconstruction-metrics";
+        [["MSE",metric("mse"),6,""],["MAE",metric("mae"),6,""],["PSNR",metric("psnr_db"),2," dB"]].forEach(([label,value,digits,suffix])=>{const box=document.createElement("div");const a=document.createElement("span");a.textContent=label;const b=document.createElement("strong");b.textContent=value==null?"—":Number(value).toFixed(digits)+suffix;box.append(a,b);metrics.appendChild(box);});
+        wrap.appendChild(metrics);card.appendChild(wrap);section.appendChild(card);return;
       }
       if(env.kind==="image"){
         const wrap=document.createElement("div");wrap.className="mlb-output-visual-card";
