@@ -4278,6 +4278,14 @@ def _supervised_xy(split, info):
             for box,class_id in list(zip(boxes or [],class_ids or []))[:max_objects]:
                 if len(box) < 4:
                     raise ValueError("Detection boxes must use [x, y, width, height] format.")
+                class_id = int(class_id)
+                classes = int(info.get("output_classes") or 0)
+                if class_id < 0 or (classes > 0 and class_id >= classes):
+                    upper = classes - 1 if classes > 0 else "the configured class range"
+                    raise ValueError(
+                        f"Detection class id {class_id} is outside 0..{upper}. "
+                        "Check the dataset class mapping and Detection Head classes before training."
+                    )
                 bx,by,bw,bh=[float(v) for v in box[:4]]
                 cx=(bx+bw*0.5)/max(float(image_w),1.0)
                 cy=(by+bh*0.5)/max(float(image_h),1.0)
@@ -4308,6 +4316,32 @@ def _supervised_xy(split, info):
             y = _split_column_tensor(split, target_name, dtype=torch.float32).reshape(-1, 1)
         else:
             y = _split_column_tensor(split, target_name, dtype=torch.long).reshape(-1)
+            # COCO-derived classification views can contain images with no
+            # annotated objects.  Data processing marks those rows with -1 so
+            # they remain useful to reconstruction/self-supervised models.  A
+            # CUDA CrossEntropy kernel cannot consume -1 without an ignore
+            # policy and otherwise triggers a device-side assert.  Drop only
+            # those explicitly unlabeled rows here, before anything reaches
+            # the accelerator.  Positive out-of-range ids are treated as a
+            # real dataset/model contract error instead of being clipped.
+            if y.numel():
+                negative = y < 0
+                if bool(negative.any().item()):
+                    keep = ~negative
+                    if not bool(keep.any().item()):
+                        raise ValueError(
+                            "Classification split contains no labeled samples after removing unlabeled rows."
+                        )
+                    x = x.index_select(0, torch.nonzero(keep, as_tuple=False).flatten())
+                    y = y.index_select(0, torch.nonzero(keep, as_tuple=False).flatten())
+                classes = int(info.get("output_classes") or 0)
+                if classes > 0:
+                    max_target = int(y.max().item())
+                    if max_target >= classes:
+                        raise ValueError(
+                            f"Classification label {max_target} is outside the model head range 0..{classes - 1}. "
+                            f"Set the Classifier Head classes to match the dataset before training."
+                        )
     else:
         target_name = next((name for name in ("target", "label") if name in columns), None)
         if target_name is None:
@@ -4622,7 +4656,14 @@ def _detection_loss_and_metrics(prediction,target):
     loss_obj=torch.stack(obj_losses).mean() if obj_losses else torch.tensor(0.0,device=scales[0].device)
     if box_terms:
         loss_box=torch.stack(box_terms).mean()
-        logits=torch.stack(cls_logits);targets=torch.stack(cls_targets).long().clamp(0,logits.size(-1)-1)
+        logits=torch.stack(cls_logits);targets=torch.stack(cls_targets).long()
+        if targets.numel():
+            min_target=int(targets.min().item()); max_target=int(targets.max().item())
+            if min_target < 0 or max_target >= int(logits.size(-1)):
+                raise ValueError(
+                    f"Detection target class range {min_target}..{max_target} is incompatible with "
+                    f"the model's {int(logits.size(-1))}-class prediction head."
+                )
         loss_cls=F.cross_entropy(logits,targets)
         pred_cls=logits.detach().argmax(dim=-1)
         accuracy=float((pred_cls==targets).float().mean().item())
@@ -4649,8 +4690,18 @@ def _supervised_loss_and_metrics(prediction, target, task):
     elif task == "classification":
         if prediction.ndim != 2:
             raise ValueError(f"Classification output must be [B,classes], received {tuple(prediction.shape)}.")
-        loss = F.cross_entropy(prediction, target.long().reshape(-1))
-        metrics["accuracy"] = float((prediction.detach().argmax(dim=-1) == target.reshape(-1)).float().mean().item())
+        targets = target.long().reshape(-1)
+        if targets.numel():
+            min_target = int(targets.min().item())
+            max_target = int(targets.max().item())
+            classes = int(prediction.size(-1))
+            if min_target < 0 or max_target >= classes:
+                raise ValueError(
+                    f"Classification target range {min_target}..{max_target} is incompatible with "
+                    f"the model's {classes}-class output."
+                )
+        loss = F.cross_entropy(prediction, targets)
+        metrics["accuracy"] = float((prediction.detach().argmax(dim=-1) == targets).float().mean().item())
     elif task == "binary_classification":
         pred = prediction.reshape(-1, 1)
         tgt = target.float().reshape_as(pred)
