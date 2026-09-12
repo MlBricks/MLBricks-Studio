@@ -990,6 +990,7 @@ class Builder:
         snapshot = {
             "steps": [], "source": None, "text_processing": None,
             "split": None, "tokenizer": None, "image_processing": None,
+            "detection_processing": None,
             "audio_processing": None, "signal_processing": None, "batch": None, "output": None,
         }
         source_types = {"demo_dataset", "coco128_cloud", "manual_dataset", "hf_dataset", "kaggle_dataset", "url_dataset", "local_dataset"}
@@ -1003,6 +1004,7 @@ class Builder:
             elif t=="train_test_split": snapshot["split"] = value
             elif t=="tokenize_text": snapshot["tokenizer"] = value
             elif t=="image_process": snapshot["image_processing"] = value
+            elif t=="detection_process": snapshot["detection_processing"] = value
             elif t=="audio_process": snapshot["audio_processing"] = value
             elif t=="signal_process": snapshot["signal_processing"] = value
             elif t=="batch_data": snapshot["batch"] = value
@@ -1379,6 +1381,7 @@ class Builder:
         save_to_disk = str(params.get("save_to_disk", "false")).lower() == "true"
         path = str(params.get("path") or "") if save_to_disk else None
 
+        pipeline = self._data_pipeline_snapshot()
         metadata = {
             "id": dataset_id,
             "name": requested_name,
@@ -1386,9 +1389,15 @@ class Builder:
             "output_node_id": node.get("id"),
             "storage": "disk+memory" if save_to_disk else "memory",
             "path": path,
-            "pipeline": self._data_pipeline_snapshot(),
+            "pipeline": pipeline,
             **summary,
         }
+        default_split = str(summary.get("default_split") or "train")
+        default_columns = set(((summary.get("splits") or {}).get(default_split) or {}).get("columns") or [])
+        if pipeline.get("detection_processing") or {"image", "boxes", "class_ids"}.issubset(default_columns):
+            metadata["modality"] = "image"
+            metadata["data_modality"] = "image"
+            metadata["task"] = "object_detection"
 
         if save_to_disk and path:
             try:

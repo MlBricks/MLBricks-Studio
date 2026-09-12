@@ -4305,6 +4305,7 @@ function studioChoice(title,message,actions,options={}){
       // modality="signal" even though their actual columns are tabular.
       // The schema is stronger evidence than that stale label.
       const cols=meta?.splits?.train?.columns||[];
+      if(cols.includes("image")&&cols.includes("boxes")&&cols.includes("class_ids"))return "image";
       if(cols.some(c=>/^feature_\d+$/.test(String(c))))return "tabular";
 
       const declared=String(meta?.modality||meta?.data_modality||"").trim().toLowerCase();
@@ -4342,6 +4343,66 @@ function studioChoice(title,message,actions,options={}){
       // stronger evidence than that legacy requirement label.
       if((modality==="tabular"||modality==="unknown") && (types.has("rnn")||types.has("lstm")||types.has("gru")))return "sequence";
       return modality;
+    }
+
+    function detectionDatasetContract(datasetMeta){
+      const pipeline=datasetMeta?.pipeline||{};
+      const prep=pipeline.detection_processing||pipeline.image_processing||{};
+      const classes=Number(datasetMeta?.num_classes||0);
+      const mode=String(prep?.mode||"RGB").toUpperCase();
+      const channels=mode==="L"?1:3;
+      const width=Number(prep?.width||0);
+      const height=Number(prep?.height||0);
+      return {classes,channels,width,height,classNames:Array.isArray(datasetMeta?.class_names)?datasetMeta.class_names:[]};
+    }
+
+    function detectorDatasetAutoConfig(entry,datasetMeta){
+      if(!entry||!datasetMeta)return {available:false,reason:"Select a prepared detection dataset first."};
+      const contract=detectionDatasetContract(datasetMeta);
+      const model=modelRootComponent();
+      const nodes=model?.nodes||[];
+      const hasDetector=nodes.some(n=>["detection_head","detection_pyramid_head"].includes(String(n?.type||"")));
+      if(!hasDetector)return {available:false,reason:"The current model does not expose a Detection Head."};
+      if(nodes.some(n=>String(n?.type||"")==="vesa"))return {available:false,reason:"VESA detector geometry is editable but is not auto-resized yet; configure its image geometry manually."};
+      if(!contract.classes||!contract.width||!contract.height)return {available:false,reason:"The selected dataset does not expose a complete detection contract."};
+      if(contract.width!==contract.height)return {available:false,reason:"Auto-configuration currently requires a square detection processing size."};
+      return {available:true,contract};
+    }
+
+    function configureDetectorForDataset(entry,datasetMeta){
+      const plan=detectorDatasetAutoConfig(entry,datasetMeta);
+      if(!plan.available){setStatus(plan.reason||"Detector cannot be auto-configured for this dataset.");return;}
+      const contract=plan.contract;
+      const model=modelRootComponent();
+      if(!model)return;
+      checkpoint("Configure detector for "+String(datasetMeta.name||"dataset"));
+      const nodes=model.nodes||[];
+      const imageInputs=nodes.filter(n=>String(n?.type||"")==="image_input");
+      const inputIds=new Set(imageInputs.map(n=>n.id));
+      imageInputs.forEach(n=>{n.params=n.params||{};n.params.channels=contract.channels;n.params.image_size=contract.width;});
+      (model.edges||[]).forEach(e=>{
+        if(!inputIds.has(e.source))return;
+        const target=nodes.find(n=>n.id===e.target);
+        if(!target)return;
+        target.params=target.params||{};
+        if(Object.prototype.hasOwnProperty.call(target.params,"in_channels"))target.params.in_channels=contract.channels;
+        if(Object.prototype.hasOwnProperty.call(target.params,"image_size"))target.params.image_size=contract.width;
+        if(String(target.type||"")==="conv2d" && Number(target.params.out_channels||0)>0){
+          target.name=String(target.name||"Conv2D").replace(/\d+\s*→\s*\d+/,contract.channels+" → "+Number(target.params.out_channels));
+        }
+      });
+      nodes.forEach(n=>{
+        if(["detection_head","detection_pyramid_head"].includes(String(n?.type||""))){n.params=n.params||{};n.params.classes=contract.classes;}
+      });
+      state.project={...(state.project||{}),task:"Object detection",dataset:datasetMeta.name||state.project?.dataset};
+      entry.architecture=cp(model);
+      entry.requirements=inferModelRequirements(model);
+      entry.nodes=nodes.length;entry.connections=(model.edges||[]).length;
+      entry.status="needs_rebuild";entry.training_status="untrained";entry.weights_ready=false;
+      entry.selected_dataset_id=datasetMeta.id||entry.selected_dataset_id||null;
+      entry.class_names=cp(contract.classNames);
+      setStatus("Detector configured for "+String(datasetMeta.name||"dataset")+": "+contract.channels+" channels · "+contract.width+"×"+contract.height+" · "+contract.classes+" classes. Click Build to compile the updated graph.");
+      draw();
     }
 
     function modelDatasetCompatibility(modelEntry,datasetMeta){
@@ -5973,6 +6034,17 @@ function studioChoice(title,message,actions,options={}){
       const compTitle=document.createElement("div");compTitle.className="mlb-section-title";compTitle.textContent="COMPATIBILITY";
       body.appendChild(compTitle);
       body.appendChild(compatibilityCard(compat));
+      if(dataset && req.training_task==="object_detection" && !compat.ok){
+        const auto=detectorDatasetAutoConfig(entry,dataset);
+        if(auto.available){
+          const configure=btn("Configure Model for "+String(dataset.name||"Dataset"),"mlb-dark-btn");
+          configure.title="Update the visible Image Input, first image-consuming layer and Detection Head to match the selected dataset contract";
+          configure.addEventListener("click",()=>configureDetectorForDataset(entry,dataset));
+          body.appendChild(configure);
+        }else if(auto.reason){
+          const note=document.createElement("div");note.className="mlb-api-path";note.textContent=auto.reason;body.appendChild(note);
+        }
+      }
 
       if(dataset){
         body.appendChild(datasetSummaryCard(dataset,"SELECTED TRAINING DATA"));
